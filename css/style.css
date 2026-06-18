@@ -113,6 +113,17 @@ html, body {
 }
 @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 
+.fs-btn {
+  position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right));
+  width: 44px; height: 44px; border-radius: 12px; cursor: pointer;
+  background: rgba(11, 15, 26, 0.6); color: var(--ink);
+  border: 1px solid rgba(255, 255, 255, 0.14); font-size: 20px; line-height: 1;
+  pointer-events: auto; display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.fs-btn:hover { background: rgba(11, 15, 26, 0.85); }
+.fs-btn:active { transform: scale(0.92); }
+
 .toast {
   position: absolute; left: 50%; bottom: 18%; transform: translateX(-50%) translateY(10px);
   background: rgba(11, 15, 26, 0.78); border: 1px solid rgba(255, 255, 255, 0.12);

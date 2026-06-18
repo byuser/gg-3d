@@ -60,7 +60,10 @@
     joystick: document.getElementById("joystick"),
     stick: document.getElementById("stick"),
     actionBtn: document.getElementById("actionBtn"),
+    fsBtn: document.getElementById("fsBtn"),
+    goal: document.getElementById("goal"),
   };
+  if (dom.goal) dom.goal.textContent = CONFIG.goal;
 
   const isTouch = window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
 
@@ -258,9 +261,13 @@
       const input = Input.moveVector();
       const mag = Math.min(1, Math.hypot(input.x, input.z));
       if (mag > 0.05) {
+        // Camera-relative movement. For an ArcRotateCamera the view direction
+        // (camera -> target) on the XZ plane is -(cos a, sin a); screen-right is
+        // (-sin a, cos a). Using these makes "up" on the stick go into the screen
+        // and "right" go right, on both touch and keyboard.
         const a = camera.alpha;
-        const fwd = new BABYLON.Vector3(Math.cos(a), 0, Math.sin(a));
-        const right = new BABYLON.Vector3(Math.cos(a - Math.PI / 2), 0, Math.sin(a - Math.PI / 2));
+        const fwd = new BABYLON.Vector3(-Math.cos(a), 0, -Math.sin(a));
+        const right = new BABYLON.Vector3(-Math.sin(a), 0, Math.cos(a));
         const dir = fwd.scale(input.z).add(right.scale(input.x));
         if (dir.lengthSquared() > 1e-4) {
           dir.normalize();
@@ -584,6 +591,42 @@
     dom.canvas.focus();
   }
 
+  // ---- Fullscreen (whole page, so the HUD/joystick stay visible) ----------
+  const Fullscreen = {
+    el: document.documentElement,
+    supported() {
+      const e = this.el;
+      return !!(e && (e.requestFullscreen || e.webkitRequestFullscreen || e.msRequestFullscreen));
+    },
+    active() {
+      return !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
+    },
+    toggle() {
+      try {
+        if (!this.active()) {
+          const e = this.el;
+          (e.requestFullscreen || e.webkitRequestFullscreen || e.msRequestFullscreen).call(e);
+        } else {
+          (document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen).call(document);
+        }
+      } catch (err) { console.warn("Fullscreen failed:", err); }
+    },
+    init() {
+      if (!dom.fsBtn) return;
+      if (!this.supported()) { dom.fsBtn.style.display = "none"; return; } // e.g. iOS Safari
+      const sync = () => {
+        const on = this.active();
+        dom.fsBtn.textContent = on ? "✕" : "⛶";
+        dom.fsBtn.title = on ? "Exit fullscreen" : "Fullscreen";
+        engine.resize();
+      };
+      dom.fsBtn.addEventListener("click", () => this.toggle());
+      document.addEventListener("fullscreenchange", sync);
+      document.addEventListener("webkitfullscreenchange", sync);
+      sync();
+    },
+  };
+
   function boot() {
     try {
       Input.init();
@@ -593,6 +636,7 @@
       window.addEventListener("resize", () => engine.resize());
       dom.startBtn.addEventListener("click", startGame);
       dom.replayBtn.addEventListener("click", () => window.location.reload());
+      Fullscreen.init();
     } catch (e) { showFatal(e.message); throw e; }
   }
 
