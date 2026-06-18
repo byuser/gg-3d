@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Good Game 3D</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="description" content="Good Game 3D — a third-person browser adventure. Collect the glowing relics and store them in the chest." />
+  <meta name="theme-color" content="#0b0f1a" />
+  <link rel="stylesheet" href="css/style.css" />
+  <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+</head>
+<body>
+  <!-- Loading / start screen -->
+  <div id="overlay" class="overlay">
+    <div class="panel">
+      <h1>Good Game <span class="badge">3D</span></h1>
+      <p class="tagline">Run with Lily, gather the three glowing relics, and lock them in the chest.</p>
+      <ul class="controls">
+        <li><b>Move</b><span>WASD / Arrows · or the on-screen stick</span></li>
+        <li><b>Look</b><span>Drag the screen / mouse</span></li>
+        <li><b>Pick&nbsp;up&nbsp;·&nbsp;Drop</b><span>E / Space · or the action button</span></li>
+      </ul>
+      <button id="startBtn" class="start-btn">Start Adventure</button>
+      <p class="hint" id="loadHint">Loading engine…</p>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud" class="hud hidden">
+    <div class="hud-top">
+      <div class="objective">
+        Relics stored: <span id="score">0</span> / <span id="goal">3</span>
+      </div>
+      <div id="prompt" class="prompt hidden">Press <b>E</b></div>
+    </div>
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <!-- Touch controls (shown only on touch devices) -->
+  <div id="touch" class="touch hidden">
+    <div id="joystick" class="joystick"><div id="stick" class="stick"></div></div>
+    <button id="actionBtn" class="action-btn">E</button>
+  </div>
+
+  <!-- Win screen -->
+  <div id="win" class="overlay hidden">
+    <div class="panel">
+      <h1>You Win! 🏆</h1>
+      <p class="tagline">All three relics are safe in the chest. Good game!</p>
+      <button id="replayBtn" class="start-btn">Play Again</button>
+    </div>
+  </div>
+
+  <canvas id="renderCanvas"></canvas>
+
+  <script src="js/game.js"></script>
+</body>
+</html>
