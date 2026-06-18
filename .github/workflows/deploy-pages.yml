@@ -29,10 +29,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Pages
+        # One-time setup: enable Pages in repo Settings -> Pages with
+        # "Source: GitHub Actions". After that this deploys automatically.
         uses: actions/configure-pages@v5
-        with:
-          # Enable Pages (build type: GitHub Actions) on first run if it isn't already.
-          enablement: true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
