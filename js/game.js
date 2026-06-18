@@ -1,22 +1,24 @@
 /*
  * Good Game 3D
  * ---------------------------------------------------------------------------
- * A third-person browser adventure built on Babylon.js.
+ * A third-person browser action game built on Babylon.js.
  *
- * This release: run as Lily through a procedurally generated meadow (roads,
- * grass, trees, rocks, flowers), find the randomly spawned glowing relics,
- * pick them up (with a pick-up animation) and store them in the chest.
- * Collect 3 to win. Works on desktop and mobile.
+ * This release: run as Lily through a procedurally generated meadow, armed with
+ * a glowing MAGIC WAND. Every minute a new WAVE of "living sweets" (lollipops,
+ * gummy bears, cupcakes, donuts, candy canes) marches in — each wave bigger
+ * than the last and dropping more ARTIFACTS. Blast the sweets with your wand
+ * and grab the artifacts to rack up SCORE. The sweets hurt you on contact;
+ * survive as long as you can.
  *
- * The code is split into small systems so future releases (combat, puzzles,
- * NPC dialogue) slot in cleanly:
+ * The code is split into small systems so features slot in cleanly:
  *
  *   - Interactable / InteractionSystem  reusable "walk up + press E" contract.
- *   - Input                             keyboard + on-screen stick -> one vector.
- *   - Player                            movement + walk/idle/pick-up animations.
+ *   - Input                             keyboard + on-screen stick + cast button.
+ *   - Player                            movement, animation, wand + casting, health.
+ *   - Projectile / projectile pool      the wand's magic bolts.
+ *   - Monster                           a "living sweet" with chase AI + pop FX.
+ *   - WaveSystem                        timed escalating waves of sweets + artifacts.
  *   - buildWorld                        procedural environment + lighting.
- *
- * Roadmap seams are documented at the bottom of the file.
  */
 
 (() => {
@@ -33,13 +35,36 @@
   window.addEventListener("error", (e) => showFatal(e.message || "unknown error"));
 
   const CONFIG = {
-    goal: 3,
-    itemCount: 6,            // how many relics to scatter (collect `goal` of them)
     moveSpeed: 6.5,          // metres / second
     turnLerp: 0.2,
     cameraLerp: 0.12,
-    interactRange: 2.8,
+    interactRange: 2.6,
     worldRadius: 44,         // playable area before the invisible fence
+
+    // Combat / wand
+    castCooldown: 0.32,      // seconds between magic bolts
+    boltSpeed: 22,           // metres / second
+    boltLife: 1.4,           // seconds before a bolt fizzles
+    boltRadius: 0.8,         // hit radius against monsters
+
+    // Player health
+    maxHealth: 100,
+    contactDamage: 12,       // damage per sweet "bite"
+    biteCooldown: 0.8,       // seconds between bites from the same sweet
+
+    // Waves
+    firstWaveDelay: 5,       // seconds before wave 1
+    waveInterval: 60,        // seconds between waves ("every 1 minute")
+    baseMonsters: 3,         // monsters in wave 1
+    monstersPerWave: 2,      // extra monsters each subsequent wave
+    maxMonstersPerWave: 26,  // cap for performance
+    baseArtifacts: 3,        // artifacts dropped in wave 1
+    artifactsPerWave: 1,     // extra artifacts each subsequent wave
+    maxArtifactsPerWave: 10,
+
+    // Score
+    scorePerMonster: 25,
+    scorePerArtifact: 50,
   };
 
   const PALETTE = ["#6cc6ff", "#a06cff", "#ff6c8a", "#ffd34e", "#5be0a0", "#ff944e"];
@@ -52,18 +77,23 @@
     loadHint: document.getElementById("loadHint"),
     hud: document.getElementById("hud"),
     score: document.getElementById("score"),
+    wave: document.getElementById("wave"),
+    nextWave: document.getElementById("nextWave"),
+    healthFill: document.getElementById("healthFill"),
+    waveBanner: document.getElementById("waveBanner"),
     prompt: document.getElementById("prompt"),
     toast: document.getElementById("toast"),
-    win: document.getElementById("win"),
+    over: document.getElementById("over"),
+    finalScore: document.getElementById("finalScore"),
+    finalWave: document.getElementById("finalWave"),
     replayBtn: document.getElementById("replayBtn"),
     touch: document.getElementById("touch"),
     joystick: document.getElementById("joystick"),
     stick: document.getElementById("stick"),
     actionBtn: document.getElementById("actionBtn"),
+    castBtn: document.getElementById("castBtn"),
     fsBtn: document.getElementById("fsBtn"),
-    goal: document.getElementById("goal"),
   };
-  if (dom.goal) dom.goal.textContent = CONFIG.goal;
 
   const isTouch = window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
 
@@ -76,13 +106,18 @@
     keys: Object.create(null),
     joy: { x: 0, y: 0, active: false },
     interactQueued: false,
+    castHeld: false,         // fire is continuous while held (respecting cooldown)
 
     init() {
       window.addEventListener("keydown", (e) => {
         this.keys[e.code] = true;
-        if (e.code === "KeyE" || e.code === "Space") { this.interactQueued = true; e.preventDefault(); }
+        if (e.code === "KeyE") { this.interactQueued = true; e.preventDefault(); }
+        if (e.code === "Space" || e.code === "KeyF") { this.castHeld = true; e.preventDefault(); }
       });
-      window.addEventListener("keyup", (e) => { this.keys[e.code] = false; });
+      window.addEventListener("keyup", (e) => {
+        this.keys[e.code] = false;
+        if (e.code === "Space" || e.code === "KeyF") this.castHeld = false;
+      });
       if (isTouch) this._initJoystick();
     },
 
@@ -113,6 +148,12 @@
       base.addEventListener("pointerup", reset);
       base.addEventListener("pointercancel", reset);
       dom.actionBtn.addEventListener("pointerdown", (e) => { this.interactQueued = true; e.preventDefault(); });
+      const castOn = (e) => { this.castHeld = true; e.preventDefault(); };
+      const castOff = () => { this.castHeld = false; };
+      dom.castBtn.addEventListener("pointerdown", castOn);
+      dom.castBtn.addEventListener("pointerup", castOff);
+      dom.castBtn.addEventListener("pointercancel", castOff);
+      dom.castBtn.addEventListener("pointerleave", castOff);
     },
 
     moveVector() {
@@ -125,6 +166,7 @@
       return { x, z };
     },
     consumeInteract() { const v = this.interactQueued; this.interactQueued = false; return v; },
+    wantsCast() { return this.castHeld; },
   };
 
   // =========================================================================
@@ -163,7 +205,7 @@
   }
 
   // =========================================================================
-  // Player — Lily, with idle / walk / pick-up animation states.
+  // Player — Lily, with a magic wand, casting, locomotion + pick-up states.
   // =========================================================================
   class Player {
     constructor(scene, shadow) {
@@ -175,7 +217,10 @@
       this.pickT = 0;            // 0..1 progress through the pick-up animation
       this.pendingItem = null;   // mesh being picked up
       this.onPicked = null;      // callback once the relic reaches the hands
-      this.carried = null;
+      this.carried = null;       // collectible mesh that flies up + poofs
+      this.castCooldown = 0;     // counts down to 0 when ready to cast
+      this.castAnim = 0;         // 0..1 quick wand-thrust animation
+      this.health = CONFIG.maxHealth;
       this._build(scene, shadow);
     }
 
@@ -233,7 +278,10 @@
         sh.position.set(x, 0.07, 0.05); this["shoe" + x] = sh;
       }
 
-      // Where carried relics sit (above the hands / head).
+      // ---- The MAGIC WAND, held in the right hand. ----
+      this._buildWand(scene, shadow);
+
+      // Where carried collectibles sit (above the hands / head).
       this.carryAnchor = new BABYLON.TransformNode("carry", scene);
       this.carryAnchor.parent = lean; this.carryAnchor.position.set(0, 2.35, 0.1);
 
@@ -245,15 +293,75 @@
       root.position.set(0, 0, 12);
     }
 
+    _buildWand(scene, shadow) {
+      // Parent the wand to the right arm so it swings with the hand.
+      const grip = new BABYLON.TransformNode("wandGrip", scene);
+      grip.parent = this.armR; grip.position.set(0, -0.58, 0.12); // at the hand
+      grip.rotation.x = -0.5; // angle the wand slightly forward/up
+      this.wandGrip = grip;
+
+      const handleMat = emat(scene, "wandHandle", "#5a3a8a", 0.05);
+      const handle = cyl(scene, "wandHandle", 0.07, 0.05, 0.95, handleMat);
+      handle.parent = grip; handle.position.y = 0.35; shadow.addShadowCaster(handle);
+
+      // Glowing crystal star at the tip.
+      const crystalMat = emat(scene, "wandCrystal", "#9fd0ff", 1.0);
+      const crystal = BABYLON.MeshBuilder.CreatePolyhedron("wandCrystal", { type: 2, size: 0.16 }, scene);
+      crystal.material = crystalMat; crystal.parent = grip; crystal.position.y = 0.9;
+      this.wandCrystal = crystal;
+
+      // A soft halo around the crystal.
+      const halo = sphere(scene, "wandHalo", 0.34, emat(scene, "wandHaloM", "#9fd0ff", 1.0));
+      halo.material.alpha = 0.22; halo.parent = grip; halo.position.y = 0.9; halo.isPickable = false;
+      this.wandHalo = halo;
+
+      // The point bolts launch from.
+      const tip = new BABYLON.TransformNode("wandTip", scene);
+      tip.parent = grip; tip.position.y = 1.02;
+      this.wandTip = tip;
+
+      // A little light so the wand actually glows on nearby surfaces.
+      const glow = new BABYLON.PointLight("wandGlow", new BABYLON.Vector3(0, 0, 0), scene);
+      glow.parent = tip; glow.diffuse = BABYLON.Color3.FromHexString("#9fd0ff");
+      glow.intensity = 0.5; glow.range = 6;
+      this.wandGlow = glow;
+    }
+
     startPickup(itemMesh, onPicked) {
       this.state = "pickup"; this.pickT = 0;
       this.pendingItem = itemMesh; this.onPicked = onPicked;
     }
     get busy() { return this.state === "pickup"; }
 
+    // Returns { origin, dir } if a bolt should be fired, else null.
+    tryCast() {
+      if (this.castCooldown > 0 || this.busy) return null;
+      this.castCooldown = CONFIG.castCooldown;
+      this.castAnim = 1;
+      const dir = new BABYLON.Vector3(Math.sin(this.facing), 0, Math.cos(this.facing));
+      const origin = this.wandTip.getAbsolutePosition().clone();
+      // A tiny upward arc reads better than a flat shot.
+      dir.y = 0.04; dir.normalize();
+      return { origin, dir };
+    }
+
     update(dt, camera) {
+      if (this.castCooldown > 0) this.castCooldown -= dt;
+      if (this.castAnim > 0) this.castAnim = Math.max(0, this.castAnim - dt / 0.22);
+
       if (this.state === "pickup") { this._updatePickup(dt); }
       else { this._updateMove(dt, camera); }
+
+      // Cast thrust is layered on top of whatever the right arm is doing.
+      if (this.castAnim > 0) {
+        const thrust = Math.sin(this.castAnim * Math.PI); // 0->1->0
+        this.armR.rotation.x = lerp(this.armR.rotation.x, -1.9, thrust);
+      }
+      // Pulse the wand crystal.
+      const pulse = 0.85 + Math.sin(performance.now() / 120) * 0.15;
+      this.wandHalo.scaling.setAll(pulse);
+      this.wandGlow.intensity = 0.4 + (this.castAnim > 0 ? 0.8 : 0) + pulse * 0.1;
+
       this.yaw.rotation.y = this.facing;
     }
 
@@ -302,40 +410,190 @@
       }
     }
 
-    // Crouch -> grab -> stand and raise the relic overhead.
+    // Crouch -> grab -> stand and raise the artifact, which then poofs into points.
     _updatePickup(dt) {
       this.pickT = Math.min(1, this.pickT + dt / 0.7);
       const t = this.pickT;
       const bend = Math.sin(Math.min(t, 0.5) / 0.5 * Math.PI / 2);      // 0->1 by t=0.5
       const rise = t < 0.5 ? 0 : (t - 0.5) / 0.5;                        // 0->1 from t=0.5
-      // Body bends down then straightens.
       const downThenUp = t < 0.5 ? bend : (1 - rise);
       this.lean.rotation.x = downThenUp * 0.55;
       this.lean.position.y = -downThenUp * 0.18;
-      // Arms reach down, then lift overhead.
       const armDown = downThenUp * 1.3;
       const armUp = rise * 2.6;
-      this.armL.rotation.x = this.armR.rotation.x = armDown - armUp;
-      this.armL.rotation.z = this.armR.rotation.z = 0;
+      // Left arm does the grabbing (right hand holds the wand).
+      this.armL.rotation.x = armDown - armUp;
+      this.armL.rotation.z = 0;
       this.legL.rotation.x = this.legR.rotation.x = 0;
 
-      // At the bottom of the reach, take hold of the relic.
+      // At the bottom of the reach, take hold of the artifact.
       if (this.pendingItem && t >= 0.5) {
         const m = this.pendingItem; this.pendingItem = null;
         m.setParent(this.carryAnchor);
-        m.position.set(0, -1.4, 0.4); // starts low (at the hands)
+        m.position.set(0, -1.4, 0.4);
         this.carried = m;
         if (this.onPicked) { this.onPicked(); this.onPicked = null; }
       }
-      // Raise the held relic to the overhead anchor as we stand.
+      // Raise the held artifact overhead as we stand.
       if (this.carried) {
-        this.carried.position.y = lerp(this.carried.position.y, 0, 0.25);
-        this.carried.position.z = lerp(this.carried.position.z, 0, 0.25);
+        this.carried.position.y = lerp(this.carried.position.y, 0.4, 0.3);
+        this.carried.position.z = lerp(this.carried.position.z, 0, 0.3);
+        this.carried.scaling.setAll(lerp(this.carried.scaling.x, t > 0.85 ? 0 : 1, 0.3));
       }
-      if (t >= 1) { this.state = "idle"; this.lean.rotation.x = 0; this.lean.position.y = 0; }
+      if (t >= 1) {
+        if (this.carried) { this.carried.dispose(); this.carried = null; }
+        this.state = "idle"; this.lean.rotation.x = 0; this.lean.position.y = 0;
+      }
     }
 
-    releaseCarried() { const m = this.carried; this.carried = null; return m; }
+    // Returns true if the hit actually landed (i.e. wasn't on bite-cooldown).
+    takeDamage(amount) {
+      this.health = Math.max(0, this.health - amount);
+      return this.health;
+    }
+
+    get position() { return this.root.position; }
+  }
+
+  // =========================================================================
+  // Magic bolts (wand projectiles)
+  // =========================================================================
+  class Projectile {
+    constructor(scene, shadow, origin, dir) {
+      this.dir = dir.clone();
+      this.life = CONFIG.boltLife;
+      this.dead = false;
+      const m = sphere(scene, "bolt", 0.32, emat(scene, "boltM", "#bfe3ff", 1.0));
+      m.position.copyFrom(origin);
+      m.isPickable = false;
+      this.mesh = m;
+      // A trailing glow.
+      const halo = sphere(scene, "boltHalo", 0.6, emat(scene, "boltHaloM", "#9fd0ff", 1.0));
+      halo.material.alpha = 0.3; halo.parent = m; halo.isPickable = false;
+    }
+    update(dt) {
+      this.life -= dt;
+      if (this.life <= 0) { this.dead = true; return; }
+      this.mesh.position.addInPlace(this.dir.scale(CONFIG.boltSpeed * dt));
+      if (Math.hypot(this.mesh.position.x, this.mesh.position.z) > CONFIG.worldRadius + 6) this.dead = true;
+    }
+    dispose() { this.mesh.dispose(); }
+  }
+
+  // =========================================================================
+  // Monster — a "living sweet" with a chase AI, a bob, and a pop on death.
+  // =========================================================================
+  const SWEETS = ["lollipop", "gummy", "cupcake", "donut", "candycane"];
+
+  class Monster {
+    constructor(scene, shadow, pos, wave) {
+      this.scene = scene;
+      this.hp = 1 + Math.floor(wave / 4);          // sturdier in later waves
+      this.speed = 1.6 + Math.random() * 0.7 + wave * 0.06;
+      this.alive = true;
+      this.dying = 0;                               // >0 while playing the pop animation
+      this.radius = 0.85;
+      this.bob = Math.random() * Math.PI * 2;
+      this.biteTimer = 0;                           // cooldown before this sweet bites again
+      this.kind = SWEETS[(Math.random() * SWEETS.length) | 0];
+      this._build(scene, shadow, pos);
+    }
+
+    _build(scene, shadow, pos) {
+      const root = new BABYLON.TransformNode("monster", scene);
+      root.position.copyFrom(pos);
+      this.root = root;
+      const body = new BABYLON.TransformNode("monsterBody", scene);
+      body.parent = root; this.body = body;
+
+      const candy = PALETTE[(Math.random() * PALETTE.length) | 0];
+      const main = emat(scene, "swt" + root.uniqueId, candy, 0.18);
+      const cream = emat(scene, "cream" + root.uniqueId, "#fff3e0", 0.1);
+      const dark = emat(scene, "swtd" + root.uniqueId, "#7a4030", 0.08);
+      const add = (m) => { m.parent = body; shadow.addShadowCaster(m); return m; };
+
+      let topY = 1.1; // where the face sits, per kind
+      if (this.kind === "lollipop") {
+        const stick = add(cyl(scene, "stick", 0.08, 0.08, 0.9, cream)); stick.position.y = 0.45;
+        const disc2 = add(cyl(scene, "pop", 0.9, 0.9, 0.22, main)); disc2.position.y = 1.05; disc2.rotation.x = Math.PI / 2;
+        topY = 1.05;
+      } else if (this.kind === "gummy") {
+        const torso = add(capsule(scene, "gtor", 1.0, 0.42, main)); torso.position.y = 0.7;
+        const headm = add(sphere(scene, "ghead", 0.7, main)); headm.position.y = 1.2;
+        for (const s of [-1, 1]) {
+          const ear = add(sphere(scene, "gear", 0.28, main)); ear.position.set(0.32 * s, 1.55, 0);
+          const arm = add(capsule(scene, "garm", 0.5, 0.14, main)); arm.position.set(0.5 * s, 0.8, 0); arm.rotation.z = 0.6 * s;
+        }
+        topY = 1.25;
+      } else if (this.kind === "cupcake") {
+        const base = add(cone(scene, "cbaseM", 0.95, 0.6, 0.7, cream)); base.position.y = 0.45;
+        const top = add(sphere(scene, "ctop", 1.0, main)); top.position.y = 1.0; top.scaling.y = 0.85;
+        const cherry = add(sphere(scene, "cherry", 0.25, emat(scene, "cherryM" + root.uniqueId, "#ff4060", 0.3))); cherry.position.y = 1.55;
+        topY = 1.1;
+      } else if (this.kind === "donut") {
+        const torus = BABYLON.MeshBuilder.CreateTorus("donut", { diameter: 1.4, thickness: 0.6, tessellation: 16 }, scene);
+        torus.material = main; add(torus); torus.position.y = 0.8;
+        const ice = BABYLON.MeshBuilder.CreateTorus("icing", { diameter: 1.4, thickness: 0.62, tessellation: 16 }, scene);
+        ice.material = cream; add(ice); ice.position.y = 0.9; ice.scaling.y = 0.6;
+        topY = 1.15;
+      } else { // candycane
+        const cane = add(capsule(scene, "cane", 1.3, 0.28, cream)); cane.position.y = 0.75;
+        const stripe = add(capsule(scene, "stripe", 1.3, 0.30, main)); stripe.position.y = 0.75; stripe.scaling.set(0.6, 1.01, 0.6); stripe.rotation.y = 0.5;
+        const hook = add(sphere(scene, "hook", 0.4, cream)); hook.position.set(0.18, 1.45, 0);
+        topY = 1.0;
+      }
+
+      // Cute angry face — eyes + a little frown — for every sweet.
+      const eyeMat = emat(scene, "meye" + root.uniqueId, "#241a2a", 0);
+      const whiteMat = emat(scene, "mwhite" + root.uniqueId, "#ffffff", 0.05);
+      for (const s of [-1, 1]) {
+        const w = add(sphere(scene, "mw", 0.2, whiteMat)); w.position.set(0.18 * s, topY, 0.42); w.scaling.z = 0.5;
+        const e = add(sphere(scene, "me", 0.1, eyeMat)); e.position.set(0.18 * s, topY, 0.5);
+        const brow = add(box(scene, "brow", 0.22, 0.05, 0.05, eyeMat)); brow.position.set(0.18 * s, topY + 0.16, 0.48); brow.rotation.z = -0.5 * s;
+      }
+      const mouth = add(box(scene, "mouth", 0.26, 0.06, 0.05, eyeMat)); mouth.position.set(0, topY - 0.22, 0.5);
+
+      // Soft blob shadow.
+      const blob = disc(scene, "mblob", this.radius, emat(scene, "mblobM" + root.uniqueId, "#000000", 0));
+      blob.material.alpha = 0.25; blob.rotation.x = Math.PI / 2; blob.position.y = 0.02;
+      blob.parent = root; blob.isPickable = false;
+    }
+
+    // Move toward the player; return true if currently touching them.
+    update(dt, playerPos) {
+      if (this.biteTimer > 0) this.biteTimer -= dt;
+      if (this.dying > 0) {
+        this.dying -= dt;
+        const k = Math.max(0, this.dying / 0.35);
+        this.body.scaling.setAll(k);
+        this.body.rotation.y += dt * 12;
+        if (this.dying <= 0) { this.alive = false; this.root.dispose(); }
+        return false;
+      }
+      this.bob += dt * 6;
+      // Ease back to normal scale after a non-fatal hit squashed us bigger.
+      if (this.body.scaling.x !== 1) this.body.scaling.setAll(lerp(this.body.scaling.x, 1, 0.25));
+      const to = playerPos.subtract(this.root.position); to.y = 0;
+      const dist = to.length();
+      if (dist > 0.001) {
+        to.normalize();
+        const step = Math.min(this.speed * dt, Math.max(0, dist - 1.0));
+        this.root.position.addInPlace(to.scale(step));
+        this.body.rotation.y = lerpAngle(this.body.rotation.y, Math.atan2(to.x, to.z), 0.2);
+      }
+      // Hoppy bob.
+      this.body.position.y = Math.abs(Math.sin(this.bob)) * 0.18;
+      return dist <= this.radius + 1.0;
+    }
+
+    hit(dmg) {
+      this.hp -= dmg;
+      if (this.hp <= 0 && this.dying <= 0) { this.dying = 0.35; return true; } // killed
+      // flash / squash on a non-fatal hit
+      this.body.scaling.setAll(1.25);
+      return false;
+    }
+
     get position() { return this.root.position; }
   }
 
@@ -375,14 +633,13 @@
       }
     }
 
-    // Central plaza around the chest.
+    // Central plaza.
     const plaza = disc(scene, "plaza", 5, mat(scene, "plaza", "#caa46a"));
     plaza.rotation.x = Math.PI / 2; plaza.position.y = 0.04; plaza.receiveShadows = true;
 
     // Helper: are we on/near a road centerline? (keep trees off the roads)
     const onRoad = (x, z) => {
       for (const ang of [baseAngle, baseAngle + Math.PI / 2]) {
-        // perpendicular distance from (x,z) to a road centerline through the origin
         const perp = Math.abs(x * Math.sin(ang) - z * Math.cos(ang));
         if (perp < 5) return true;
       }
@@ -396,7 +653,6 @@
     const tuftMat = mat(scene, "tuft", "#69bd55");
 
     const place = (minR, maxR) => {
-      // rejection-sample a spot off the roads and away from the plaza
       for (let tries = 0; tries < 12; tries++) {
         const ang = Math.random() * Math.PI * 2;
         const r = minR + Math.random() * (maxR - minR);
@@ -428,7 +684,6 @@
       rock.rotation.set(Math.random(), Math.random(), Math.random()); shadow.addShadowCaster(rock);
     }
 
-    // Flowers (stem + colored head) and grass tufts for ground detail.
     for (let i = 0; i < 60; i++) {
       const p = place(6, 56); if (!p) continue;
       if (Math.random() < 0.5) {
@@ -446,42 +701,105 @@
   }
 
   // =========================================================================
-  // Chest + relics
+  // Artifacts (the collectibles, formerly "relics")
   // =========================================================================
-  function buildChest(scene, shadow) {
-    const root = new BABYLON.TransformNode("chest", scene);
-    const wood = emat(scene, "cw", "#8a5a2b", 0.05);
-    const woodDark = emat(scene, "cwd", "#6e451f", 0.05);
-    const gold = emat(scene, "cg", "#ffcf5c", 0.3);
-
-    const base = box(scene, "cbase", 1.8, 1, 1.2, wood); base.parent = root; base.position.y = 0.5;
-    shadow.addShadowCaster(base);
-    const lidPivot = new BABYLON.TransformNode("lidP", scene);
-    lidPivot.parent = root; lidPivot.position.set(0, 1, -0.6);
-    const lid = BABYLON.MeshBuilder.CreateCylinder("clid", { height: 1.8, diameter: 1.2, tessellation: 16, arc: 0.5 }, scene);
-    lid.rotation.z = Math.PI / 2; lid.material = woodDark; lid.parent = lidPivot; lid.position.z = 0.6;
-    shadow.addShadowCaster(lid);
-    const lock = box(scene, "lock", 0.3, 0.3, 0.12, gold); lock.parent = root; lock.position.set(0, 0.6, 0.62);
-
-    // Goal beam.
-    const beam = cyl(scene, "beam", 0.1, 1.4, 6, emat(scene, "beamM", "#ffcf5c", 1));
-    beam.material.alpha = 0.1; beam.parent = root; beam.position.y = 3; beam.isPickable = false;
-
-    return { root, lidPivot, openAmount: 0 };
-  }
-
-  function buildRelic(scene, shadow, position, color) {
-    const root = new BABYLON.TransformNode("relic", scene);
+  function buildArtifact(scene, shadow, position, color) {
+    const root = new BABYLON.TransformNode("artifact", scene);
     root.position.copyFrom(position);
-    const m = emat(scene, "relicM" + color, color, 0.6);
+    const m = emat(scene, "artM" + root.uniqueId, color, 0.6);
     const gem = BABYLON.MeshBuilder.CreatePolyhedron("gem", { type: 1, size: 0.36 }, scene);
     gem.material = m; gem.parent = root; gem.position.y = 1.0; shadow.addShadowCaster(gem);
-    const halo = disc(scene, "halo", 0.55, emat(scene, "haloM" + color, color, 1));
+    const halo = disc(scene, "halo", 0.55, emat(scene, "haloM" + root.uniqueId, color, 1));
     halo.material.alpha = 0.35; halo.rotation.x = Math.PI / 2; halo.position.y = 0.06; halo.parent = root;
     halo.isPickable = false;
-    const beam = cyl(scene, "rbeam", 0.05, 0.7, 4, emat(scene, "rbeamM" + color, color, 1));
+    const beam = cyl(scene, "rbeam", 0.05, 0.7, 4, emat(scene, "rbeamM" + root.uniqueId, color, 1));
     beam.material.alpha = 0.12; beam.parent = root; beam.position.y = 2; beam.isPickable = false;
     return { root, gem, halo };
+  }
+
+  // Spawn one artifact somewhere valid and wire it into the interaction/score systems.
+  function spawnArtifact(scene, world, interaction, player, state, near) {
+    let pos = null;
+    for (let tries = 0; tries < 24 && !pos; tries++) {
+      let x, z;
+      if (near) { // cluster near a wave's monsters
+        const ang = Math.random() * Math.PI * 2, r = 2 + Math.random() * 8;
+        x = near.x + Math.cos(ang) * r; z = near.z + Math.sin(ang) * r;
+      } else {
+        const ang = Math.random() * Math.PI * 2, r = 9 + Math.random() * 24;
+        x = Math.cos(ang) * r; z = Math.sin(ang) * r;
+      }
+      if (Math.hypot(x, z) < CONFIG.worldRadius - 2 && !world.onRoad(x, z)) pos = new BABYLON.Vector3(x, 0, z);
+    }
+    if (!pos) pos = new BABYLON.Vector3((Math.random() - 0.5) * 30, 0, (Math.random() - 0.5) * 30);
+
+    const color = PALETTE[(Math.random() * PALETTE.length) | 0];
+    const artifact = buildArtifact(scene, world.shadow, pos, color);
+    const it = new Interactable(artifact.root, {
+      label: "Collect artifact",
+      onInteract: (self) => {
+        if (player.busy) return;
+        self.enabled = false;
+        artifact.halo.setEnabled(false);
+        interaction.remove(self);
+        const i = state.artifacts.indexOf(artifact);
+        if (i >= 0) state.artifacts.splice(i, 1);
+        player.startPickup(artifact.gem, () => {
+          artifact.root.dispose(); // clean up halo/beam/root (gem is now carried)
+          addScore(state, CONFIG.scorePerArtifact);
+          toast(`Artifact! +${CONFIG.scorePerArtifact}`);
+        });
+      },
+    });
+    artifact._it = it; interaction.register(it); state.artifacts.push(artifact);
+    return artifact;
+  }
+
+  // =========================================================================
+  // Wave system — escalating waves of living sweets + artifacts every minute.
+  // =========================================================================
+  class WaveSystem {
+    constructor(scene, world, interaction, player, state) {
+      this.scene = scene; this.world = world; this.interaction = interaction;
+      this.player = player; this.state = state;
+      this.wave = 0;
+      this.timer = CONFIG.firstWaveDelay; // seconds until next wave
+    }
+
+    update(dt) {
+      this.timer -= dt;
+      dom.nextWave.textContent = Math.ceil(Math.max(0, this.timer)) + "s";
+      if (this.timer <= 0) { this.timer = CONFIG.waveInterval; this.spawnWave(); }
+    }
+
+    spawnWave() {
+      this.wave++;
+      this.state.wave = this.wave;
+      dom.wave.textContent = this.wave;
+
+      const monsterCount = Math.min(
+        CONFIG.maxMonstersPerWave,
+        CONFIG.baseMonsters + (this.wave - 1) * CONFIG.monstersPerWave
+      );
+      const artifactCount = Math.min(
+        CONFIG.maxArtifactsPerWave,
+        CONFIG.baseArtifacts + (this.wave - 1) * CONFIG.artifactsPerWave
+      );
+
+      // Monsters spawn around the ring, away from the player so they march in.
+      for (let i = 0; i < monsterCount; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const r = 26 + Math.random() * 12;
+        const pos = new BABYLON.Vector3(Math.cos(ang) * r, 0, Math.sin(ang) * r);
+        this.state.monsters.push(new Monster(this.scene, this.world.shadow, pos, this.wave));
+      }
+      // Each wave also drops fresh artifacts to grab.
+      for (let i = 0; i < artifactCount; i++) {
+        spawnArtifact(this.scene, this.world, this.interaction, this.player, this.state);
+      }
+
+      bannerWave(this.wave, monsterCount);
+    }
   }
 
   // =========================================================================
@@ -500,83 +818,133 @@
     const world = buildWorld(scene);
     const player = new Player(scene, world.shadow);
     const interaction = new InteractionSystem();
-    const chest = buildChest(scene, world.shadow);
 
-    const state = { score: 0, won: false, relics: [], chest };
+    const state = {
+      score: 0, wave: 0, over: false,
+      artifacts: [], monsters: [], bolts: [],
+    };
+    updateHealthBar(player.health);
 
-    // Randomly spawn relics around the meadow (off the roads, away from chest).
-    for (let i = 0; i < CONFIG.itemCount; i++) {
-      let pos = null;
-      for (let tries = 0; tries < 20 && !pos; tries++) {
-        const ang = Math.random() * Math.PI * 2;
-        const r = 9 + Math.random() * 24;
-        const x = Math.cos(ang) * r, z = Math.sin(ang) * r;
-        if (!world.onRoad(x, z)) pos = new BABYLON.Vector3(x, 0, z);
-      }
-      if (!pos) pos = new BABYLON.Vector3((Math.random() - 0.5) * 30, 0, (Math.random() - 0.5) * 30);
-      const color = PALETTE[i % PALETTE.length];
-      const relic = buildRelic(scene, world.shadow, pos, color);
-      const it = new Interactable(relic.root, {
-        label: "Pick up relic",
-        onInteract: (self) => {
-          if (player.busy) return;
-          if (player.carried) { toast("Store the relic you're holding first!"); return; }
-          self.enabled = false;
-          player.startPickup(relic.gem, () => {
-            relic.halo.setEnabled(false);
-            interaction.remove(self);
-            toast("Relic collected — bring it to the chest!");
-          });
-        },
-      });
-      relic._it = it; interaction.register(it); state.relics.push(relic);
-    }
+    // A few artifacts to find before the first wave even arrives.
+    for (let i = 0; i < 3; i++) spawnArtifact(scene, world, interaction, player, state);
 
-    const chestIt = new Interactable(chest.root, {
-      label: "Store relic", range: 3.4,
-      onInteract: () => {
-        if (player.busy || !player.carried) { if (!player.carried) toast("Find a glowing relic first!"); return; }
-        const gem = player.releaseCarried(); gem.dispose();
-        state.score++; chest.openAmount = 1; dom.score.textContent = state.score;
-        toast(`Stored! ${state.score} / ${CONFIG.goal}`);
-        if (state.score >= CONFIG.goal) winGame(state);
-      },
-    });
-    chestIt.enabled = false; interaction.register(chestIt);
+    const waves = new WaveSystem(scene, world, interaction, player, state);
 
     scene.onBeforeRenderObservable.add(() => {
       const dt = Math.min(engine.getDeltaTime() / 1000, 0.05);
-      if (!state.won) {
-        player.update(dt, camera);
-        const target = player.position.add(new BABYLON.Vector3(0, 1.4, 0));
-        camera.target = BABYLON.Vector3.Lerp(camera.target, target, CONFIG.cameraLerp);
-        chestIt.enabled = !!player.carried && !player.busy;
-        interaction.update(player.position);
-        if (Input.consumeInteract() && !player.busy) interaction.trigger();
+      if (state.over) { cosmetics(state, dt); return; }
+
+      player.update(dt, camera);
+      const target = player.position.add(new BABYLON.Vector3(0, 1.4, 0));
+      camera.target = BABYLON.Vector3.Lerp(camera.target, target, CONFIG.cameraLerp);
+
+      waves.update(dt);
+
+      // Casting.
+      if (Input.wantsCast()) {
+        const shot = player.tryCast();
+        if (shot) state.bolts.push(new Projectile(scene, world.shadow, shot.origin, shot.dir));
       }
+
+      updateBolts(state, dt);
+      updateMonsters(state, player, dt);
+
+      interaction.update(player.position);
+      if (Input.consumeInteract() && !player.busy) interaction.trigger();
+
       cosmetics(state, dt);
     });
 
     return scene;
   }
 
-  function cosmetics(state, dt) {
-    const t = performance.now() / 1000;
-    for (const r of state.relics) {
-      if (r._it && r._it.enabled) {
-        r.gem.rotation.y += dt * 1.6;
-        r.gem.position.y = 1.0 + Math.sin(t * 2 + r.gem.uniqueId) * 0.14;
-        r.halo.scaling.setAll(1 + Math.sin(t * 3) * 0.12);
+  function updateBolts(state, dt) {
+    for (let i = state.bolts.length - 1; i >= 0; i--) {
+      const b = state.bolts[i];
+      b.update(dt);
+      if (!b.dead) {
+        // Hit-test against live monsters on the XZ plane (bolts fly at hand
+        // height while a monster's root sits on the ground, so ignore Y).
+        for (const m of state.monsters) {
+          if (!m.alive || m.dying > 0) continue;
+          const dx = b.mesh.position.x - m.position.x;
+          const dz = b.mesh.position.z - m.position.z;
+          if (Math.hypot(dx, dz) <= CONFIG.boltRadius + m.radius) {
+            const killed = m.hit(1);
+            if (killed) { addScore(state, CONFIG.scorePerMonster); toast(`Splat! +${CONFIG.scorePerMonster}`); }
+            b.dead = true;
+            break;
+          }
+        }
       }
+      if (b.dead) { b.dispose(); state.bolts.splice(i, 1); }
     }
-    const c = state.chest;
-    c.lidPivot.rotation.x = lerp(c.lidPivot.rotation.x, -c.openAmount * 1.1, 0.15);
-    if (c.openAmount > 0) c.openAmount = Math.max(0, c.openAmount - dt * 0.8);
   }
 
-  function winGame(state) {
-    state.won = true; dom.prompt.classList.add("hidden"); state.chest.openAmount = 1;
-    setTimeout(() => dom.win.classList.remove("hidden"), 700);
+  function updateMonsters(state, player, dt) {
+    for (let i = state.monsters.length - 1; i >= 0; i--) {
+      const m = state.monsters[i];
+      const touching = m.update(dt, player.position);
+      if (!m.alive) { state.monsters.splice(i, 1); continue; }
+      if (touching && m.dying <= 0 && m.biteTimer <= 0) {
+        m.biteTimer = CONFIG.biteCooldown;
+        const hp = player.takeDamage(CONFIG.contactDamage);
+        updateHealthBar(hp);
+        flashHurt();
+        if (hp <= 0) { gameOver(state); return; }
+      }
+    }
+  }
+
+  function cosmetics(state, dt) {
+    const t = performance.now() / 1000;
+    for (const a of state.artifacts) {
+      if (a._it && a._it.enabled) {
+        a.gem.rotation.y += dt * 1.6;
+        a.gem.position.y = 1.0 + Math.sin(t * 2 + a.gem.uniqueId) * 0.14;
+        a.halo.scaling.setAll(1 + Math.sin(t * 3) * 0.12);
+      }
+    }
+  }
+
+  // =========================================================================
+  // Score / HUD helpers
+  // =========================================================================
+  function addScore(state, points) {
+    state.score += points;
+    dom.score.textContent = state.score;
+  }
+
+  function updateHealthBar(hp) {
+    const pct = Math.max(0, Math.min(100, (hp / CONFIG.maxHealth) * 100));
+    dom.healthFill.style.width = pct + "%";
+    dom.healthFill.style.background = pct > 50
+      ? "linear-gradient(90deg, #5be0a0, #6cc6ff)"
+      : pct > 25
+      ? "linear-gradient(90deg, #ffd34e, #ff9d5c)"
+      : "linear-gradient(90deg, #ff5c7a, #ff3b3b)";
+  }
+
+  let hurtTimer = null;
+  function flashHurt() {
+    dom.hud.style.boxShadow = "inset 0 0 120px rgba(255,40,60,0.55)";
+    clearTimeout(hurtTimer);
+    hurtTimer = setTimeout(() => { dom.hud.style.boxShadow = "none"; }, 160);
+  }
+
+  function bannerWave(n, monsterCount) {
+    dom.waveBanner.textContent = `Wave ${n} — ${monsterCount} sweets!`;
+    dom.waveBanner.classList.remove("show");
+    void dom.waveBanner.offsetWidth; // restart the CSS animation
+    dom.waveBanner.classList.add("show");
+  }
+
+  function gameOver(state) {
+    state.over = true;
+    dom.prompt.classList.add("hidden");
+    dom.finalScore.textContent = state.score;
+    dom.finalWave.textContent = state.wave;
+    setTimeout(() => dom.over.classList.remove("hidden"), 600);
   }
 
   // ---- UI / boot ---------------------------------------------------------
@@ -671,12 +1039,12 @@
 
   /* ===========================================================================
    * ROADMAP SEAMS (inert, documented integration points):
-   *   CombatSystem    - add Havok physics in buildWorld(); Player gains health
-   *                     + attack(); enemies are Interactables with an AI tick.
-   *   DialogueSystem  - NPCs register as Interactables ("Talk"); onInteract
-   *                     opens a BABYLON.GUI panel (babylon.gui is loaded).
    *   PuzzleSystem    - levers/plates are Interactables flipping state flags
    *                     that gate a door mesh; reuses InteractionSystem.
+   *   DialogueSystem  - NPCs register as Interactables ("Talk"); onInteract
+   *                     opens a BABYLON.GUI panel (babylon.gui is loaded).
+   *   Power-ups       - drop from sweets like artifacts; tweak Player.castCooldown
+   *                     / boltSpeed or restore health on pickup.
    * ===========================================================================
    */
 })();

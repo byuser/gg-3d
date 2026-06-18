@@ -1,7 +1,8 @@
 # Good Game 3D
 
-A third-person browser adventure. Run as **Lily**, gather the **three glowing relics**
-scattered across the meadow, and store each one in the **chest** to win.
+A third-person browser **action** game. Run as **Lily**, wield a **magic wand**, and
+survive escalating **waves of living sweets**. Blast the candy monsters and grab the
+glowing **artifacts** to rack up your **score**.
 
 ▶️ **Play:** once GitHub Pages is enabled, the game is live at
 `https://<owner>.github.io/gg-3d/`
@@ -14,10 +15,19 @@ scattered across the meadow, and store each one in the **chest** to win.
 | --- | --- | --- |
 | Move | `WASD` / Arrow keys | on-screen stick (bottom-left) |
 | Look | drag mouse | drag the screen |
-| Pick up / Store | `E` or `Space` | action button (bottom-right) |
+| Cast magic | `Space` or `F` (hold to fire) | ✨ button (bottom-right) |
+| Collect artifact | `E` | action button (bottom-right) |
 
-Pick up a relic, carry it to the glowing chest, and press the action to store it.
-Store all three to win.
+## How to play
+
+- **Waves:** every **60 seconds** a new wave of **living sweets** (lollipops, gummy
+  bears, cupcakes, donuts, candy canes) marches in from the meadow's edge. Each wave
+  is **bigger than the last** and drops **more artifacts** to collect.
+- **Magic wand:** hold the cast key/button to fire glowing bolts. A hit pops a sweet
+  for points.
+- **Score:** **+25** per sweet defeated, **+50** per artifact collected.
+- **Health:** the sweets bite on contact. When your health hits zero it's **game over** —
+  your final score and the wave you reached are shown.
 
 ## Why Babylon.js?
 
@@ -50,17 +60,19 @@ js/game.js              # engine, systems, gameplay
 
 ### Architecture
 
-`js/game.js` is organised as small systems so the roadmap is additive, not a rewrite:
+`js/game.js` is organised as small systems so features are additive, not a rewrite:
 
-- **`Interactable`** — a reusable "walk up + press E" contract. Relics and the chest use it;
-  NPCs and puzzle levers will too.
-- **`InteractionSystem`** — finds the nearest interactable in range and drives the prompt.
-- **`Input`** — unifies keyboard and the on-screen joystick into one move vector.
-- **`Player`** — Lily, built from primitives with a procedural walk cycle; combat state hangs here.
-- **`buildWorld`** — lighting, ground, scenery; physics and enemies attach here.
+- **`Interactable` / `InteractionSystem`** — a reusable "walk up + press E" contract;
+  artifacts use it (NPCs and puzzle levers will too).
+- **`Input`** — unifies keyboard, the on-screen joystick, and the cast button.
+- **`Player`** — Lily, built from primitives with a procedural walk cycle, a **magic wand**,
+  casting, and health.
+- **`Projectile`** — the wand's magic bolts (spawn, travel, hit-test, fizzle).
+- **`Monster`** — a "living sweet" with chase AI, a hoppy bob, and a pop-on-death effect.
+- **`WaveSystem`** — the 60-second timer that spawns escalating waves of sweets + artifacts.
+- **`buildWorld`** — lighting, ground, procedural scenery.
 
-The bottom of `game.js` documents the exact seams for **CombatSystem**, **DialogueSystem**,
-and **PuzzleSystem**.
+The bottom of `game.js` documents seams for **PuzzleSystem**, **DialogueSystem**, and **power-ups**.
 
 ## Run locally
 
@@ -80,7 +92,10 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 ## Roadmap
 
 - [x] Third-person character, movement & camera (mobile + desktop)
-- [x] Collect items and store them in the chest (win at 3)
-- [ ] Combat with enemies (Havok physics + hitboxes)
+- [x] Collect artifacts for score
+- [x] Magic wand + projectile combat
+- [x] Escalating waves of "living sweet" enemies (every minute)
+- [x] Score + health + game-over
+- [ ] Power-ups dropped by sweets (faster casting, healing)
 - [ ] Puzzles (levers, plates, gated doors)
 - [ ] NPC dialogue (Babylon GUI panels)

@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <title>Good Game 3D</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <meta name="description" content="Good Game 3D — a third-person browser adventure. Collect the glowing relics and store them in the chest." />
+  <meta name="description" content="Good Game 3D — a third-person browser adventure. Wield a magic wand, blast waves of living sweets, and collect artifacts for points." />
   <meta name="theme-color" content="#0b0f1a" />
-  <link rel="stylesheet" href="css/style.css?v=3" />
+  <link rel="stylesheet" href="css/style.css?v=4" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
@@ -17,11 +17,13 @@
   <div id="overlay" class="overlay">
     <div class="panel">
       <h1>Good Game <span class="badge">3D</span></h1>
-      <p class="tagline">Run with Lily, gather the three glowing relics, and lock them in the chest.</p>
+      <p class="tagline">Run with Lily, raise your <b>magic wand</b>, and survive the waves of
+        <b>living sweets</b>. Blast monsters and grab artifacts to score!</p>
       <ul class="controls">
         <li><b>Move</b><span>WASD / Arrows · or the on-screen stick</span></li>
         <li><b>Look</b><span>Drag the screen / mouse</span></li>
-        <li><b>Pick&nbsp;up&nbsp;·&nbsp;Drop</b><span>E / Space · or the action button</span></li>
+        <li><b>Cast&nbsp;magic</b><span>Space / F · or the ✨ button</span></li>
+        <li><b>Collect&nbsp;artifact</b><span>E · or the action button</span></li>
       </ul>
       <button id="startBtn" class="start-btn">Start Adventure</button>
       <p class="hint" id="loadHint">Loading engine…</p>
@@ -31,11 +33,16 @@
   <!-- HUD -->
   <div id="hud" class="hud hidden">
     <div class="hud-top">
-      <div class="objective">
-        Relics stored: <span id="score">0</span> / <span id="goal">3</span>
-      </div>
+      <div class="stat">⭐ <span id="score">0</span></div>
+      <div class="stat">Wave <span id="wave">0</span></div>
+      <div class="stat" id="nextWaveStat">Next <span id="nextWave">—</span></div>
       <div id="prompt" class="prompt hidden">Press <b>E</b></div>
     </div>
+    <div class="healthwrap">
+      <span class="heart">❤</span>
+      <div class="healthbar"><div id="healthFill" class="health-fill"></div></div>
+    </div>
+    <div id="waveBanner" class="wave-banner"></div>
     <button id="fsBtn" class="fs-btn" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
     <div id="toast" class="toast"></div>
   </div>
@@ -43,20 +50,22 @@
   <!-- Touch controls (shown only on touch devices) -->
   <div id="touch" class="touch hidden">
     <div id="joystick" class="joystick"><div id="stick" class="stick"></div></div>
+    <button id="castBtn" class="cast-btn">✨</button>
     <button id="actionBtn" class="action-btn">E</button>
   </div>
 
-  <!-- Win screen -->
-  <div id="win" class="overlay hidden">
+  <!-- Game over screen -->
+  <div id="over" class="overlay hidden">
     <div class="panel">
-      <h1>You Win! 🏆</h1>
-      <p class="tagline">All three relics are safe in the chest. Good game!</p>
+      <h1>Game Over 🍭</h1>
+      <p class="tagline">The living sweets got you! You scored <b><span id="finalScore">0</span></b>
+        and survived to <b>wave <span id="finalWave">0</span></b>.</p>
       <button id="replayBtn" class="start-btn">Play Again</button>
     </div>
   </div>
 
   <canvas id="renderCanvas"></canvas>
 
-  <script src="js/game.js?v=3"></script>
+  <script src="js/game.js?v=4"></script>
 </body>
 </html>

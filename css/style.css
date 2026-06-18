@@ -100,12 +100,50 @@ html, body {
   position: absolute; top: max(14px, env(safe-area-inset-top)); left: 0; right: 0;
   display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; padding: 0 14px;
 }
-.objective {
+.stat {
   background: rgba(11, 15, 26, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 8px 16px; border-radius: 999px; font-size: 15px; font-weight: 600;
 }
-.objective #score { color: var(--accent); }
+.stat #score { color: var(--accent); }
+.stat #wave { color: var(--accent2); }
+.stat #nextWave { color: #ff9d5c; }
+
+/* ---------- Health bar ---------- */
+.healthwrap {
+  position: absolute; top: max(58px, calc(env(safe-area-inset-top) + 44px)); left: 50%;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px;
+}
+.healthwrap .heart { font-size: 18px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+.healthbar {
+  width: min(240px, 60vw); height: 14px; border-radius: 999px;
+  background: rgba(11, 15, 26, 0.6); border: 1px solid rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+.health-fill {
+  height: 100%; width: 100%;
+  background: linear-gradient(90deg, #ff5c7a, #ff9d5c);
+  transition: width 0.25s ease, background 0.25s ease;
+}
+
+/* ---------- Wave banner (flashes on each new wave) ---------- */
+.wave-banner {
+  position: absolute; left: 50%; top: 32%; transform: translateX(-50%) scale(0.8);
+  font-size: clamp(28px, 7vw, 54px); font-weight: 900; letter-spacing: 1px;
+  color: var(--accent); text-shadow: 0 4px 24px rgba(0,0,0,0.6);
+  opacity: 0; pointer-events: none; text-align: center;
+}
+.wave-banner.show {
+  animation: waveflash 1.8s ease forwards;
+}
+@keyframes waveflash {
+  0%   { opacity: 0; transform: translateX(-50%) scale(0.6); }
+  20%  { opacity: 1; transform: translateX(-50%) scale(1.05); }
+  75%  { opacity: 1; transform: translateX(-50%) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) scale(1); }
+}
+
 .prompt {
   background: rgba(255, 207, 92, 0.92); color: #2a1a00;
   padding: 8px 16px; border-radius: 999px; font-size: 14px; font-weight: 700;
@@ -147,9 +185,19 @@ html, body {
 }
 .action-btn {
   position: absolute; right: max(26px, env(safe-area-inset-right)); bottom: 40px;
-  width: 86px; height: 86px; border-radius: 50%; border: 0;
+  width: 78px; height: 78px; border-radius: 50%; border: 0;
   background: linear-gradient(135deg, var(--accent), #ff9d5c); color: #2a1a00;
-  font-size: 26px; font-weight: 800; pointer-events: auto; touch-action: none;
+  font-size: 24px; font-weight: 800; pointer-events: auto; touch-action: none;
   box-shadow: 0 10px 24px rgba(255, 157, 92, 0.4);
 }
 .action-btn:active { transform: scale(0.94); }
+
+/* Magic cast button — sits above-left of the action button. */
+.cast-btn {
+  position: absolute; right: calc(max(26px, env(safe-area-inset-right)) + 92px); bottom: 70px;
+  width: 86px; height: 86px; border-radius: 50%; border: 0;
+  background: linear-gradient(135deg, #a06cff, #6cc6ff); color: #fff;
+  font-size: 30px; font-weight: 800; pointer-events: auto; touch-action: none;
+  box-shadow: 0 10px 24px rgba(160, 108, 255, 0.45);
+}
+.cast-btn:active { transform: scale(0.92); }
