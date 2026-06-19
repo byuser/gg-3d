@@ -37,7 +37,6 @@
   const CONFIG = {
     moveSpeed: 6.5,          // metres / second
     turnLerp: 0.2,
-    cameraLerp: 0.12,
     interactRange: 2.6,
     worldRadius: 44,         // playable area before the invisible fence
 
@@ -54,13 +53,19 @@
 
     // Waves
     firstWaveDelay: 5,       // seconds before wave 1
-    waveInterval: 60,        // seconds between waves ("every 1 minute")
-    baseMonsters: 3,         // monsters in wave 1
-    monstersPerWave: 2,      // extra monsters each subsequent wave
-    maxMonstersPerWave: 26,  // cap for performance
+    waveInterval: 60,        // max seconds to rest before the next wave auto-starts
+    baseMonsters: 4,         // monsters in wave 1
+    monstersPerWave: 3,      // extra monsters each subsequent wave
+    maxMonstersPerWave: 60,  // cap for performance
     baseArtifacts: 3,        // artifacts dropped in wave 1
     artifactsPerWave: 1,     // extra artifacts each subsequent wave
-    maxArtifactsPerWave: 10,
+    maxArtifactsPerWave: 14,
+
+    // Difficulty scaling — sweets get faster and tougher each wave.
+    monsterBaseSpeed: 1.6,
+    monsterSpeedPerWave: 0.12,
+    monsterMaxSpeed: 6.0,
+    monsterHpPerWaves: 3,    // +1 HP every N waves
 
     // Score
     scorePerMonster: 25,
@@ -78,7 +83,11 @@
     hud: document.getElementById("hud"),
     score: document.getElementById("score"),
     wave: document.getElementById("wave"),
+    monsters: document.getElementById("monsters"),
     nextWave: document.getElementById("nextWave"),
+    wavePanel: document.getElementById("wavePanel"),
+    wavePanelTitle: document.getElementById("wavePanelTitle"),
+    nextWaveBtn: document.getElementById("nextWaveBtn"),
     healthFill: document.getElementById("healthFill"),
     waveBanner: document.getElementById("waveBanner"),
     prompt: document.getElementById("prompt"),
@@ -99,6 +108,8 @@
 
   const engine = new BABYLON.Engine(dom.canvas, true, { stencil: true, adaptToDeviceRatio: true });
 
+  let gameStarted = false;   // gameplay (waves, monsters) waits on the start screen
+
   // =========================================================================
   // Input
   // =========================================================================
@@ -106,12 +117,14 @@
     keys: Object.create(null),
     joy: { x: 0, y: 0, active: false },
     interactQueued: false,
+    nextWaveQueued: false,   // player asked to start the next wave early
     castHeld: false,         // fire is continuous while held (respecting cooldown)
 
     init() {
       window.addEventListener("keydown", (e) => {
         this.keys[e.code] = true;
         if (e.code === "KeyE") { this.interactQueued = true; e.preventDefault(); }
+        if (e.code === "Enter" || e.code === "KeyN") { this.nextWaveQueued = true; e.preventDefault(); }
         if (e.code === "Space" || e.code === "KeyF") { this.castHeld = true; e.preventDefault(); }
       });
       window.addEventListener("keyup", (e) => {
@@ -166,6 +179,7 @@
       return { x, z };
     },
     consumeInteract() { const v = this.interactQueued; this.interactQueued = false; return v; },
+    consumeNextWave() { const v = this.nextWaveQueued; this.nextWaveQueued = false; return v; },
     wantsCast() { return this.castHeld; },
   };
 
@@ -483,13 +497,19 @@
   // =========================================================================
   // Monster — a "living sweet" with a chase AI, a bob, and a pop on death.
   // =========================================================================
-  const SWEETS = ["lollipop", "gummy", "cupcake", "donut", "candycane"];
+  const SWEETS = [
+    "lollipop", "gummy", "cupcake", "donut", "candycane",
+    "icecream", "macaron", "candycorn", "chocbar", "jellybean", "marshmallow", "pretzel",
+  ];
 
   class Monster {
     constructor(scene, shadow, pos, wave) {
       this.scene = scene;
-      this.hp = 1 + Math.floor(wave / 4);          // sturdier in later waves
-      this.speed = 1.6 + Math.random() * 0.7 + wave * 0.06;
+      this.hp = 1 + Math.floor((wave - 1) / CONFIG.monsterHpPerWaves); // sturdier in later waves
+      this.speed = Math.min(
+        CONFIG.monsterMaxSpeed,
+        CONFIG.monsterBaseSpeed + Math.random() * 0.7 + (wave - 1) * CONFIG.monsterSpeedPerWave
+      );
       this.alive = true;
       this.dying = 0;                               // >0 while playing the pop animation
       this.radius = 0.85;
@@ -536,11 +556,58 @@
         const ice = BABYLON.MeshBuilder.CreateTorus("icing", { diameter: 1.4, thickness: 0.62, tessellation: 16 }, scene);
         ice.material = cream; add(ice); ice.position.y = 0.9; ice.scaling.y = 0.6;
         topY = 1.15;
-      } else { // candycane
+      } else if (this.kind === "candycane") {
         const cane = add(capsule(scene, "cane", 1.3, 0.28, cream)); cane.position.y = 0.75;
         const stripe = add(capsule(scene, "stripe", 1.3, 0.30, main)); stripe.position.y = 0.75; stripe.scaling.set(0.6, 1.01, 0.6); stripe.rotation.y = 0.5;
         const hook = add(sphere(scene, "hook", 0.4, cream)); hook.position.set(0.18, 1.45, 0);
         topY = 1.0;
+      } else if (this.kind === "icecream") {
+        // Waffle cone (point down) + two stacked scoops.
+        const coneM = add(cone(scene, "iccone", 0.7, 0.05, 1.0, emat(scene, "icconeM" + root.uniqueId, "#c8923f", 0.08)));
+        coneM.position.y = 0.5; coneM.rotation.x = Math.PI; // tip down
+        const s1 = add(sphere(scene, "icscoop1", 0.78, main)); s1.position.y = 1.05;
+        const s2 = add(sphere(scene, "icscoop2", 0.64, cream)); s2.position.y = 1.55;
+        topY = 1.05;
+      } else if (this.kind === "macaron") {
+        // Two domed shells with a cream filling.
+        const top = add(sphere(scene, "mtop", 1.1, main)); top.position.y = 1.05; top.scaling.y = 0.5;
+        const bot = add(sphere(scene, "mbot", 1.1, main)); bot.position.y = 0.65; bot.scaling.y = 0.5;
+        const fill = add(cyl(scene, "mfill", 1.0, 1.0, 0.25, cream)); fill.position.y = 0.85;
+        topY = 1.05;
+      } else if (this.kind === "candycorn") {
+        // Classic three-band cone (white tip, orange, yellow).
+        const yellow = emat(scene, "ccY" + root.uniqueId, "#ffd34e", 0.18);
+        const orange = emat(scene, "ccO" + root.uniqueId, "#ff944e", 0.18);
+        const b1 = add(cone(scene, "ccb1", 1.0, 0.7, 0.5, yellow)); b1.position.y = 0.3;
+        const b2 = add(cone(scene, "ccb2", 0.7, 0.4, 0.5, orange)); b2.position.y = 0.78;
+        const b3 = add(cone(scene, "ccb3", 0.4, 0.05, 0.5, cream)); b3.position.y = 1.25;
+        topY = 0.62;
+      } else if (this.kind === "chocbar") {
+        // A chunky chocolate bar with embossed squares.
+        const bar = add(box(scene, "bar", 1.5, 1.0, 0.5, emat(scene, "barM" + root.uniqueId, "#5b3a22", 0.08)));
+        bar.position.y = 0.9;
+        for (const sx of [-0.42, 0.42]) for (const sy of [-0.22, 0.22]) {
+          const sq = add(box(scene, "sq", 0.5, 0.4, 0.12, dark)); sq.position.set(sx, 0.9 + sy, 0.26);
+        }
+        topY = 1.35;
+      } else if (this.kind === "jellybean") {
+        // A glossy bean — a fat tilted capsule.
+        const bean = add(capsule(scene, "bean", 1.1, 0.55, main)); bean.position.y = 0.62; bean.rotation.z = 0.5;
+        const shine = add(sphere(scene, "shine", 0.3, cream)); shine.position.set(-0.25, 0.95, 0.35);
+        topY = 0.78;
+      } else if (this.kind === "marshmallow") {
+        // Soft squishy cylinder.
+        const mm = add(cyl(scene, "mm", 1.05, 1.05, 1.1, cream)); mm.position.y = 0.75;
+        const band = add(cyl(scene, "mmband", 1.08, 1.08, 0.3, main)); band.position.y = 0.75;
+        topY = 1.0;
+      } else { // pretzel — a knotted torus with salt bumps.
+        const knot = BABYLON.MeshBuilder.CreateTorusKnot("pretzel", { radius: 0.5, tube: 0.18, radialSegments: 32, tubularSegments: 8, p: 2, q: 3 }, scene);
+        knot.material = emat(scene, "pretM" + root.uniqueId, "#a6692e", 0.08); add(knot); knot.position.y = 0.95;
+        for (let s = 0; s < 5; s++) {
+          const salt = add(sphere(scene, "salt", 0.1, cream));
+          salt.position.set((Math.random() - 0.5) * 1.1, 0.95 + (Math.random() - 0.5) * 1.1, 0.3 + Math.random() * 0.2);
+        }
+        topY = 1.55;
       }
 
       // Cute angry face — eyes + a little frown — for every sweet.
@@ -756,35 +823,62 @@
   }
 
   // =========================================================================
-  // Wave system — escalating waves of living sweets + artifacts every minute.
+  // Wave system — escalating waves of living sweets + artifacts.
+  //
+  // Flow: a wave spawns -> fight until every sweet is cleared -> a rest period
+  // begins where a "Next Wave" button (or Enter/N, or the touch button) starts
+  // the next wave early; otherwise it auto-starts after `waveInterval` seconds.
+  // Each wave brings more, faster, tougher sweets and more artifacts.
   // =========================================================================
   class WaveSystem {
     constructor(scene, world, interaction, player, state) {
       this.scene = scene; this.world = world; this.interaction = interaction;
       this.player = player; this.state = state;
       this.wave = 0;
-      this.timer = CONFIG.firstWaveDelay; // seconds until next wave
+      this.betweenWaves = true;            // resting before the next wave
+      this.timer = CONFIG.firstWaveDelay;  // seconds until the next wave auto-starts
+      this._enterRest("Get ready!", "Start Wave 1");
+    }
+
+    monstersForWave(w) {
+      return Math.min(CONFIG.maxMonstersPerWave, CONFIG.baseMonsters + (w - 1) * CONFIG.monstersPerWave);
+    }
+    artifactsForWave(w) {
+      return Math.min(CONFIG.maxArtifactsPerWave, CONFIG.baseArtifacts + (w - 1) * CONFIG.artifactsPerWave);
     }
 
     update(dt) {
-      this.timer -= dt;
-      dom.nextWave.textContent = Math.ceil(Math.max(0, this.timer)) + "s";
-      if (this.timer <= 0) { this.timer = CONFIG.waveInterval; this.spawnWave(); }
+      const wantNext = Input.consumeNextWave();
+      if (this.betweenWaves) {
+        this.timer = Math.max(0, this.timer - dt);
+        dom.nextWave.textContent = Math.ceil(this.timer) + "s";
+        if (wantNext || this.timer <= 0) this.spawnWave();
+      } else if (this.state.monsters.length === 0) {
+        // Wave cleared — start the rest period and offer the Next Wave button.
+        this.timer = CONFIG.waveInterval;
+        this.betweenWaves = true;
+        this._enterRest(`Wave ${this.wave} cleared!`, `Start Wave ${this.wave + 1}`);
+        toast("Wave cleared! 🍬");
+      }
+    }
+
+    _enterRest(title, btnLabel) {
+      this._restBtnLabel = btnLabel;
+      dom.wavePanelTitle.textContent = title;
+      dom.nextWaveBtn.textContent = btnLabel;
+      dom.wavePanel.classList.remove("hidden");
     }
 
     spawnWave() {
       this.wave++;
+      this.betweenWaves = false;
       this.state.wave = this.wave;
       dom.wave.textContent = this.wave;
+      dom.wavePanel.classList.add("hidden");
 
-      const monsterCount = Math.min(
-        CONFIG.maxMonstersPerWave,
-        CONFIG.baseMonsters + (this.wave - 1) * CONFIG.monstersPerWave
-      );
-      const artifactCount = Math.min(
-        CONFIG.maxArtifactsPerWave,
-        CONFIG.baseArtifacts + (this.wave - 1) * CONFIG.artifactsPerWave
-      );
+      const monsterCount = this.monstersForWave(this.wave);
+      const artifactCount = this.artifactsForWave(this.wave);
+      this.state.waveTotal = monsterCount;
 
       // Monsters spawn around the ring, away from the player so they march in.
       for (let i = 0; i < monsterCount; i++) {
@@ -798,6 +892,7 @@
         spawnArtifact(this.scene, this.world, this.interaction, this.player, this.state);
       }
 
+      updateMonsterCounter(this.state);
       bannerWave(this.wave, monsterCount);
     }
   }
@@ -820,10 +915,11 @@
     const interaction = new InteractionSystem();
 
     const state = {
-      score: 0, wave: 0, over: false,
+      score: 0, wave: 0, waveTotal: 0, over: false,
       artifacts: [], monsters: [], bolts: [],
     };
     updateHealthBar(player.health);
+    updateMonsterCounter(state);
 
     // A few artifacts to find before the first wave even arrives.
     for (let i = 0; i < 3; i++) spawnArtifact(scene, world, interaction, player, state);
@@ -832,11 +928,16 @@
 
     scene.onBeforeRenderObservable.add(() => {
       const dt = Math.min(engine.getDeltaTime() / 1000, 0.05);
+      if (!gameStarted) return;                       // hold sim until "Start"
       if (state.over) { cosmetics(state, dt); return; }
 
       player.update(dt, camera);
-      const target = player.position.add(new BABYLON.Vector3(0, 1.4, 0));
-      camera.target = BABYLON.Vector3.Lerp(camera.target, target, CONFIG.cameraLerp);
+      // Rigid follow: mutate the camera's pivot vector IN PLACE so the pivot
+      // tracks the character exactly while alpha/beta/radius stay untouched.
+      // (Assigning camera.target = ... or setTarget() would rebuild the radius
+      // from the camera's lagging position, which is what made the apparent
+      // distance change while moving.) Zoom is now wheel / two-finger pinch only.
+      camera.target.copyFromFloats(player.position.x, player.position.y + 1.4, player.position.z);
 
       waves.update(dt);
 
@@ -848,6 +949,7 @@
 
       updateBolts(state, dt);
       updateMonsters(state, player, dt);
+      updateMonsterCounter(state);
 
       interaction.update(player.position);
       if (Input.consumeInteract() && !player.busy) interaction.trigger();
@@ -915,6 +1017,13 @@
     dom.score.textContent = state.score;
   }
 
+  // Show how many sweets are still alive in the current wave (X left / total).
+  function updateMonsterCounter(state) {
+    if (!dom.monsters) return;
+    const left = state.monsters.length;
+    dom.monsters.textContent = `${left} / ${state.waveTotal}`;
+  }
+
   function updateHealthBar(hp) {
     const pct = Math.max(0, Math.min(100, (hp / CONFIG.maxHealth) * 100));
     dom.healthFill.style.width = pct + "%";
@@ -942,6 +1051,7 @@
   function gameOver(state) {
     state.over = true;
     dom.prompt.classList.add("hidden");
+    dom.wavePanel.classList.add("hidden");
     dom.finalScore.textContent = state.score;
     dom.finalWave.textContent = state.wave;
     setTimeout(() => dom.over.classList.remove("hidden"), 600);
@@ -957,6 +1067,7 @@
     dom.overlay.classList.add("hidden"); dom.hud.classList.remove("hidden");
     if (isTouch) dom.touch.classList.remove("hidden");
     dom.canvas.focus();
+    gameStarted = true;
   }
 
   // ---- Fullscreen (whole page, so the HUD/joystick stay visible) ----------
@@ -1004,6 +1115,7 @@
       window.addEventListener("resize", () => engine.resize());
       dom.startBtn.addEventListener("click", startGame);
       dom.replayBtn.addEventListener("click", () => window.location.reload());
+      dom.nextWaveBtn.addEventListener("click", () => { Input.nextWaveQueued = true; });
       Fullscreen.init();
     } catch (e) { showFatal(e.message); throw e; }
   }

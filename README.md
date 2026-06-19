@@ -15,19 +15,29 @@ glowing **artifacts** to rack up your **score**.
 | --- | --- | --- |
 | Move | `WASD` / Arrow keys | on-screen stick (bottom-left) |
 | Look | drag mouse | drag the screen |
+| Zoom | mouse wheel | two-finger pinch |
 | Cast magic | `Space` or `F` (hold to fire) | ✨ button (bottom-right) |
 | Collect artifact | `E` | action button (bottom-right) |
+| Start next wave | `Enter` / `N` | Next Wave button |
 
 ## How to play
 
-- **Waves:** every **60 seconds** a new wave of **living sweets** (lollipops, gummy
-  bears, cupcakes, donuts, candy canes) marches in from the meadow's edge. Each wave
-  is **bigger than the last** and drops **more artifacts** to collect.
-- **Magic wand:** hold the cast key/button to fire glowing bolts. A hit pops a sweet
-  for points.
+- **Waves:** each wave a swarm of **living sweets** marches in from the meadow's edge.
+  Clear them all and a **Next Wave** button appears — start the next wave when you're
+  ready, or it auto-starts after 60 seconds. Every wave brings **more sweets** (faster
+  and tougher) and **more artifacts**.
+- **Living sweets:** a dozen kinds — lollipops, gummy bears, cupcakes, donuts, candy
+  canes, ice-cream cones, macarons, candy corn, chocolate bars, jelly beans,
+  marshmallows and pretzels.
+- **Monster counter:** the HUD shows how many sweets are left in the current wave
+  (`🍬 left / total`).
+- **Magic wand:** Lily carries a glowing wand. Hold the cast key/button to fire bolts;
+  a hit pops a sweet for points.
 - **Score:** **+25** per sweet defeated, **+50** per artifact collected.
 - **Health:** the sweets bite on contact. When your health hits zero it's **game over** —
   your final score and the wave you reached are shown.
+- **Camera:** the view follows Lily at a fixed distance; zoom only with the mouse
+  wheel (or a two-finger pinch on mobile).
 
 ## Why Babylon.js?
 
@@ -94,7 +104,8 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 - [x] Third-person character, movement & camera (mobile + desktop)
 - [x] Collect artifacts for score
 - [x] Magic wand + projectile combat
-- [x] Escalating waves of "living sweet" enemies (every minute)
+- [x] Escalating waves of "living sweet" enemies (12 types, more/faster/tougher each wave)
+- [x] Player-paced waves with a Next Wave button + live monster counter
 - [x] Score + health + game-over
 - [ ] Power-ups dropped by sweets (faster casting, healing)
 - [ ] Puzzles (levers, plates, gated doors)

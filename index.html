@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="description" content="Good Game 3D — a third-person browser adventure. Wield a magic wand, blast waves of living sweets, and collect artifacts for points." />
   <meta name="theme-color" content="#0b0f1a" />
-  <link rel="stylesheet" href="css/style.css?v=4" />
+  <link rel="stylesheet" href="css/style.css?v=5" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
@@ -24,6 +24,7 @@
         <li><b>Look</b><span>Drag the screen / mouse</span></li>
         <li><b>Cast&nbsp;magic</b><span>Space / F · or the ✨ button</span></li>
         <li><b>Collect&nbsp;artifact</b><span>E · or the action button</span></li>
+        <li><b>Next&nbsp;wave</b><span>Enter / N · or the Next Wave button</span></li>
       </ul>
       <button id="startBtn" class="start-btn">Start Adventure</button>
       <p class="hint" id="loadHint">Loading engine…</p>
@@ -35,7 +36,7 @@
     <div class="hud-top">
       <div class="stat">⭐ <span id="score">0</span></div>
       <div class="stat">Wave <span id="wave">0</span></div>
-      <div class="stat" id="nextWaveStat">Next <span id="nextWave">—</span></div>
+      <div class="stat">🍬 <span id="monsters">0 / 0</span></div>
       <div id="prompt" class="prompt hidden">Press <b>E</b></div>
     </div>
     <div class="healthwrap">
@@ -43,6 +44,13 @@
       <div class="healthbar"><div id="healthFill" class="health-fill"></div></div>
     </div>
     <div id="waveBanner" class="wave-banner"></div>
+
+    <!-- Between-waves panel: appears once a wave is cleared -->
+    <div id="wavePanel" class="wave-panel-box hidden">
+      <div id="wavePanelTitle" class="wave-panel-title">Get ready!</div>
+      <button id="nextWaveBtn" class="next-wave-btn">Start Wave 1</button>
+      <div class="wave-panel-sub">auto-starts in <span id="nextWave">—</span></div>
+    </div>
     <button id="fsBtn" class="fs-btn" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
     <div id="toast" class="toast"></div>
   </div>
@@ -66,6 +74,6 @@
 
   <canvas id="renderCanvas"></canvas>
 
-  <script src="js/game.js?v=4"></script>
+  <script src="js/game.js?v=5"></script>
 </body>
 </html>
