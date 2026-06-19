@@ -23,9 +23,20 @@ glowing **artifacts** to rack up your **score**.
 ## How to play
 
 - **Waves:** each wave a swarm of **living sweets** marches in from the meadow's edge.
-  Clear them all and a **Next Wave** button appears — start the next wave when you're
-  ready, or it auto-starts after 60 seconds. Every wave brings **more sweets** (faster
-  and tougher) and **more artifacts**.
+  Clear them all and a **wave-results window** pops up — it shows your tally (sweets
+  defeated, artifacts, coins earned) and a **Start Next Wave** button that skips the
+  wait. Close it with the **×** and it shrinks to a small **corner widget** so you can
+  roam the map (and visit the merchant) with the view unblocked; the next wave still
+  starts from there, or auto-starts after 60 seconds. Every wave brings **more sweets**
+  (faster and tougher) and **more artifacts**.
+- **Coins:** defeated sweets sometimes drop **golden coins**. Walk near one and it's
+  scooped up (coins even magnet toward you). Coins are the currency you spend at the
+  merchant's shop.
+- **The merchant:** once a wave is cleared a **travelling merchant** 🧙 appears at the
+  central plaza and leaves when the next wave begins. Walk up and press **E** (or the
+  action button) to open the **shop**, where you can **buy a new weapon** (the
+  three-bolt Trident Wand) and **upgrade your wand** — more damage, faster casting,
+  bigger bolts — or buy a healing brew. Spend your coins between waves!
 - **Living sweets:** a dozen kinds — lollipops, gummy bears, cupcakes, donuts, candy
   canes, ice-cream cones, macarons, candy corn, chocolate bars, jelly beans,
   marshmallows and pretzels.
@@ -33,7 +44,8 @@ glowing **artifacts** to rack up your **score**.
   (`🍬 left / total`).
 - **Magic wand:** Lily carries a glowing wand. Hold the cast key/button to fire bolts;
   a hit pops a sweet for points.
-- **Score:** **+25** per sweet defeated, **+50** per artifact collected.
+- **Score:** **+25** per sweet defeated, **+50** per artifact collected. **Coins** are a
+  separate currency spent at the merchant.
 - **Health:** the sweets bite on contact. When your health hits zero it's **game over** —
   your final score and the wave you reached are shown.
 - **Camera:** the view follows Lily at a fixed distance; zoom only with the mouse
@@ -73,16 +85,20 @@ js/game.js              # engine, systems, gameplay
 `js/game.js` is organised as small systems so features are additive, not a rewrite:
 
 - **`Interactable` / `InteractionSystem`** — a reusable "walk up + press E" contract;
-  artifacts use it (NPCs and puzzle levers will too).
+  artifacts and the **merchant NPC** use it (puzzle levers will too).
 - **`Input`** — unifies keyboard, the on-screen joystick, and the cast button.
 - **`Player`** — Lily, built from primitives with a procedural walk cycle, a **magic wand**,
-  casting, and health.
-- **`Projectile`** — the wand's magic bolts (spawn, travel, hit-test, fizzle).
+  casting, health, and a **weapon stat block** the shop upgrades.
+- **`Projectile`** — the wand's magic bolts (spawn, travel, hit-test, fizzle), parameterised
+  by the player's weapon (damage, speed, size, colour) for multishot + upgrades.
 - **`Monster`** — a "living sweet" with chase AI, a hoppy bob, and a pop-on-death effect.
-- **`WaveSystem`** — the 60-second timer that spawns escalating waves of sweets + artifacts.
+- **`Coin` / `Merchant` / `Shop`** — coins drop from sweets and fund the plaza merchant's
+  shop, where you buy a new weapon or upgrade the wand between waves.
+- **`WaveSystem`** — the timer that spawns escalating waves, then shows the **results window**
+  (collapsible to a corner widget) and reveals the merchant once a wave is cleared.
 - **`buildWorld`** — lighting, ground, procedural scenery.
 
-The bottom of `game.js` documents seams for **PuzzleSystem**, **DialogueSystem**, and **power-ups**.
+The bottom of `game.js` documents the remaining seams for **PuzzleSystem** and **DialogueSystem**.
 
 ## Run locally
 
@@ -106,7 +122,9 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 - [x] Magic wand + projectile combat
 - [x] Escalating waves of "living sweet" enemies (12 types, more/faster/tougher each wave)
 - [x] Player-paced waves with a Next Wave button + live monster counter
+- [x] Wave-results window (skip the wait) that collapses to a non-blocking corner widget
+- [x] Coins dropped by sweets, collected like artifacts, used as shop currency
+- [x] Central merchant NPC — buy new weapons & upgrade the wand between waves
 - [x] Score + health + game-over
-- [ ] Power-ups dropped by sweets (faster casting, healing)
 - [ ] Puzzles (levers, plates, gated doors)
 - [ ] NPC dialogue (Babylon GUI panels)

@@ -70,6 +70,14 @@
     // Score
     scorePerMonster: 25,
     scorePerArtifact: 50,
+
+    // Coins (the shop currency, dropped by defeated sweets)
+    coinDropChance: 0.55,     // chance a defeated sweet drops coins
+    coinValueMin: 1,
+    coinValueMax: 3,
+    coinPickupRange: 1.9,     // walk this close to scoop a coin up
+    coinMagnetRange: 4.5,     // coins drift toward the player inside this range
+    coinLife: 30,             // seconds before an uncollected coin fades away
   };
 
   const PALETTE = ["#6cc6ff", "#a06cff", "#ff6c8a", "#ffd34e", "#5be0a0", "#ff944e"];
@@ -82,12 +90,28 @@
     loadHint: document.getElementById("loadHint"),
     hud: document.getElementById("hud"),
     score: document.getElementById("score"),
+    coins: document.getElementById("coins"),
     wave: document.getElementById("wave"),
     monsters: document.getElementById("monsters"),
     nextWave: document.getElementById("nextWave"),
     wavePanel: document.getElementById("wavePanel"),
     wavePanelTitle: document.getElementById("wavePanelTitle"),
+    wavePanelClose: document.getElementById("wavePanelClose"),
+    waveResults: document.getElementById("waveResults"),
+    resKills: document.getElementById("resKills"),
+    resArtifacts: document.getElementById("resArtifacts"),
+    resCoins: document.getElementById("resCoins"),
+    waveShopHint: document.getElementById("waveShopHint"),
     nextWaveBtn: document.getElementById("nextWaveBtn"),
+    waveMini: document.getElementById("waveMini"),
+    miniNextBtn: document.getElementById("miniNextBtn"),
+    miniWaveNum: document.getElementById("miniWaveNum"),
+    miniCountdown: document.getElementById("miniCountdown"),
+    shop: document.getElementById("shop"),
+    shopClose: document.getElementById("shopClose"),
+    shopDone: document.getElementById("shopDone"),
+    shopCoins: document.getElementById("shopCoins"),
+    shopItems: document.getElementById("shopItems"),
     healthFill: document.getElementById("healthFill"),
     waveBanner: document.getElementById("waveBanner"),
     prompt: document.getElementById("prompt"),
@@ -109,6 +133,8 @@
   const engine = new BABYLON.Engine(dom.canvas, true, { stencil: true, adaptToDeviceRatio: true });
 
   let gameStarted = false;   // gameplay (waves, monsters) waits on the start screen
+  let uiPaused = false;      // true while a blocking menu (the shop) is open
+  let waveSystem = null;     // the active WaveSystem (for the HUD buttons)
 
   // =========================================================================
   // Input
@@ -235,6 +261,20 @@
       this.castCooldown = 0;     // counts down to 0 when ready to cast
       this.castAnim = 0;         // 0..1 quick wand-thrust animation
       this.health = CONFIG.maxHealth;
+
+      // The wand's combat stats — the merchant's upgrades mutate these.
+      this.weapon = {
+        name: "Magic Wand",
+        damage: 1,
+        cooldown: CONFIG.castCooldown,
+        boltRadius: CONFIG.boltRadius,
+        boltSpeed: CONFIG.boltSpeed,
+        multishot: 1,            // bolts fired per cast
+        spread: 0.22,            // radians between multishot bolts
+        color: "#bfe3ff",
+        haloColor: "#9fd0ff",
+      };
+
       this._build(scene, shadow);
     }
 
@@ -347,16 +387,25 @@
     }
     get busy() { return this.state === "pickup"; }
 
-    // Returns { origin, dir } if a bolt should be fired, else null.
+    // Returns an array of { origin, dir } bolts to fire (one per multishot),
+    // or null if still on cooldown / busy.
     tryCast() {
       if (this.castCooldown > 0 || this.busy) return null;
-      this.castCooldown = CONFIG.castCooldown;
+      const w = this.weapon;
+      this.castCooldown = w.cooldown;
       this.castAnim = 1;
-      const dir = new BABYLON.Vector3(Math.sin(this.facing), 0, Math.cos(this.facing));
       const origin = this.wandTip.getAbsolutePosition().clone();
-      // A tiny upward arc reads better than a flat shot.
-      dir.y = 0.04; dir.normalize();
-      return { origin, dir };
+      const n = Math.max(1, w.multishot);
+      const shots = [];
+      for (let i = 0; i < n; i++) {
+        // Fan the bolts symmetrically around the facing direction.
+        const offset = n === 1 ? 0 : (i - (n - 1) / 2) * w.spread;
+        const ang = this.facing + offset;
+        // A tiny upward arc reads better than a flat shot.
+        const dir = new BABYLON.Vector3(Math.sin(ang), 0.04, Math.cos(ang)).normalize();
+        shots.push({ origin: origin.clone(), dir });
+      }
+      return shots;
     }
 
     update(dt, camera) {
@@ -473,22 +522,27 @@
   // Magic bolts (wand projectiles)
   // =========================================================================
   class Projectile {
-    constructor(scene, shadow, origin, dir) {
+    constructor(scene, shadow, origin, dir, opts = {}) {
       this.dir = dir.clone();
       this.life = CONFIG.boltLife;
+      this.speed = opts.speed || CONFIG.boltSpeed;
+      this.radius = opts.radius || CONFIG.boltRadius;  // hit radius vs monsters
+      this.damage = opts.damage || 1;
       this.dead = false;
-      const m = sphere(scene, "bolt", 0.32, emat(scene, "boltM", "#bfe3ff", 1.0));
+      const m = sphere(scene, "bolt", 0.32, emat(scene, "boltM", opts.color || "#bfe3ff", 1.0));
       m.position.copyFrom(origin);
       m.isPickable = false;
+      // Scale the visible bolt with its hit radius so upgrades read on-screen.
+      m.scaling.setAll(this.radius / CONFIG.boltRadius);
       this.mesh = m;
       // A trailing glow.
-      const halo = sphere(scene, "boltHalo", 0.6, emat(scene, "boltHaloM", "#9fd0ff", 1.0));
+      const halo = sphere(scene, "boltHalo", 0.6, emat(scene, "boltHaloM", opts.haloColor || "#9fd0ff", 1.0));
       halo.material.alpha = 0.3; halo.parent = m; halo.isPickable = false;
     }
     update(dt) {
       this.life -= dt;
       if (this.life <= 0) { this.dead = true; return; }
-      this.mesh.position.addInPlace(this.dir.scale(CONFIG.boltSpeed * dt));
+      this.mesh.position.addInPlace(this.dir.scale(this.speed * dt));
       if (Math.hypot(this.mesh.position.x, this.mesh.position.z) > CONFIG.worldRadius + 6) this.dead = true;
     }
     dispose() { this.mesh.dispose(); }
@@ -665,6 +719,138 @@
   }
 
   // =========================================================================
+  // Coin — a spinning golden coin dropped by defeated sweets. Walk near it to
+  // scoop it up; coins are the currency spent at the merchant's shop.
+  // =========================================================================
+  class Coin {
+    constructor(scene, shadow, pos, value) {
+      this.value = value;
+      this.life = CONFIG.coinLife;
+      this.collected = false;
+      this.spin = Math.random() * Math.PI * 2;
+      const root = new BABYLON.TransformNode("coin", scene);
+      root.position.copyFrom(pos);
+      root.position.y = 0.6;
+      this.root = root;
+
+      const gold = emat(scene, "coinM" + root.uniqueId, "#ffcf3a", 0.45);
+      const disc2 = cyl(scene, "coinDisc", 0.42, 0.42, 0.1, gold);
+      disc2.rotation.x = Math.PI / 2; disc2.parent = root;
+      shadow.addShadowCaster(disc2);
+      // A soft glow so coins are easy to spot in the grass.
+      const halo = sphere(scene, "coinHalo", 0.7, emat(scene, "coinHaloM" + root.uniqueId, "#ffe27a", 1));
+      halo.material.alpha = 0.22; halo.parent = root; halo.isPickable = false;
+      this.halo = halo;
+    }
+
+    // Returns true once the player has scooped this coin up.
+    update(dt, playerPos) {
+      this.life -= dt;
+      this.spin += dt * 4;
+      this.root.rotation.y = this.spin;
+      this.root.position.y = 0.6 + Math.sin(this.spin * 1.5) * 0.08;
+      this.halo.scaling.setAll(1 + Math.sin(this.spin * 2) * 0.12);
+
+      const dx = playerPos.x - this.root.position.x;
+      const dz = playerPos.z - this.root.position.z;
+      const dist = Math.hypot(dx, dz);
+      // Magnet: drift toward the player when they're close, then collect.
+      if (dist < CONFIG.coinMagnetRange) {
+        const pull = (1 - dist / CONFIG.coinMagnetRange) * 8 * dt;
+        this.root.position.x += dx * pull / (dist || 1);
+        this.root.position.z += dz * pull / (dist || 1);
+      }
+      return dist <= CONFIG.coinPickupRange;
+    }
+
+    dispose() { this.root.dispose(); }
+  }
+
+  // =========================================================================
+  // Merchant — a friendly NPC who appears at the plaza after a wave is cleared
+  // and leaves when the next wave begins. Walk up + press E to open the shop.
+  // =========================================================================
+  class Merchant {
+    constructor(scene, shadow, interaction, onOpen) {
+      const root = new BABYLON.TransformNode("merchant", scene);
+      root.position.set(0, 0, 0);
+      this.root = root;
+      this.bob = 0;
+      this._build(scene, shadow);
+
+      this.it = new Interactable(root, {
+        label: "Shop",
+        range: 3.4,
+        onInteract: () => onOpen(),
+      });
+      this.it.enabled = false;
+      interaction.register(this.it);
+
+      root.setEnabled(false);
+      this.visible = false;
+    }
+
+    _build(scene, shadow) {
+      const robe = emat(scene, "mRobe", "#4a3a8a", 0.08);
+      const robeDk = emat(scene, "mRobeDk", "#352a66", 0.06);
+      const skin = emat(scene, "mSkin", "#ffd9b8", 0.08);
+      const hat = emat(scene, "mHat", "#2a2050", 0.06);
+      const gold = emat(scene, "mGold", "#ffcf3a", 0.5);
+      const add = (m) => { m.parent = this.root; shadow.addShadowCaster(m); return m; };
+
+      add(cone(scene, "mBody", 1.1, 0.4, 1.5, robe)).position.y = 0.75;
+      add(cyl(scene, "mBelt", 0.7, 0.85, 0.18, robeDk)).position.y = 0.95;
+      const head = add(sphere(scene, "mHead", 0.55, skin)); head.position.y = 1.75;
+      // A big beard for the wizardly merchant.
+      const beard = add(cone(scene, "mBeard", 0.5, 0.06, 0.7, emat(scene, "mBeardM", "#e8e8f0", 0.05)));
+      beard.position.set(0, 1.5, 0.18); beard.rotation.x = Math.PI;
+      // Wide-brimmed pointed hat.
+      add(cyl(scene, "mBrim", 1.1, 1.1, 0.08, hat)).position.y = 2.02;
+      add(cone(scene, "mCap", 0.7, 0.02, 1.0, hat)).position.y = 2.5;
+      const star = add(BABYLON.MeshBuilder.CreatePolyhedron("mStar", { type: 2, size: 0.12 }, scene));
+      star.material = gold; star.position.y = 3.0;
+      for (const s of [-1, 1]) {
+        const eye = add(sphere(scene, "mEye", 0.08, emat(scene, "mEyeM", "#2a2a3a", 0)));
+        eye.position.set(0.13 * s, 1.8, 0.45);
+      }
+
+      // A floating "shop" marker (coin pouch) so the player can spot the merchant.
+      const sign = new BABYLON.TransformNode("mSign", scene);
+      sign.parent = this.root; sign.position.y = 3.5; this.sign = sign;
+      const bag = sphere(scene, "mBag", 0.45, emat(scene, "mBagM", "#b07a3a", 0.1));
+      bag.parent = sign; bag.position.set(0, 0, 0); bag.scaling.set(1, 1.1, 1);
+      shadow.addShadowCaster(bag);
+      const coin = cyl(scene, "mCoinIcon", 0.42, 0.42, 0.08, gold);
+      coin.parent = sign; coin.position.set(0, 0, 0.4); coin.rotation.x = Math.PI / 2;
+      this.coinIcon = coin;
+
+      // Light so the merchant pops at the plaza.
+      const glow = new BABYLON.PointLight("mGlow", new BABYLON.Vector3(0, 2.4, 0), scene);
+      glow.parent = this.root; glow.diffuse = BABYLON.Color3.FromHexString("#ffd98a");
+      glow.intensity = 0.6; glow.range = 8;
+    }
+
+    show() {
+      if (this.visible) return;
+      this.visible = true;
+      this.root.setEnabled(true);
+      this.it.enabled = true;
+    }
+    hide() {
+      if (!this.visible) return;
+      this.visible = false;
+      this.root.setEnabled(false);
+      this.it.enabled = false;
+    }
+    update(dt) {
+      if (!this.visible) return;
+      this.bob += dt;
+      this.sign.position.y = 3.5 + Math.sin(this.bob * 2) * 0.12;
+      this.coinIcon.rotation.y += dt * 2;
+    }
+  }
+
+  // =========================================================================
   // World — procedural environment.
   // =========================================================================
   function buildWorld(scene) {
@@ -814,6 +1000,7 @@
         player.startPickup(artifact.gem, () => {
           artifact.root.dispose(); // clean up halo/beam/root (gem is now carried)
           addScore(state, CONFIG.scorePerArtifact);
+          state.waveStats.artifacts++;
           toast(`Artifact! +${CONFIG.scorePerArtifact}`);
         });
       },
@@ -821,6 +1008,114 @@
     artifact._it = it; interaction.register(it); state.artifacts.push(artifact);
     return artifact;
   }
+
+  // =========================================================================
+  // Shop — the merchant's wares. Each item buys a weapon upgrade with coins.
+  // Levelled items cost more each purchase; one-time items unlock once.
+  // =========================================================================
+  const SHOP_ITEMS = [
+    {
+      id: "damage", name: "Power Crystal", icon: "💥",
+      desc: "+1 magic bolt damage", baseCost: 8, growth: 1.8, max: 5,
+      apply: (p) => { p.weapon.damage += 1; },
+    },
+    {
+      id: "firerate", name: "Swift Sigil", icon: "⚡",
+      desc: "Cast 15% faster", baseCost: 10, growth: 1.7, max: 5,
+      apply: (p) => { p.weapon.cooldown = Math.max(0.08, p.weapon.cooldown * 0.85); },
+    },
+    {
+      id: "boltsize", name: "Giant Bolt", icon: "🔮",
+      desc: "Bigger bolts that are easier to land", baseCost: 12, growth: 1.8, max: 3,
+      apply: (p) => { p.weapon.boltRadius += 0.25; },
+    },
+    {
+      id: "trident", name: "Trident Wand", icon: "🔱",
+      desc: "New weapon: fire 3 bolts in a spread", baseCost: 45, growth: 1, max: 1,
+      apply: (p) => {
+        p.weapon.multishot = 3; p.weapon.name = "Trident Wand";
+        p.weapon.color = "#ffd9f0"; p.weapon.haloColor = "#ff9de0";
+      },
+    },
+    {
+      id: "heal", name: "Healing Brew", icon: "❤️",
+      desc: "Restore your health to full", baseCost: 6, growth: 1.4, max: Infinity, repeatable: true,
+      apply: (p) => { p.health = CONFIG.maxHealth; updateHealthBar(p.health); },
+      // Healing is pointless at full health — let the UI grey it out.
+      unavailable: (p) => p.health >= CONFIG.maxHealth,
+    },
+  ];
+
+  function itemLevel(state, item) { return state.upgrades[item.id] || 0; }
+  function itemCost(state, item) {
+    return Math.round(item.baseCost * Math.pow(item.growth, itemLevel(state, item)));
+  }
+
+  const Shop = {
+    state: null, player: null, open: false,
+
+    init(state, player) { this.state = state; this.player = player; },
+
+    openShop() {
+      if (this.open) return;
+      this.open = true; uiPaused = true;
+      dom.shop.classList.remove("hidden");
+      this.render();
+    },
+    closeShop() {
+      if (!this.open) return;
+      this.open = false; uiPaused = false;
+      dom.shop.classList.add("hidden");
+    },
+
+    buy(item) {
+      const lvl = itemLevel(this.state, item);
+      if (lvl >= item.max) return;
+      if (item.unavailable && item.unavailable(this.player)) return;
+      const cost = itemCost(this.state, item);
+      if (this.state.coins < cost) return;
+      this.state.coins -= cost;
+      this.state.upgrades[item.id] = lvl + 1;
+      item.apply(this.player);
+      updateCoins(this.state);
+      toast(`${item.icon} ${item.name} purchased!`);
+      this.render();
+    },
+
+    render() {
+      dom.shopCoins.textContent = this.state.coins;
+      dom.shopItems.innerHTML = "";
+      for (const item of SHOP_ITEMS) {
+        const lvl = itemLevel(this.state, item);
+        const maxed = lvl >= item.max;
+        const cost = itemCost(this.state, item);
+        const blocked = item.unavailable && item.unavailable(this.player);
+        const tooPoor = this.state.coins < cost;
+
+        const row = document.createElement("div");
+        row.className = "shop-item";
+
+        const levelLabel = item.repeatable
+          ? ""
+          : (item.max > 1 ? ` <span class="lvl">Lv ${lvl}/${item.max}</span>` : "");
+
+        let btnLabel, btnClass = "buy-btn", disabled = false;
+        if (maxed) { btnLabel = "Owned"; btnClass += " owned"; disabled = true; }
+        else if (blocked) { btnLabel = "Full"; disabled = true; }
+        else { btnLabel = `🪙 ${cost}`; disabled = tooPoor; }
+
+        row.innerHTML =
+          `<div class="icon">${item.icon}</div>` +
+          `<div class="info"><div class="name">${item.name}${levelLabel}</div>` +
+          `<div class="desc">${item.desc}</div></div>`;
+        const btn = document.createElement("button");
+        btn.className = btnClass; btn.textContent = btnLabel; btn.disabled = disabled;
+        if (!disabled) btn.addEventListener("click", () => this.buy(item));
+        row.appendChild(btn);
+        dom.shopItems.appendChild(row);
+      }
+    },
+  };
 
   // =========================================================================
   // Wave system — escalating waves of living sweets + artifacts.
@@ -836,8 +1131,9 @@
       this.player = player; this.state = state;
       this.wave = 0;
       this.betweenWaves = true;            // resting before the next wave
+      this.minimized = false;              // results window collapsed to corner?
       this.timer = CONFIG.firstWaveDelay;  // seconds until the next wave auto-starts
-      this._enterRest("Get ready!", "Start Wave 1");
+      this._enterRest("Get ready!", false);
     }
 
     monstersForWave(w) {
@@ -851,30 +1147,66 @@
       const wantNext = Input.consumeNextWave();
       if (this.betweenWaves) {
         this.timer = Math.max(0, this.timer - dt);
-        dom.nextWave.textContent = Math.ceil(this.timer) + "s";
+        const label = Math.ceil(this.timer) + "s";
+        dom.nextWave.textContent = label;
+        dom.miniCountdown.textContent = label;
         if (wantNext || this.timer <= 0) this.spawnWave();
       } else if (this.state.monsters.length === 0) {
-        // Wave cleared — start the rest period and offer the Next Wave button.
+        // Wave cleared — start the rest period, show the results window and the
+        // merchant, and offer the Next Wave button (also collapsible to a widget).
         this.timer = CONFIG.waveInterval;
         this.betweenWaves = true;
-        this._enterRest(`Wave ${this.wave} cleared!`, `Start Wave ${this.wave + 1}`);
+        if (this.state.merchant) this.state.merchant.show();
+        this._enterRest(`Wave ${this.wave} cleared!`, true);
         toast("Wave cleared! 🍬");
       }
     }
 
-    _enterRest(title, btnLabel) {
-      this._restBtnLabel = btnLabel;
+    // Show the between-waves window. `showResults` adds the per-wave stat
+    // breakdown + merchant hint (skipped for the initial "Get ready" screen).
+    _enterRest(title, showResults) {
+      this.minimized = false;
       dom.wavePanelTitle.textContent = title;
-      dom.nextWaveBtn.textContent = btnLabel;
+      dom.nextWaveBtn.textContent = `Start Wave ${this.wave + 1}`;
+      dom.miniWaveNum.textContent = this.wave + 1;
+
+      if (showResults) {
+        const s = this.state.waveStats;
+        dom.resKills.textContent = s.kills;
+        dom.resArtifacts.textContent = s.artifacts;
+        dom.resCoins.textContent = s.coins;
+        dom.waveResults.classList.remove("hidden");
+        dom.waveShopHint.classList.remove("hidden");
+      } else {
+        dom.waveResults.classList.add("hidden");
+        dom.waveShopHint.classList.add("hidden");
+      }
+
       dom.wavePanel.classList.remove("hidden");
+      dom.waveMini.classList.add("hidden");
+    }
+
+    // Collapse the results window into the small, non-blocking corner widget.
+    minimize() {
+      if (!this.betweenWaves || this.minimized) return;
+      this.minimized = true;
+      dom.wavePanel.classList.add("hidden");
+      dom.waveMini.classList.remove("hidden");
     }
 
     spawnWave() {
       this.wave++;
       this.betweenWaves = false;
+      this.minimized = false;
       this.state.wave = this.wave;
       dom.wave.textContent = this.wave;
       dom.wavePanel.classList.add("hidden");
+      dom.waveMini.classList.add("hidden");
+      if (this.state.merchant) this.state.merchant.hide();
+      Shop.closeShop();
+
+      // Reset the per-wave stat counters for the wave about to begin.
+      this.state.waveStats = { kills: 0, artifacts: 0, coins: 0 };
 
       const monsterCount = this.monstersForWave(this.wave);
       const artifactCount = this.artifactsForWave(this.wave);
@@ -915,21 +1247,35 @@
     const interaction = new InteractionSystem();
 
     const state = {
-      score: 0, wave: 0, waveTotal: 0, over: false,
-      artifacts: [], monsters: [], bolts: [],
+      scene, shadow: world.shadow,
+      score: 0, coins: 0, wave: 0, waveTotal: 0, over: false,
+      artifacts: [], monsters: [], bolts: [], coinsList: [],
+      upgrades: Object.create(null),
+      waveStats: { kills: 0, artifacts: 0, coins: 0 },
+      merchant: null,
     };
     updateHealthBar(player.health);
     updateMonsterCounter(state);
+    updateCoins(state);
+
+    // The merchant who runs the between-waves shop, waiting at the plaza.
+    const merchant = new Merchant(scene, world.shadow, interaction, () => Shop.openShop());
+    state.merchant = merchant;
+    Shop.init(state, player);
 
     // A few artifacts to find before the first wave even arrives.
     for (let i = 0; i < 3; i++) spawnArtifact(scene, world, interaction, player, state);
 
     const waves = new WaveSystem(scene, world, interaction, player, state);
+    waveSystem = waves;
 
     scene.onBeforeRenderObservable.add(() => {
       const dt = Math.min(engine.getDeltaTime() / 1000, 0.05);
       if (!gameStarted) return;                       // hold sim until "Start"
       if (state.over) { cosmetics(state, dt); return; }
+
+      // While the shop menu is open, freeze gameplay but keep the scene live.
+      if (uiPaused) { merchant.update(dt); cosmetics(state, dt); return; }
 
       player.update(dt, camera);
       // Rigid follow: mutate the camera's pivot vector IN PLACE so the pivot
@@ -940,15 +1286,25 @@
       camera.target.copyFromFloats(player.position.x, player.position.y + 1.4, player.position.z);
 
       waves.update(dt);
+      merchant.update(dt);
 
-      // Casting.
+      // Casting — the weapon may fire several bolts per cast (multishot).
       if (Input.wantsCast()) {
-        const shot = player.tryCast();
-        if (shot) state.bolts.push(new Projectile(scene, world.shadow, shot.origin, shot.dir));
+        const shots = player.tryCast();
+        if (shots) {
+          const w = player.weapon;
+          for (const s of shots) {
+            state.bolts.push(new Projectile(scene, world.shadow, s.origin, s.dir, {
+              speed: w.boltSpeed, radius: w.boltRadius, damage: w.damage,
+              color: w.color, haloColor: w.haloColor,
+            }));
+          }
+        }
       }
 
       updateBolts(state, dt);
       updateMonsters(state, player, dt);
+      updateCoinDrops(state, player, dt);
       updateMonsterCounter(state);
 
       interaction.update(player.position);
@@ -971,9 +1327,14 @@
           if (!m.alive || m.dying > 0) continue;
           const dx = b.mesh.position.x - m.position.x;
           const dz = b.mesh.position.z - m.position.z;
-          if (Math.hypot(dx, dz) <= CONFIG.boltRadius + m.radius) {
-            const killed = m.hit(1);
-            if (killed) { addScore(state, CONFIG.scorePerMonster); toast(`Splat! +${CONFIG.scorePerMonster}`); }
+          if (Math.hypot(dx, dz) <= b.radius + m.radius) {
+            const killed = m.hit(b.damage);
+            if (killed) {
+              addScore(state, CONFIG.scorePerMonster);
+              state.waveStats.kills++;
+              maybeDropCoin(state, m.position);
+              toast(`Splat! +${CONFIG.scorePerMonster}`);
+            }
             b.dead = true;
             break;
           }
@@ -998,6 +1359,31 @@
     }
   }
 
+  // Roll for a coin drop when a sweet is defeated, and spawn it at the kill spot.
+  function maybeDropCoin(state, pos) {
+    if (Math.random() > CONFIG.coinDropChance) return;
+    const value = CONFIG.coinValueMin +
+      ((Math.random() * (CONFIG.coinValueMax - CONFIG.coinValueMin + 1)) | 0);
+    state.coinsList.push(new Coin(state.scene, state.shadow, pos, value));
+  }
+
+  // Spin, magnet and collect coins; drop ones that have sat around too long.
+  function updateCoinDrops(state, player, dt) {
+    for (let i = state.coinsList.length - 1; i >= 0; i--) {
+      const c = state.coinsList[i];
+      const got = c.update(dt, player.position);
+      if (got) {
+        state.coins += c.value;
+        state.waveStats.coins += c.value;
+        updateCoins(state);
+        toast(`🪙 +${c.value}`);
+        c.dispose(); state.coinsList.splice(i, 1);
+      } else if (c.life <= 0) {
+        c.dispose(); state.coinsList.splice(i, 1);
+      }
+    }
+  }
+
   function cosmetics(state, dt) {
     const t = performance.now() / 1000;
     for (const a of state.artifacts) {
@@ -1015,6 +1401,11 @@
   function addScore(state, points) {
     state.score += points;
     dom.score.textContent = state.score;
+  }
+
+  function updateCoins(state) {
+    if (dom.coins) dom.coins.textContent = state.coins;
+    if (dom.shopCoins) dom.shopCoins.textContent = state.coins;
   }
 
   // Show how many sweets are still alive in the current wave (X left / total).
@@ -1116,6 +1507,13 @@
       dom.startBtn.addEventListener("click", startGame);
       dom.replayBtn.addEventListener("click", () => window.location.reload());
       dom.nextWaveBtn.addEventListener("click", () => { Input.nextWaveQueued = true; });
+      dom.miniNextBtn.addEventListener("click", () => { Input.nextWaveQueued = true; });
+      // The × collapses the results window into the corner widget (frees the view).
+      dom.wavePanelClose.addEventListener("click", () => { if (waveSystem) waveSystem.minimize(); });
+      // Shop open/close.
+      dom.shopClose.addEventListener("click", () => Shop.closeShop());
+      dom.shopDone.addEventListener("click", () => Shop.closeShop());
+      window.addEventListener("keydown", (e) => { if (e.code === "Escape") Shop.closeShop(); });
       Fullscreen.init();
     } catch (e) { showFatal(e.message); throw e; }
   }
@@ -1153,10 +1551,14 @@
    * ROADMAP SEAMS (inert, documented integration points):
    *   PuzzleSystem    - levers/plates are Interactables flipping state flags
    *                     that gate a door mesh; reuses InteractionSystem.
-   *   DialogueSystem  - NPCs register as Interactables ("Talk"); onInteract
-   *                     opens a BABYLON.GUI panel (babylon.gui is loaded).
-   *   Power-ups       - drop from sweets like artifacts; tweak Player.castCooldown
-   *                     / boltSpeed or restore health on pickup.
+   *   DialogueSystem  - the Merchant already registers as an Interactable and
+   *                     opens an HTML overlay; swap/extend it for a BABYLON.GUI
+   *                     dialogue panel (babylon.gui is loaded) for talking NPCs.
+   *
+   * SHIPPED THIS RELEASE: coins (currency) dropped by sweets, the plaza Merchant
+   * + Shop (buy/upgrade weapons), and the between-waves results window that
+   * collapses into a non-blocking corner widget. See Coin / Merchant / Shop /
+   * SHOP_ITEMS and WaveSystem above.
    * ===========================================================================
    */
 })();

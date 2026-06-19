@@ -5,7 +5,9 @@ on:
   push:
     branches:
       - claude/good-game-3d-engine-m13prm
+      - claude/wave-completion-features-5rp8w2
       - main
+      - master
   workflow_dispatch:
 
 permissions:

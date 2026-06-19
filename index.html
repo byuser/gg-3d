@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="description" content="Good Game 3D — a third-person browser adventure. Wield a magic wand, blast waves of living sweets, and collect artifacts for points." />
   <meta name="theme-color" content="#0b0f1a" />
-  <link rel="stylesheet" href="css/style.css?v=5" />
+  <link rel="stylesheet" href="css/style.css?v=6" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
@@ -35,6 +35,7 @@
   <div id="hud" class="hud hidden">
     <div class="hud-top">
       <div class="stat">⭐ <span id="score">0</span></div>
+      <div class="stat">🪙 <span id="coins">0</span></div>
       <div class="stat">Wave <span id="wave">0</span></div>
       <div class="stat">🍬 <span id="monsters">0 / 0</span></div>
       <div id="prompt" class="prompt hidden">Press <b>E</b></div>
@@ -45,11 +46,27 @@
     </div>
     <div id="waveBanner" class="wave-banner"></div>
 
-    <!-- Between-waves panel: appears once a wave is cleared -->
+    <!-- Between-waves results window: appears once a wave is cleared.
+         The × collapses it into the small corner widget below so the player
+         can roam the map (and visit the merchant) without the view blocked. -->
     <div id="wavePanel" class="wave-panel-box hidden">
+      <button id="wavePanelClose" class="wave-panel-close" title="Close" aria-label="Close results">×</button>
       <div id="wavePanelTitle" class="wave-panel-title">Get ready!</div>
+      <div id="waveResults" class="wave-results hidden">
+        <div class="wave-result"><span>🍬 Sweets defeated</span><b id="resKills">0</b></div>
+        <div class="wave-result"><span>💎 Artifacts</span><b id="resArtifacts">0</b></div>
+        <div class="wave-result"><span>🪙 Coins earned</span><b id="resCoins">0</b></div>
+      </div>
+      <div id="waveShopHint" class="wave-shop-hint hidden">🧙 The merchant is at the plaza — spend your coins!</div>
       <button id="nextWaveBtn" class="next-wave-btn">Start Wave 1</button>
       <div class="wave-panel-sub">auto-starts in <span id="nextWave">—</span></div>
+    </div>
+
+    <!-- Collapsed wave widget: small, non-blocking, lets you start the next
+         wave while freely exploring the map. -->
+    <div id="waveMini" class="wave-mini hidden">
+      <button id="miniNextBtn" class="mini-next-btn">Start Wave <span id="miniWaveNum">1</span> ▶</button>
+      <div class="mini-sub">auto in <span id="miniCountdown">—</span></div>
     </div>
     <button id="fsBtn" class="fs-btn" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
     <div id="toast" class="toast"></div>
@@ -72,8 +89,20 @@
     </div>
   </div>
 
+  <!-- Merchant shop: opened by walking up to the NPC at the plaza and pressing E. -->
+  <div id="shop" class="shop-overlay hidden">
+    <div class="shop-panel">
+      <button id="shopClose" class="shop-close" title="Close" aria-label="Close shop">×</button>
+      <h2>🧙 Travelling Merchant</h2>
+      <p class="shop-tagline">Buy a new weapon or upgrade your wand between waves.</p>
+      <div class="shop-coins">🪙 <span id="shopCoins">0</span> coins</div>
+      <div id="shopItems" class="shop-items"></div>
+      <button id="shopDone" class="start-btn shop-done">Done</button>
+    </div>
+  </div>
+
   <canvas id="renderCanvas"></canvas>
 
-  <script src="js/game.js?v=5"></script>
+  <script src="js/game.js?v=6"></script>
 </body>
 </html>

@@ -106,6 +106,7 @@ html, body {
   padding: 8px 16px; border-radius: 999px; font-size: 15px; font-weight: 600;
 }
 .stat #score { color: var(--accent); }
+.stat #coins { color: #ffd34e; }
 .stat #wave { color: var(--accent2); }
 .stat #nextWave { color: #ff9d5c; }
 
@@ -151,11 +152,12 @@ html, body {
 }
 @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 
-/* ---------- Between-waves panel + Next Wave button ---------- */
+/* ---------- Between-waves results window + Next Wave button ---------- */
 .wave-panel-box {
   position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%);
   display: flex; flex-direction: column; align-items: center; gap: 12px;
-  background: rgba(11, 15, 26, 0.72); border: 1px solid rgba(255, 255, 255, 0.12);
+  width: min(360px, 86vw);
+  background: rgba(11, 15, 26, 0.78); border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 18px; padding: 22px 28px; text-align: center;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); backdrop-filter: blur(6px);
   pointer-events: auto;
@@ -163,6 +165,33 @@ html, body {
 .wave-panel-title { font-size: clamp(20px, 4vw, 28px); font-weight: 800; color: var(--accent); }
 .wave-panel-sub { font-size: 13px; opacity: 0.75; }
 .wave-panel-sub #nextWave { color: #ff9d5c; font-weight: 700; }
+
+/* Close (×) that collapses the window into the corner widget. */
+.wave-panel-close {
+  position: absolute; top: 8px; right: 10px; width: 30px; height: 30px;
+  border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06); color: var(--ink);
+  font-size: 20px; line-height: 1; cursor: pointer; pointer-events: auto;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.wave-panel-close:hover { background: rgba(255, 90, 110, 0.5); }
+.wave-panel-close:active { transform: scale(0.9); }
+
+/* Per-wave results breakdown. */
+.wave-results { width: 100%; display: grid; gap: 6px; }
+.wave-result {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px; padding: 8px 12px; font-size: 14px;
+}
+.wave-result b { color: var(--accent); font-size: 16px; }
+.wave-shop-hint {
+  font-size: 13px; line-height: 1.4; color: #9fe0ff;
+  background: rgba(108, 198, 255, 0.1); border: 1px solid rgba(108, 198, 255, 0.22);
+  border-radius: 10px; padding: 8px 12px;
+}
+
 .next-wave-btn {
   appearance: none; border: 0; cursor: pointer;
   font-size: 18px; font-weight: 800; color: #15233b;
@@ -174,6 +203,87 @@ html, body {
 }
 .next-wave-btn:hover { filter: brightness(1.06); }
 .next-wave-btn:active { transform: scale(0.96); }
+
+/* ---------- Collapsed wave widget (top-right, non-blocking) ---------- */
+.wave-mini {
+  position: absolute; top: max(64px, calc(env(safe-area-inset-top) + 52px));
+  right: max(12px, env(safe-area-inset-right));
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px;
+  pointer-events: none; text-align: center;
+}
+.mini-next-btn {
+  appearance: none; border: 0; cursor: pointer; pointer-events: auto;
+  font-size: 14px; font-weight: 800; color: #15233b;
+  padding: 9px 16px; border-radius: 999px;
+  background: linear-gradient(135deg, #5be0a0, #6cc6ff);
+  box-shadow: 0 8px 20px rgba(91, 224, 160, 0.4);
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+.mini-next-btn:hover { filter: brightness(1.06); }
+.mini-next-btn:active { transform: scale(0.96); }
+.mini-sub {
+  font-size: 11px; opacity: 0.8; color: var(--ink);
+  background: rgba(11, 15, 26, 0.6); border-radius: 999px; padding: 2px 8px;
+}
+.mini-sub #miniCountdown { color: #ff9d5c; font-weight: 700; }
+
+/* ---------- Merchant shop overlay ---------- */
+.shop-overlay {
+  position: fixed; inset: 0; z-index: 28;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  background: radial-gradient(900px 600px at 50% -10%, rgba(160, 108, 255, 0.18), transparent 60%),
+    rgba(6, 9, 18, 0.7);
+  backdrop-filter: blur(4px);
+}
+.shop-panel {
+  position: relative; width: min(460px, 100%);
+  max-height: 88vh; overflow-y: auto;
+  background: rgba(18, 24, 43, 0.92); border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px; padding: 26px 24px 22px; text-align: center;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+.shop-panel h2 { margin: 0 0 4px; font-size: clamp(22px, 5vw, 30px); }
+.shop-tagline { margin: 0 0 10px; opacity: 0.8; font-size: 14px; }
+.shop-coins {
+  display: inline-block; margin: 0 0 16px; padding: 6px 16px; border-radius: 999px;
+  background: rgba(255, 211, 78, 0.12); border: 1px solid rgba(255, 211, 78, 0.3);
+  font-weight: 700; font-size: 16px;
+}
+.shop-coins #shopCoins { color: #ffd34e; }
+.shop-items { display: grid; gap: 10px; margin-bottom: 18px; }
+.shop-item {
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px; padding: 12px 14px;
+}
+.shop-item .icon { font-size: 26px; width: 34px; text-align: center; flex: 0 0 auto; }
+.shop-item .info { flex: 1 1 auto; min-width: 0; }
+.shop-item .name { font-weight: 700; font-size: 15px; }
+.shop-item .name .lvl { font-size: 12px; opacity: 0.7; font-weight: 600; }
+.shop-item .desc { font-size: 12px; opacity: 0.75; line-height: 1.35; }
+.buy-btn {
+  appearance: none; border: 0; cursor: pointer; flex: 0 0 auto;
+  font-size: 14px; font-weight: 800; color: #15233b;
+  padding: 9px 14px; border-radius: 999px; min-width: 74px;
+  background: linear-gradient(135deg, var(--accent), #ff9d5c);
+  box-shadow: 0 6px 16px rgba(255, 157, 92, 0.35);
+  transition: transform 0.1s ease, filter 0.12s ease;
+}
+.buy-btn:hover:not(:disabled) { filter: brightness(1.06); }
+.buy-btn:active:not(:disabled) { transform: scale(0.95); }
+.buy-btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+.buy-btn.owned { background: linear-gradient(135deg, #5be0a0, #6cc6ff); }
+.shop-close {
+  position: absolute; top: 12px; right: 14px; width: 34px; height: 34px;
+  border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06); color: var(--ink);
+  font-size: 22px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.shop-close:hover { background: rgba(255, 90, 110, 0.5); }
+.shop-close:active { transform: scale(0.9); }
+.shop-done { font-size: 16px; padding: 11px 26px; }
 
 .fs-btn {
   position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right));
