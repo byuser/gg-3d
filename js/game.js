@@ -34,6 +34,26 @@
   }
   window.addEventListener("error", (e) => showFatal(e.message || "unknown error"));
 
+  // =========================================================================
+  // Deterministic RNG (mulberry32)
+  // -------------------------------------------------------------------------
+  // The whole game draws its randomness from this single seeded stream instead
+  // of rng(). Seeding it makes the *procedural world* (river, roads,
+  // trees, rocks, …) fully reproducible: a saved game records its seed, and on
+  // load we re-seed and rebuild the exact same environment before restoring the
+  // live entities (monsters, coins, artifacts) on top. See serializeGame /
+  // applySave below.
+  // =========================================================================
+  let worldSeed = (Date.now() ^ (Date.now() << 11) ^ 0x9e3779b9) >>> 0;
+  let _rngState = worldSeed >>> 0;
+  function rng() {
+    _rngState |= 0; _rngState = (_rngState + 0x6D2B79F5) | 0;
+    let t = Math.imul(_rngState ^ (_rngState >>> 15), 1 | _rngState);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  function setSeed(s) { worldSeed = s >>> 0; _rngState = worldSeed; }
+
   const CONFIG = {
     moveSpeed: 6.5,          // metres / second
     turnLerp: 0.2,
@@ -140,6 +160,22 @@
     actionBtn: document.getElementById("actionBtn"),
     castBtn: document.getElementById("castBtn"),
     fsBtn: document.getElementById("fsBtn"),
+    // Start-screen "Load progress".
+    loadBtn: document.getElementById("loadBtn"),
+    loadFile: document.getElementById("loadFile"),
+    // In-game pause menu + its confirmation dialog.
+    pauseBtn: document.getElementById("pauseBtn"),
+    pauseMenu: document.getElementById("pauseMenu"),
+    resumeBtn: document.getElementById("resumeBtn"),
+    saveBtn: document.getElementById("saveBtn"),
+    restartBtn: document.getElementById("restartBtn"),
+    exitBtn: document.getElementById("exitBtn"),
+    pauseWave: document.getElementById("pauseWave"),
+    pauseScore: document.getElementById("pauseScore"),
+    confirmDialog: document.getElementById("confirmDialog"),
+    confirmText: document.getElementById("confirmText"),
+    confirmYes: document.getElementById("confirmYes"),
+    confirmNo: document.getElementById("confirmNo"),
   };
 
   const isTouch = window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
@@ -148,8 +184,12 @@
 
   let gameStarted = false;   // gameplay (waves, monsters) waits on the start screen
   let uiPaused = false;      // true while a blocking menu (the shop) is open
+  let paused = false;        // true while the in-game pause menu is open
   let waveSystem = null;     // the active WaveSystem (for the HUD buttons)
   let playerRef = null;      // the Player (so HUD helpers can read max health)
+  // Live handles to the running game, captured in createScene so the save/load
+  // and pause systems can read and rebuild the world.
+  let sceneRef = null, worldRef = null, interactionRef = null, stateRef = null, cameraRef = null;
 
   // Coin pickup/magnet ranges live here (not in the frozen CONFIG) so the shop's
   // "Lodestone" upgrade can widen them at runtime.
@@ -590,21 +630,28 @@
   ];
 
   class Monster {
-    constructor(scene, shadow, pos, wave) {
+    // `restore` (optional) rebuilds a saved sweet exactly: { kind, hp, speed }.
+    constructor(scene, shadow, pos, wave, restore) {
       this.scene = scene;
-      this.hp = 1 + Math.floor((wave - 1) / CONFIG.monsterHpPerWaves); // sturdier in later waves
-      this.speed = Math.min(
-        CONFIG.monsterMaxSpeed,
-        CONFIG.monsterBaseSpeed + Math.random() * 0.7 + (wave - 1) * CONFIG.monsterSpeedPerWave
-      );
+      if (restore) {
+        this.hp = restore.hp;
+        this.speed = restore.speed;
+        this.kind = restore.kind;
+      } else {
+        this.hp = 1 + Math.floor((wave - 1) / CONFIG.monsterHpPerWaves); // sturdier in later waves
+        this.speed = Math.min(
+          CONFIG.monsterMaxSpeed,
+          CONFIG.monsterBaseSpeed + rng() * 0.7 + (wave - 1) * CONFIG.monsterSpeedPerWave
+        );
+        this.kind = SWEETS[(rng() * SWEETS.length) | 0];
+      }
       this.alive = true;
       this.dying = 0;                               // >0 while playing the pop animation
       this.radius = 0.85;
       this.isBoss = false;
       this.contactDamage = CONFIG.contactDamage;    // damage dealt to the player on contact
-      this.bob = Math.random() * Math.PI * 2;
+      this.bob = rng() * Math.PI * 2;
       this.biteTimer = 0;                           // cooldown before this sweet bites again
-      this.kind = SWEETS[(Math.random() * SWEETS.length) | 0];
       this._build(scene, shadow, pos);
     }
 
@@ -615,7 +662,7 @@
       const body = new BABYLON.TransformNode("monsterBody", scene);
       body.parent = root; this.body = body;
 
-      const candy = PALETTE[(Math.random() * PALETTE.length) | 0];
+      const candy = PALETTE[(rng() * PALETTE.length) | 0];
       const main = emat(scene, "swt" + root.uniqueId, candy, 0.18);
       const cream = emat(scene, "cream" + root.uniqueId, "#fff3e0", 0.1);
       const dark = emat(scene, "swtd" + root.uniqueId, "#7a4030", 0.08);
@@ -694,7 +741,7 @@
         knot.material = emat(scene, "pretM" + root.uniqueId, "#a6692e", 0.08); add(knot); knot.position.y = 0.95;
         for (let s = 0; s < 5; s++) {
           const salt = add(sphere(scene, "salt", 0.1, cream));
-          salt.position.set((Math.random() - 0.5) * 1.1, 0.95 + (Math.random() - 0.5) * 1.1, 0.3 + Math.random() * 0.2);
+          salt.position.set((rng() - 0.5) * 1.1, 0.95 + (rng() - 0.5) * 1.1, 0.3 + rng() * 0.2);
         }
         topY = 1.55;
       }
@@ -769,6 +816,7 @@
   class Boss {
     constructor(scene, shadow, pos, wave) {
       this.scene = scene;
+      this.wave = wave;                                       // recorded for save/restore
       const cycle = Math.floor(wave / CONFIG.bossEveryWaves); // 1, 2, 3, …
       this.maxHp = CONFIG.bossBaseHp + (cycle - 1) * CONFIG.bossHpPerCycle;
       this.hp = this.maxHp;
@@ -883,7 +931,7 @@
       this.value = value;
       this.life = CONFIG.coinLife;
       this.collected = false;
-      this.spin = Math.random() * Math.PI * 2;
+      this.spin = rng() * Math.PI * 2;
       const root = new BABYLON.TransformNode("coin", scene);
       root.position.copyFrom(pos);
       root.position.y = 0.6;
@@ -1037,11 +1085,11 @@
     // ---- A winding RIVER with wooden bridges. -------------------------------
     // The river is a straight band at a fixed orientation. Crossing it is the
     // local +X of the deck (crossN); flowing along it is local +Z (alongT).
-    const riverAngle = 0.5 + Math.random() * 0.7;
+    const riverAngle = 0.5 + rng() * 0.7;
     const ca = Math.cos(riverAngle), sa = Math.sin(riverAngle);
     const crossN = { x: ca, z: -sa };            // perpendicular to the flow
     const alongT = { x: sa, z: ca };             // direction of flow
-    const riverPerp = 30 + Math.random() * 6;    // offset of the river from centre
+    const riverPerp = 30 + rng() * 6;    // offset of the river from centre
     const riverHalf = 6.5;                        // half-width of the water
     const bridgeHalf = 5;                         // half-length of each bridge gap
     const bridges = [0, 52, -52];                 // crossing points along the flow
@@ -1071,12 +1119,12 @@
     // Lily pads floating on the water (purely decorative).
     const padMat = mat(scene, "pad", "#2f8f4a");
     for (let i = 0; i < 14; i++) {
-      const t = (Math.random() - 0.5) * riverLen * 0.8;
+      const t = (rng() - 0.5) * riverLen * 0.8;
       if (Math.abs((((t) % 52) + 52) % 52) < bridgeHalf + 1) continue; // not on a bridge
-      const off = (Math.random() - 0.5) * (riverHalf * 1.4);
+      const off = (rng() - 0.5) * (riverHalf * 1.4);
       const x = riverCenter.x + alongT.x * t + crossN.x * off;
       const z = riverCenter.z + alongT.z * t + crossN.z * off;
-      const pad = disc(scene, "pad", 0.5 + Math.random() * 0.4, padMat);
+      const pad = disc(scene, "pad", 0.5 + rng() * 0.4, padMat);
       pad.rotation.x = Math.PI / 2; pad.position.set(x, 0.08, z); pad.isPickable = false;
     }
 
@@ -1100,7 +1148,7 @@
     // ---- Roads: a randomly oriented crossroads of grey strips. ----
     const roadMat = mat(scene, "road", "#6b6f78");
     const roadEdge = mat(scene, "roadEdge", "#d9c47a");
-    const baseAngle = Math.random() * Math.PI;
+    const baseAngle = rng() * Math.PI;
     const roadAngles = [baseAngle, baseAngle + Math.PI / 2];
     for (const ang of roadAngles) {
       const road = BABYLON.MeshBuilder.CreateGround("road", { width: 7, height: GROUND }, scene);
@@ -1129,8 +1177,8 @@
     // Find a valid scatter spot: away from spawn/roads/water, inside the fence.
     const place = (minR, maxR) => {
       for (let tries = 0; tries < 16; tries++) {
-        const ang = Math.random() * Math.PI * 2;
-        const r = minR + Math.random() * (maxR - minR);
+        const ang = rng() * Math.PI * 2;
+        const r = minR + rng() * (maxR - minR);
         const x = Math.cos(ang) * r, z = Math.sin(ang) * r;
         if (r > 6 && !onRoad(x, z) &&
             Math.abs(signedPerp(x, z) - riverPerp) > riverHalf + 1.5) return { x, z };
@@ -1161,17 +1209,17 @@
     // ---- Trees. ----
     const trunkMat = mat(scene, "trunk", "#7a5230");
     const leafMats = ["#3f9d4a", "#46ad53", "#379142"].map((c, i) => mat(scene, "leaf" + i, c));
-    const trees = 60 + ((Math.random() * 18) | 0);
+    const trees = 60 + ((rng() * 18) | 0);
     for (let i = 0; i < trees; i++) {
       const p = place(8, FAR); if (!p) continue;
-      const h = 1.3 + Math.random() * 1.0;
+      const h = 1.3 + rng() * 1.0;
       const trunk = cyl(scene, "trunk", 0.5, 0.6, h * 1.5, trunkMat);
       trunk.position.set(p.x, h * 0.75, p.z); shadow.addShadowCaster(trunk);
-      const lm = leafMats[(Math.random() * leafMats.length) | 0];
-      const n = 2 + ((Math.random() * 2) | 0);
+      const lm = leafMats[(rng() * leafMats.length) | 0];
+      const n = 2 + ((rng() * 2) | 0);
       for (let k = 0; k < n; k++) {
-        const leaf = sphere(scene, "leaf", 1.9 + Math.random(), lm);
-        leaf.position.set(p.x + (Math.random() - 0.5), h * 1.5 + 0.6 + k * 0.6, p.z + (Math.random() - 0.5));
+        const leaf = sphere(scene, "leaf", 1.9 + rng(), lm);
+        leaf.position.set(p.x + (rng() - 0.5), h * 1.5 + 0.6 + k * 0.6, p.z + (rng() - 0.5));
         leaf.scaling.y = 1.1; shadow.addShadowCaster(leaf);
       }
       addObstacle(p.x, p.z, 0.9);
@@ -1181,21 +1229,21 @@
     const rockMat = mat(scene, "rock", "#9aa0a6");
     for (let i = 0; i < 40; i++) {
       const p = place(7, FAR); if (!p) continue;
-      const rad = 0.5 + Math.random() * 0.9;
+      const rad = 0.5 + rng() * 0.9;
       const rock = BABYLON.MeshBuilder.CreateIcoSphere("rock", { radius: rad, subdivisions: 1 }, scene);
       rock.material = rockMat; rock.position.set(p.x, rad * 0.6, p.z);
-      rock.rotation.set(Math.random(), Math.random(), Math.random()); shadow.addShadowCaster(rock);
+      rock.rotation.set(rng(), rng(), rng()); shadow.addShadowCaster(rock);
       addObstacle(p.x, p.z, rad * 0.85);
     }
 
     // ---- Bushes (clusters of leafy spheres). ----
     for (let i = 0; i < 34; i++) {
       const p = place(7, FAR); if (!p) continue;
-      const lm = leafMats[(Math.random() * leafMats.length) | 0];
-      const lobes = 3 + ((Math.random() * 2) | 0);
+      const lm = leafMats[(rng() * leafMats.length) | 0];
+      const lobes = 3 + ((rng() * 2) | 0);
       for (let k = 0; k < lobes; k++) {
-        const b = sphere(scene, "bush", 0.7 + Math.random() * 0.5, lm);
-        b.position.set(p.x + (Math.random() - 0.5) * 1.1, 0.45, p.z + (Math.random() - 0.5) * 1.1);
+        const b = sphere(scene, "bush", 0.7 + rng() * 0.5, lm);
+        b.position.set(p.x + (rng() - 0.5) * 1.1, 0.45, p.z + (rng() - 0.5) * 1.1);
         b.scaling.y = 0.85; shadow.addShadowCaster(b);
       }
       addObstacle(p.x, p.z, 0.85);
@@ -1207,15 +1255,15 @@
     const spotMat = mat(scene, "spot", "#fff2e0");
     for (let i = 0; i < 22; i++) {
       const p = place(7, FAR); if (!p) continue;
-      const h = 0.8 + Math.random() * 0.7;
+      const h = 0.8 + rng() * 0.7;
       const stalk = cyl(scene, "stalk", 0.4, 0.55, h, stalkMat);
       stalk.position.set(p.x, h / 2, p.z); shadow.addShadowCaster(stalk);
-      const cap = sphere(scene, "cap", 1.3 + Math.random() * 0.5, capMat);
+      const cap = sphere(scene, "cap", 1.3 + rng() * 0.5, capMat);
       cap.position.set(p.x, h, p.z); cap.scaling.y = 0.6; shadow.addShadowCaster(cap);
       for (let s = 0; s < 4; s++) {
-        const spot = disc(scene, "spot", 0.12 + Math.random() * 0.08, spotMat);
+        const spot = disc(scene, "spot", 0.12 + rng() * 0.08, spotMat);
         spot.rotation.x = Math.PI / 2;
-        spot.position.set(p.x + (Math.random() - 0.5) * 1.0, h + 0.36, p.z + (Math.random() - 0.5) * 1.0);
+        spot.position.set(p.x + (rng() - 0.5) * 1.0, h + 0.36, p.z + (rng() - 0.5) * 1.0);
       }
       addObstacle(p.x, p.z, 0.5);
     }
@@ -1224,12 +1272,12 @@
     const reedMat = mat(scene, "reed", "#3c8a3c");
     const catMat = mat(scene, "cat", "#6b4a2a");
     for (let i = 0; i < 40; i++) {
-      const t = (Math.random() - 0.5) * riverLen * 0.85;
-      const off = (riverHalf + 0.6 + Math.random() * 1.2) * (Math.random() < 0.5 ? 1 : -1);
+      const t = (rng() - 0.5) * riverLen * 0.85;
+      const off = (riverHalf + 0.6 + rng() * 1.2) * (rng() < 0.5 ? 1 : -1);
       const x = riverCenter.x + alongT.x * t + crossN.x * off;
       const z = riverCenter.z + alongT.z * t + crossN.z * off;
       if (Math.hypot(x, z) > FAR) continue;
-      const stem = cyl(scene, "reed", 0.05, 0.05, 1.1 + Math.random() * 0.6, reedMat);
+      const stem = cyl(scene, "reed", 0.05, 0.05, 1.1 + rng() * 0.6, reedMat);
       stem.position.set(x, 0.6, z);
       const head = capsule(scene, "cattail", 0.4, 0.09, catMat);
       head.position.set(x, 1.25, z);
@@ -1239,10 +1287,10 @@
     const tuftMat = mat(scene, "tuft", "#69bd55");
     for (let i = 0; i < 140; i++) {
       const p = place(6, FAR); if (!p) continue;
-      if (Math.random() < 0.5) {
+      if (rng() < 0.5) {
         const stem = cyl(scene, "stem", 0.04, 0.04, 0.4, mat(scene, "stem", "#3c8a3c"));
         stem.position.set(p.x, 0.2, p.z);
-        const head = sphere(scene, "fhead", 0.18, mat(scene, "fhead", PALETTE[(Math.random() * PALETTE.length) | 0]));
+        const head = sphere(scene, "fhead", 0.18, mat(scene, "fhead", PALETTE[(rng() * PALETTE.length) | 0]));
         head.position.set(p.x, 0.42, p.z);
       } else {
         const tuft = cone(scene, "tuft", 0.35, 0, 0.5, tuftMat);
@@ -1316,25 +1364,33 @@
   }
 
   // Spawn one artifact somewhere valid and wire it into the interaction/score systems.
-  function spawnArtifact(scene, world, interaction, player, state, near) {
+  // `fixed` (optional) places a saved artifact exactly: { pos:[x,z], color }.
+  function spawnArtifact(scene, world, interaction, player, state, near, fixed) {
     let pos = null;
-    for (let tries = 0; tries < 24 && !pos; tries++) {
-      let x, z;
-      if (near) { // cluster near a wave's monsters
-        const ang = Math.random() * Math.PI * 2, r = 2 + Math.random() * 8;
-        x = near.x + Math.cos(ang) * r; z = near.z + Math.sin(ang) * r;
-      } else {
-        const ang = Math.random() * Math.PI * 2, r = 9 + Math.random() * (CONFIG.worldRadius - 16);
-        x = Math.cos(ang) * r; z = Math.sin(ang) * r;
+    let color;
+    if (fixed) {
+      pos = new BABYLON.Vector3(fixed.pos[0], 0, fixed.pos[1]);
+      color = fixed.color;
+    } else {
+      for (let tries = 0; tries < 24 && !pos; tries++) {
+        let x, z;
+        if (near) { // cluster near a wave's monsters
+          const ang = rng() * Math.PI * 2, r = 2 + rng() * 8;
+          x = near.x + Math.cos(ang) * r; z = near.z + Math.sin(ang) * r;
+        } else {
+          const ang = rng() * Math.PI * 2, r = 9 + rng() * (CONFIG.worldRadius - 16);
+          x = Math.cos(ang) * r; z = Math.sin(ang) * r;
+        }
+        if (Math.hypot(x, z) < CONFIG.worldRadius - 2 && !world.onRoad(x, z) && !world.inRiver(x, z)) {
+          pos = new BABYLON.Vector3(x, 0, z);
+        }
       }
-      if (Math.hypot(x, z) < CONFIG.worldRadius - 2 && !world.onRoad(x, z) && !world.inRiver(x, z)) {
-        pos = new BABYLON.Vector3(x, 0, z);
-      }
+      if (!pos) pos = new BABYLON.Vector3((rng() - 0.5) * 30, 0, (rng() - 0.5) * 30);
+      color = PALETTE[(rng() * PALETTE.length) | 0];
     }
-    if (!pos) pos = new BABYLON.Vector3((Math.random() - 0.5) * 30, 0, (Math.random() - 0.5) * 30);
 
-    const color = PALETTE[(Math.random() * PALETTE.length) | 0];
     const artifact = buildArtifact(scene, world.shadow, pos, color);
+    artifact._color = color;
     const it = new Interactable(artifact.root, {
       label: "Collect artifact",
       onInteract: (self) => {
@@ -1611,15 +1667,15 @@
       // Monsters spawn around the ring, away from the player so they march in.
       const ringMin = Math.min(34, CONFIG.worldRadius - 18);
       for (let i = 0; i < monsterCount; i++) {
-        const ang = Math.random() * Math.PI * 2;
-        const r = ringMin + Math.random() * 14;
+        const ang = rng() * Math.PI * 2;
+        const r = ringMin + rng() * 14;
         const pos = new BABYLON.Vector3(Math.cos(ang) * r, 0, Math.sin(ang) * r);
         this.state.monsters.push(new Monster(this.scene, this.world.shadow, pos, this.wave));
       }
 
       // Every few waves, a colossal Sweet King storms in with a health bar.
       if (isBossWave) {
-        const ang = Math.random() * Math.PI * 2;
+        const ang = rng() * Math.PI * 2;
         const r = ringMin + 8;
         const pos = new BABYLON.Vector3(Math.cos(ang) * r, 0, Math.sin(ang) * r);
         const boss = new Boss(this.scene, this.world.shadow, pos, this.wave);
@@ -1635,6 +1691,26 @@
 
       updateMonsterCounter(this.state);
       bannerWave(this.wave, monsterCount, isBossWave ? this.state.boss.name : null);
+    }
+
+    // Restore the wave clock + UI from a saved game (see applySave). The live
+    // monsters/artifacts themselves are recreated by applySave; here we only
+    // resync the counter, timer and the between-waves panels.
+    restore(data) {
+      this.wave = data.number;
+      this.betweenWaves = data.betweenWaves;
+      this.timer = data.timer;
+      this.state.wave = this.wave;
+      this.state.waveTotal = data.waveTotal;
+      dom.wave.textContent = this.wave;
+      if (this.betweenWaves) {
+        const title = this.wave > 0 ? `Wave ${this.wave} cleared!` : "Get ready!";
+        this._enterRest(title, this.wave > 0);
+        if (data.minimized) this.minimize();
+      } else {
+        dom.wavePanel.classList.add("hidden");
+        dom.waveMini.classList.add("hidden");
+      }
     }
   }
 
@@ -1680,9 +1756,14 @@
     const waves = new WaveSystem(scene, world, interaction, player, state);
     waveSystem = waves;
 
+    // Publish live handles for the save/load + pause systems.
+    sceneRef = scene; worldRef = world; interactionRef = interaction;
+    stateRef = state; cameraRef = camera;
+
     scene.onBeforeRenderObservable.add(() => {
       const dt = Math.min(engine.getDeltaTime() / 1000, 0.05);
       if (!gameStarted) return;                       // hold sim until "Start"
+      if (paused) return;                             // pause menu freezes the sim
       if (state.over) { cosmetics(state, dt); return; }
 
       // While the shop menu is open, freeze gameplay but keep the scene live.
@@ -1782,9 +1863,9 @@
       // A boss always pays out a generous purse of coins.
       let left = CONFIG.bossCoinDrop;
       while (left > 0) {
-        const v = Math.min(left, 3 + ((Math.random() * 3) | 0));
+        const v = Math.min(left, 3 + ((rng() * 3) | 0));
         left -= v;
-        const off = () => (Math.random() - 0.5) * 3;
+        const off = () => (rng() - 0.5) * 3;
         state.coinsList.push(new Coin(state.scene, state.shadow,
           new BABYLON.Vector3(m.position.x + off(), 0, m.position.z + off()), v));
       }
@@ -1801,9 +1882,9 @@
 
   // Roll for a coin drop when a sweet is defeated, and spawn it at the kill spot.
   function maybeDropCoin(state, pos) {
-    if (Math.random() > CONFIG.coinDropChance) return;
+    if (rng() > CONFIG.coinDropChance) return;
     const value = CONFIG.coinValueMin +
-      ((Math.random() * (CONFIG.coinValueMax - CONFIG.coinValueMin + 1)) | 0);
+      ((rng() * (CONFIG.coinValueMax - CONFIG.coinValueMin + 1)) | 0);
     state.coinsList.push(new Coin(state.scene, state.shadow, pos, value));
   }
 
@@ -1908,6 +1989,278 @@
     setTimeout(() => dom.over.classList.remove("hidden"), 600);
   }
 
+  // =========================================================================
+  // Save / Load — serialize the whole run to a JSON file the player downloads,
+  // and restore it from a file on any device.
+  //
+  // The procedural environment is captured by its RNG seed (re-seeded + rebuilt
+  // on load), while every live entity (player stats + perks, money, score,
+  // monsters, the boss, artifacts and dropped coins, plus the wave clock) is
+  // serialized explicitly so the run resumes exactly where it left off.
+  // =========================================================================
+  const SAVE_VERSION = 1;
+  const PENDING_LOAD_KEY = "gg3d_pending_load"; // sessionStorage hand-off across reload
+  const AUTOSTART_KEY = "gg3d_autostart";       // restart -> skip the start screen
+
+  // sessionStorage isn't available in the headless test harness (or some privacy
+  // modes); fail soft everywhere it's touched.
+  function sessionGet(k) {
+    try { return typeof sessionStorage !== "undefined" ? sessionStorage.getItem(k) : null; }
+    catch (e) { return null; }
+  }
+  function sessionSet(k, v) {
+    try { if (typeof sessionStorage !== "undefined") sessionStorage.setItem(k, v); } catch (e) {}
+  }
+  function sessionDel(k) {
+    try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(k); } catch (e) {}
+  }
+
+  function serializeGame() {
+    const state = stateRef, player = playerRef, waves = waveSystem;
+    if (!state || !player || !waves) return null;
+    const round = (n) => Math.round(n * 1000) / 1000;
+    const xz = (p) => [round(p.x), round(p.z)];
+
+    return {
+      v: SAVE_VERSION,
+      savedAt: new Date().toISOString(),
+      seed: worldSeed,
+      score: state.score,
+      money: state.coins,
+      coinMagnetRange,
+      coinPickupRange,
+      upgrades: Object.assign({}, state.upgrades),
+      waveStats: Object.assign({}, state.waveStats),
+      wave: {
+        number: waves.wave,
+        betweenWaves: waves.betweenWaves,
+        minimized: waves.minimized,
+        timer: round(waves.timer),
+        waveTotal: state.waveTotal,
+      },
+      player: {
+        health: round(player.health),
+        maxHealth: player.maxHealth,
+        speed: round(player.speed),
+        damageReduction: round(player.damageReduction),
+        lifesteal: player.lifesteal,
+        facing: round(player.facing),
+        pos: xz(player.position),
+        weapon: Object.assign({}, player.weapon),
+      },
+      monsters: state.monsters
+        .filter((m) => m.alive && m.dying <= 0)
+        .map((m) => m.isBoss
+          ? { boss: true, wave: m.wave, hp: round(m.hp), pos: xz(m.position) }
+          : { kind: m.kind, hp: m.hp, speed: round(m.speed), pos: xz(m.position) }),
+      artifacts: state.artifacts
+        .filter((a) => a._it && a._it.enabled)
+        .map((a) => ({ pos: xz(a.root.position), color: a._color })),
+      coinDrops: state.coinsList
+        .filter((c) => !c.collected && c.life > 0)
+        .map((c) => ({ pos: xz(c.root.position), value: c.value, life: round(c.life) })),
+    };
+  }
+
+  // Basic structural validation so a bad/old/foreign file fails cleanly.
+  function validateSave(d) {
+    return !!(d && d.v === SAVE_VERSION && typeof d.seed === "number" &&
+      d.player && Array.isArray(d.player.pos) && d.wave && Array.isArray(d.monsters));
+  }
+
+  // Tear down every live entity built by createScene so a save can be laid in.
+  function clearWorldEntities(state, interaction) {
+    for (const a of state.artifacts) { if (a._it) interaction.remove(a._it); a.root.dispose(); }
+    state.artifacts.length = 0;
+    for (const m of state.monsters) m.root.dispose();
+    state.monsters.length = 0;
+    for (const b of state.bolts) b.dispose();
+    state.bolts.length = 0;
+    for (const c of state.coinsList) c.dispose();
+    state.coinsList.length = 0;
+    state.boss = null;
+    hideBossBar();
+  }
+
+  // Rebuild a saved run on top of the freshly created (seeded) scene.
+  function applySave(d) {
+    const state = stateRef, player = playerRef, world = worldRef;
+    const interaction = interactionRef, waves = waveSystem;
+    if (!state || !player || !waves) throw new Error("game not ready");
+
+    clearWorldEntities(state, interaction);
+
+    // Score / money / perk economy.
+    state.score = d.score | 0;
+    state.coins = d.money | 0;
+    state.upgrades = Object.assign(Object.create(null), d.upgrades || {});
+    state.waveStats = Object.assign({ kills: 0, artifacts: 0, coins: 0 }, d.waveStats || {});
+    coinMagnetRange = (typeof d.coinMagnetRange === "number") ? d.coinMagnetRange : CONFIG.coinMagnetRange;
+    coinPickupRange = (typeof d.coinPickupRange === "number") ? d.coinPickupRange : CONFIG.coinPickupRange;
+
+    // Player stats, perks (weapon) and pose.
+    const ps = d.player;
+    player.maxHealth = ps.maxHealth;
+    player.health = ps.health;
+    player.speed = ps.speed;
+    player.damageReduction = ps.damageReduction || 0;
+    player.lifesteal = ps.lifesteal || 0;
+    player.facing = ps.facing || 0;
+    Object.assign(player.weapon, ps.weapon || {});
+    player.root.position.set(ps.pos[0], 0, ps.pos[1]);
+
+    // Monsters + boss.
+    for (const md of d.monsters || []) {
+      if (md.boss) {
+        const boss = new Boss(sceneRef, world.shadow, new BABYLON.Vector3(md.pos[0], 0, md.pos[1]), md.wave);
+        boss.hp = md.hp;
+        state.boss = boss;
+        state.monsters.push(boss);
+        showBossBar(boss);
+      } else {
+        const m = new Monster(sceneRef, world.shadow,
+          new BABYLON.Vector3(md.pos[0], 0, md.pos[1]), 1,
+          { kind: md.kind, hp: md.hp, speed: md.speed });
+        state.monsters.push(m);
+      }
+    }
+
+    // Artifacts + dropped coins.
+    for (const ad of d.artifacts || []) {
+      spawnArtifact(sceneRef, world, interaction, player, state, null, ad);
+    }
+    for (const cd of d.coinDrops || []) {
+      const c = new Coin(sceneRef, world.shadow, new BABYLON.Vector3(cd.pos[0], 0, cd.pos[1]), cd.value);
+      c.life = cd.life;
+      state.coinsList.push(c);
+    }
+
+    // Wave clock + the merchant (present during a cleared-wave rest).
+    waves.restore(d.wave);
+    if (state.merchant) {
+      if (waves.betweenWaves && waves.wave > 0) state.merchant.show();
+      else state.merchant.hide();
+    }
+
+    // Refresh every HUD readout.
+    addScore(state, 0);
+    updateCoins(state);
+    updateHealthBar(player.health);
+    updateMonsterCounter(state);
+  }
+
+  // Serialize the current run and hand the player a .json download.
+  function downloadSave() {
+    const data = serializeGame();
+    if (!data) { toast("Nothing to save yet"); return false; }
+    try {
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+      a.href = url;
+      a.download = `good-game-3d-wave${data.wave.number}-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      toast("Progress saved! 💾");
+      return true;
+    } catch (e) {
+      console.error(e);
+      toast("Save failed");
+      return false;
+    }
+  }
+
+  // Read a save file the player picked, validate it, stash it and reload so the
+  // boot path can re-seed the world and lay the run back in.
+  function loadFromFile(file, onError) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      let data;
+      try { data = JSON.parse(reader.result); } catch (e) { data = null; }
+      if (!validateSave(data)) {
+        if (onError) onError("That file isn't a valid Good Game 3D save.");
+        return;
+      }
+      sessionSet(PENDING_LOAD_KEY, reader.result);
+      window.location.reload();
+    };
+    reader.onerror = () => { if (onError) onError("Couldn't read that file."); };
+    reader.readAsText(file);
+  }
+
+  // =========================================================================
+  // Pause menu — opens mid-game (freezing the sim), with Resume / Save / Restart
+  // / Exit. Restart and Exit ask for confirmation to guard against misclicks.
+  // =========================================================================
+  const Pause = {
+    pendingAction: null, // "restart" | "exit" while the confirm dialog is up
+
+    canOpen() { return gameStarted && stateRef && !stateRef.over && !paused && !Shop.open; },
+
+    open() {
+      if (!this.canOpen()) return;
+      paused = true;
+      this.hideConfirm();
+      if (dom.pauseScore) dom.pauseScore.textContent = stateRef.score;
+      if (dom.pauseWave) dom.pauseWave.textContent = waveSystem ? waveSystem.wave : 0;
+      dom.pauseMenu.classList.remove("hidden");
+    },
+    close() {
+      if (!paused) return;
+      paused = false;
+      this.hideConfirm();
+      dom.pauseMenu.classList.add("hidden");
+    },
+    toggle() { if (paused) this.close(); else this.open(); },
+
+    askConfirm(action, text) {
+      this.pendingAction = action;
+      if (dom.confirmText) dom.confirmText.textContent = text;
+      if (dom.confirmDialog) dom.confirmDialog.classList.remove("hidden");
+    },
+    hideConfirm() {
+      this.pendingAction = null;
+      if (dom.confirmDialog) dom.confirmDialog.classList.add("hidden");
+    },
+    confirmYes() {
+      const action = this.pendingAction;
+      this.hideConfirm();
+      if (action === "restart") {
+        sessionSet(AUTOSTART_KEY, "1");
+        sessionDel(PENDING_LOAD_KEY);
+        window.location.reload();
+      } else if (action === "exit") {
+        sessionDel(AUTOSTART_KEY);
+        sessionDel(PENDING_LOAD_KEY);
+        window.location.reload(); // back to the start screen
+      }
+    },
+
+    init() {
+      if (dom.pauseBtn) dom.pauseBtn.addEventListener("click", () => this.open());
+      if (dom.resumeBtn) dom.resumeBtn.addEventListener("click", () => this.close());
+      if (dom.saveBtn) dom.saveBtn.addEventListener("click", () => {
+        // The toast lives behind the pause overlay, so confirm on the button.
+        if (downloadSave() && dom.saveBtn) {
+          const orig = dom.saveBtn.textContent;
+          dom.saveBtn.textContent = "Saved! 💾";
+          setTimeout(() => { if (dom.saveBtn) dom.saveBtn.textContent = orig; }, 1600);
+        }
+      });
+      if (dom.restartBtn) dom.restartBtn.addEventListener("click",
+        () => this.askConfirm("restart", "Restart the game? Your current progress will be lost unless you've saved it."));
+      if (dom.exitBtn) dom.exitBtn.addEventListener("click",
+        () => this.askConfirm("exit", "Exit to the main menu? Your current progress will be lost unless you've saved it."));
+      if (dom.confirmYes) dom.confirmYes.addEventListener("click", () => this.confirmYes());
+      if (dom.confirmNo) dom.confirmNo.addEventListener("click", () => this.hideConfirm());
+    },
+  };
+
   // ---- UI / boot ---------------------------------------------------------
   let toastTimer = null;
   function toast(msg) {
@@ -1960,8 +2313,33 @@
   function boot() {
     try {
       Input.init();
+
+      // A save chosen on the start screen is stashed in sessionStorage, then the
+      // page reloads into this path. Re-seed BEFORE building the world so the
+      // environment regenerates identically, then lay the run back in once ready.
+      let pendingLoad = null;
+      const rawPending = sessionGet(PENDING_LOAD_KEY);
+      if (rawPending) {
+        sessionDel(PENDING_LOAD_KEY);
+        try { pendingLoad = JSON.parse(rawPending); } catch (e) { pendingLoad = null; }
+        if (pendingLoad && !validateSave(pendingLoad)) pendingLoad = null;
+      }
+      if (pendingLoad) setSeed(pendingLoad.seed);
+
+      const wantAutostart = sessionGet(AUTOSTART_KEY) === "1";
+      if (wantAutostart) sessionDel(AUTOSTART_KEY);
+
       const scene = createScene();
-      scene.executeWhenReady(() => { dom.loadHint.textContent = "Ready!"; dom.startBtn.disabled = false; });
+      scene.executeWhenReady(() => {
+        dom.loadHint.textContent = "Ready!";
+        dom.startBtn.disabled = false;
+        if (pendingLoad) {
+          try { applySave(pendingLoad); startGame(); toast("Progress loaded! 🎮"); }
+          catch (e) { console.error(e); showFatal("Couldn't load save: " + e.message); }
+        } else if (wantAutostart) {
+          startGame();
+        }
+      });
       engine.runRenderLoop(() => scene.render());
       window.addEventListener("resize", () => engine.resize());
       dom.startBtn.addEventListener("click", startGame);
@@ -1973,7 +2351,29 @@
       // Shop open/close.
       dom.shopClose.addEventListener("click", () => Shop.closeShop());
       dom.shopDone.addEventListener("click", () => Shop.closeShop());
-      window.addEventListener("keydown", (e) => { if (e.code === "Escape") Shop.closeShop(); });
+
+      // Start-screen "Load progress" -> pick a file -> reload into the save.
+      if (dom.loadBtn && dom.loadFile) {
+        dom.loadBtn.addEventListener("click", () => dom.loadFile.click());
+        dom.loadFile.addEventListener("change", (e) => {
+          const file = e.target.files && e.target.files[0];
+          loadFromFile(file, (msg) => {
+            if (dom.loadHint) { dom.loadHint.style.color = "#ff8a8a"; dom.loadHint.textContent = msg; }
+          });
+          e.target.value = ""; // allow re-picking the same file
+        });
+      }
+
+      // In-game pause menu + Escape behaviour: Escape closes the shop if it's
+      // open, otherwise toggles the pause menu (or backs out of a confirm).
+      Pause.init();
+      window.addEventListener("keydown", (e) => {
+        if (e.code !== "Escape") return;
+        if (Shop.open) { Shop.closeShop(); return; }
+        if (paused && Pause.pendingAction) { Pause.hideConfirm(); return; }
+        Pause.toggle();
+      });
+
       Fullscreen.init();
     } catch (e) { showFatal(e.message); throw e; }
   }
@@ -2011,11 +2411,14 @@
   // Inert in production — window.__GG_TEST__ is never set on the deployed site. ---
   if (typeof window !== "undefined" && window.__GG_TEST__) {
     window.__GG_TEST__ = {
-      CONFIG, Projectile, Monster, Boss, Shop, SHOP_ITEMS,
+      CONFIG, Projectile, Monster, Boss, Coin, Shop, SHOP_ITEMS,
       get waves() { return waveSystem; },
       get player() { return playerRef; },
       get state() { return Shop.state; },
       startGame,
+      serializeGame, applySave, validateSave, setSeed, rng, Pause,
+      get seed() { return worldSeed; },
+      get paused() { return paused; },
     };
   }
 

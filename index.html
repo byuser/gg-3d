@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="description" content="Good Game 3D — a third-person browser adventure. Wield a magic wand, blast waves of living sweets, and collect artifacts for points." />
   <meta name="theme-color" content="#0b0f1a" />
-  <link rel="stylesheet" href="css/style.css?v=7" />
+  <link rel="stylesheet" href="css/style.css?v=8" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
@@ -27,6 +27,8 @@
         <li><b>Next&nbsp;wave</b><span>Enter / N · or the Next Wave button</span></li>
       </ul>
       <button id="startBtn" class="start-btn">Start Adventure</button>
+      <button id="loadBtn" class="start-btn secondary-btn">Load Progress</button>
+      <input id="loadFile" type="file" accept="application/json,.json" hidden />
       <p class="hint" id="loadHint">Loading engine…</p>
     </div>
   </div>
@@ -76,6 +78,7 @@
       <div class="mini-sub">auto in <span id="miniCountdown">—</span></div>
     </div>
     <button id="fsBtn" class="fs-btn" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
+    <button id="pauseBtn" class="pause-btn" title="Menu (Esc)" aria-label="Open menu">☰</button>
     <div id="toast" class="toast"></div>
   </div>
 
@@ -96,6 +99,29 @@
     </div>
   </div>
 
+  <!-- In-game pause menu: opens with ☰ / Esc and freezes the game. -->
+  <div id="pauseMenu" class="overlay hidden">
+    <div class="panel">
+      <h1>Paused</h1>
+      <p class="tagline">Wave <b id="pauseWave">0</b> · Score <b id="pauseScore">0</b></p>
+      <div class="menu-actions">
+        <button id="resumeBtn" class="start-btn">Resume</button>
+        <button id="saveBtn" class="start-btn secondary-btn">Save Progress</button>
+        <button id="restartBtn" class="start-btn secondary-btn">Restart</button>
+        <button id="exitBtn" class="start-btn danger-btn">Exit to Menu</button>
+      </div>
+
+      <!-- Confirmation guard for the destructive Restart / Exit actions. -->
+      <div id="confirmDialog" class="confirm-dialog hidden">
+        <p id="confirmText" class="confirm-text">Are you sure?</p>
+        <div class="confirm-actions">
+          <button id="confirmYes" class="start-btn danger-btn">Yes</button>
+          <button id="confirmNo" class="start-btn secondary-btn">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Merchant shop: opened by walking up to the NPC at the plaza and pressing E. -->
   <div id="shop" class="shop-overlay hidden">
     <div class="shop-panel">
@@ -110,6 +136,6 @@
 
   <canvas id="renderCanvas"></canvas>
 
-  <script src="js/game.js?v=7"></script>
+  <script src="js/game.js?v=8"></script>
 </body>
 </html>

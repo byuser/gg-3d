@@ -176,6 +176,9 @@ ok(boss.contactDamage > T.CONFIG.contactDamage, "boss hits harder than a normal 
 step(10);
 ok(true, "boss.update ran for 10 frames");
 // Kill the boss via a real bolt through updateBolts -> onMonsterDefeated.
+// Isolate the boss so the co-located kill bolt can't hit a nearby honour guard
+// first (guard ring + boss spawn share one seeded RNG, so spacing varies).
+T.state.monsters.length = 0; T.state.monsters.push(boss);
 const beforeScore = T.state.score;
 const beforeCoins = T.state.coinsList.length;
 const bolt = new T.Projectile(scene, null, boss.position.clone(), new Vec3(0, 0, 1), { damage: boss.maxHp + 5, radius: boss.radius + 1 });
@@ -217,6 +220,76 @@ T.state.bolts.push(b2);
 const hpBefore = p.health;
 step(2);
 ok(p.health > hpBefore, `lifesteal healed on kill (${hpBefore} -> ${p.health})`);
+
+console.log("\n[8] seeded RNG is reproducible");
+T.setSeed(987654);
+const seqA = [T.rng(), T.rng(), T.rng()];
+T.setSeed(987654);
+const seqB = [T.rng(), T.rng(), T.rng()];
+ok(seqA.every((v, i) => v === seqB[i]), "same seed reproduces the exact RNG stream");
+ok(seqA[0] !== seqA[1] && seqA.every((v) => v >= 0 && v < 1), "RNG yields varied values in [0,1)");
+
+console.log("\n[9] save / load round-trip");
+const st = T.state;
+const pl = T.player;
+// Build a known, controlled game state.
+st.score = 4242; st.coins = 99;
+pl.health = 33; pl.maxHealth = 150; pl.speed = 9.5;
+pl.damageReduction = 0.24; pl.lifesteal = 4;
+pl.weapon.damage = 7; pl.weapon.multishot = 3; pl.weapon.name = "Trident Wand";
+st.upgrades = Object.assign(Object.create(null), { damage: 3, trident: 1, vitality: 2 });
+// Fresh monsters (incl. a boss) + a dropped coin.
+st.monsters.length = 0; st.boss = null;
+st.monsters.push(new T.Monster(scene, world.shadow, new Vec3(5, 0, 5), 2));
+st.monsters.push(new T.Monster(scene, world.shadow, new Vec3(-3, 0, 4), 2));
+const bz = new T.Boss(scene, world.shadow, new Vec3(10, 0, 10), 10); bz.hp = 50;
+st.boss = bz; st.monsters.push(bz);
+st.coinsList.length = 0;
+st.coinsList.push(new T.Coin(scene, world.shadow, new Vec3(2, 0, 2), 3));
+
+const save = T.serializeGame();
+ok(save && save.v === 1, "serializeGame produced a versioned save");
+ok(T.validateSave(save), "save passes structural validation");
+ok(typeof save.seed === "number", "save records the world seed");
+ok(save.score === 4242 && save.money === 99, "score + money captured");
+ok(save.monsters.length === 3 && save.monsters.some((m) => m.boss), "monsters + boss captured");
+ok(save.coinDrops.length === 1, "dropped coins captured");
+ok(!T.validateSave({ v: 999 }), "validation rejects a foreign/old file");
+
+// Trash the live state, then restore from the save.
+st.score = 0; st.coins = 0;
+pl.health = 1; pl.maxHealth = 1; pl.speed = 1;
+pl.damageReduction = 0; pl.lifesteal = 0;
+pl.weapon.damage = 1; pl.weapon.multishot = 1; pl.weapon.name = "Magic Wand";
+st.upgrades = Object.create(null);
+const artBefore = save.artifacts.length;
+
+T.applySave(save);
+ok(st.score === 4242, "score restored");
+ok(st.coins === 99, "money restored");
+ok(pl.health === 33 && pl.maxHealth === 150, "player health restored");
+ok(pl.speed === 9.5 && pl.damageReduction === 0.24 && pl.lifesteal === 4, "player stats/perks restored");
+ok(pl.weapon.damage === 7 && pl.weapon.multishot === 3 && pl.weapon.name === "Trident Wand", "weapon perks restored");
+ok(st.upgrades.damage === 3 && st.upgrades.trident === 1 && st.upgrades.vitality === 2, "upgrade levels restored");
+ok(st.monsters.length === 3, "monsters restored to the same count");
+ok(st.boss && st.boss.isBoss && st.boss.hp === 50, "boss restored with its HP");
+ok(st.artifacts.length === artBefore, "artifacts restored to the same count");
+ok(st.coinsList.length === 1 && st.coinsList[0].value === 3, "dropped coins restored");
+ok(T.waves.wave === save.wave.number, "wave counter restored");
+// The restored game must keep simulating cleanly.
+step(5);
+ok(isFinite(pl.position.x), "restored game keeps simulating");
+
+console.log("\n[10] pause menu");
+ok(T.paused === false, "starts un-paused");
+T.Pause.open();
+ok(T.paused === true, "pause menu opens and freezes the sim");
+T.Pause.askConfirm("restart", "sure?");
+ok(T.Pause.pendingAction === "restart", "restart asks for confirmation (misclick guard)");
+T.Pause.hideConfirm();
+ok(T.Pause.pendingAction === null, "confirmation can be cancelled");
+T.Pause.close();
+ok(T.paused === false, "pause menu resumes the game");
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED ✅" : failures + " CHECK(S) FAILED ❌"}`);
 process.exit(failures === 0 ? 0 : 1);

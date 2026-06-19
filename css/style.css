@@ -318,6 +318,44 @@ html, body {
 .fs-btn:hover { background: rgba(11, 15, 26, 0.85); }
 .fs-btn:active { transform: scale(0.92); }
 
+/* ---------- Pause (☰) button — sits just left of the fullscreen button ---------- */
+.pause-btn {
+  position: absolute; top: max(12px, env(safe-area-inset-top));
+  right: calc(max(12px, env(safe-area-inset-right)) + 52px);
+  width: 44px; height: 44px; border-radius: 12px; cursor: pointer;
+  background: rgba(11, 15, 26, 0.6); color: var(--ink);
+  border: 1px solid rgba(255, 255, 255, 0.14); font-size: 20px; line-height: 1;
+  pointer-events: auto; display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.pause-btn:hover { background: rgba(11, 15, 26, 0.85); }
+.pause-btn:active { transform: scale(0.92); }
+
+/* ---------- Menu action buttons (start screen + pause menu) ---------- */
+.menu-actions { display: grid; gap: 12px; }
+
+/* Secondary / danger variants of .start-btn for menus. */
+.secondary-btn {
+  background: linear-gradient(135deg, #2a3550, #3a4866);
+  color: var(--ink); box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+}
+.danger-btn {
+  background: linear-gradient(135deg, #ff6c8a, #ff4d4d);
+  color: #fff; box-shadow: 0 10px 26px rgba(255, 76, 76, 0.35);
+}
+/* On the start screen the load button gets a little breathing room. */
+#loadBtn { margin-top: 12px; }
+
+/* ---------- Confirmation guard (restart / exit) ---------- */
+.confirm-dialog {
+  margin-top: 18px; padding: 16px;
+  background: rgba(255, 76, 76, 0.08); border: 1px solid rgba(255, 76, 76, 0.28);
+  border-radius: 14px;
+}
+.confirm-text { margin: 0 0 14px; font-size: 15px; line-height: 1.4; }
+.confirm-actions { display: flex; gap: 10px; justify-content: center; }
+.confirm-actions .start-btn { font-size: 16px; padding: 11px 24px; }
+
 .toast {
   position: absolute; left: 50%; bottom: 18%; transform: translateX(-50%) translateY(10px);
   background: rgba(11, 15, 26, 0.78); border: 1px solid rgba(255, 255, 255, 0.12);

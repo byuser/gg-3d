@@ -19,6 +19,7 @@ glowing **artifacts** to rack up your **score**.
 | Cast magic | `Space` or `F` (hold to fire) | ✨ button (bottom-right) |
 | Collect artifact | `E` | action button (bottom-right) |
 | Start next wave | `Enter` / `N` | Next Wave button |
+| Pause / menu | `Esc` | ☰ button (top-right) |
 
 ## How to play
 
@@ -60,6 +61,15 @@ glowing **artifacts** to rack up your **score**.
   your final score and the wave you reached are shown.
 - **Camera:** the view follows Lily at a fixed distance; zoom only with the mouse
   wheel (or a two-finger pinch on mobile).
+- **Pause menu:** press **Esc** or the **☰** button to pause the game at any time. The
+  menu lets you **Resume**, **Save Progress**, **Restart**, or **Exit to Menu** — the
+  last two ask for confirmation so a stray tap can't wipe your run.
+- **Save & load:** **Save Progress** downloads a small `.json` save file to your device
+  capturing *everything* needed to resume — the procedural environment (via its world
+  seed), your score, money, perks/upgrades, weapon, health, every live sweet and boss,
+  the dropped coins and artifacts, and the wave clock. Back on the **start screen**,
+  **Load Progress** reads a save file from your device and drops you right back where you
+  left off — even on a different device or browser.
 
 ## Why Babylon.js?
 
@@ -95,7 +105,8 @@ test/harness.js         # headless Node harness that exercises the gameplay logi
 
 `test/harness.js` stubs Babylon + the DOM (with faithful vector math) so the real
 gameplay code can run in Node — verifying collision, the river barrier, wave/boss
-spawning, the shop, and lifesteal without a browser:
+spawning, the shop, lifesteal, the seeded RNG, the **save/load round-trip**, and the
+**pause menu** without a browser:
 
 ```bash
 node test/harness.js
@@ -121,7 +132,13 @@ node test/harness.js
   (collapsible to a corner widget) and reveals the merchant once a wave is cleared.
 - **`buildWorld`** — lighting, ground, procedural scenery, a river + bridges, and a
   circle-based **collision** system (`obstacles` + `moveActor`) that slides the player
-  around solid props and keeps them out of the water.
+  around solid props and keeps them out of the water. Driven by a **seeded RNG** so a
+  saved world regenerates identically on load.
+- **Save/load (`serializeGame` / `applySave`)** — snapshots the whole run to JSON and
+  rebuilds it: re-seed + regenerate the world, then lay the live entities (player +
+  perks, score, money, monsters, boss, coins, artifacts, wave clock) back on top.
+- **`Pause`** — the in-game pause menu (Resume / Save / Restart / Exit) that freezes the
+  simulation, with a confirmation guard on the destructive actions.
 
 The bottom of `game.js` documents the remaining seams for **PuzzleSystem** and **DialogueSystem**.
 
@@ -154,5 +171,7 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 - [x] Solid scenery collision (trees, rocks, bushes, toadstools, lampposts)
 - [x] A larger map with a winding river + wooden bridges and richer scenery
 - [x] Score + health + game-over
+- [x] In-game pause menu (resume / save / restart / exit, with confirmations)
+- [x] Save progress to a file & load it back (seeded world + full game state)
 - [ ] Puzzles (levers, plates, gated doors)
 - [ ] NPC dialogue (Babylon GUI panels)
