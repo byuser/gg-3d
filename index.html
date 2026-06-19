@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="description" content="Good Game 3D — a third-person browser adventure. Wield a magic wand, blast waves of living sweets, and collect artifacts for points." />
   <meta name="theme-color" content="#0b0f1a" />
-  <link rel="stylesheet" href="css/style.css?v=6" />
+  <link rel="stylesheet" href="css/style.css?v=7" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
@@ -44,6 +44,13 @@
       <span class="heart">❤</span>
       <div class="healthbar"><div id="healthFill" class="health-fill"></div></div>
     </div>
+
+    <!-- Boss health bar: shown only while a Sweet King boss is alive. -->
+    <div id="bossBar" class="boss-bar hidden">
+      <div id="bossName" class="boss-name">👑 Boss</div>
+      <div class="boss-track"><div id="bossFill" class="boss-fill"></div></div>
+    </div>
+
     <div id="waveBanner" class="wave-banner"></div>
 
     <!-- Between-waves results window: appears once a wave is cleared.
@@ -103,6 +110,6 @@
 
   <canvas id="renderCanvas"></canvas>
 
-  <script src="js/game.js?v=6"></script>
+  <script src="js/game.js?v=7"></script>
 </body>
 </html>

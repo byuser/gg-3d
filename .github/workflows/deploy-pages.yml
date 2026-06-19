@@ -6,6 +6,7 @@ on:
     branches:
       - claude/good-game-3d-engine-m13prm
       - claude/wave-completion-features-5rp8w2
+      - claude/game-features-mechanics-f3a72g
       - main
       - master
   workflow_dispatch:

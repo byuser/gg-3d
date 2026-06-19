@@ -32,11 +32,21 @@ glowing **artifacts** to rack up your **score**.
 - **Coins:** defeated sweets sometimes drop **golden coins**. Walk near one and it's
   scooped up (coins even magnet toward you). Coins are the currency you spend at the
   merchant's shop.
+- **Bosses:** every **5th wave** a colossal **Sweet King** 👑 storms in — a giant
+  boss with a dedicated **health bar**, far more HP, a slower but heavier stomp, and a
+  bite that really hurts. Felling one is worth a big score bonus and a guaranteed
+  **purse of coins**. The boss brings a smaller honour guard of regular sweets.
 - **The merchant:** once a wave is cleared a **travelling merchant** 🧙 appears at the
   central plaza and leaves when the next wave begins. Walk up and press **E** (or the
-  action button) to open the **shop**, where you can **buy a new weapon** (the
-  three-bolt Trident Wand) and **upgrade your wand** — more damage, faster casting,
-  bigger bolts — or buy a healing brew. Spend your coins between waves!
+  action button) to open the **shop**. The shop now stocks **12 wares**: upgrade your
+  wand's **damage**, **fire rate** and **bolt size**; add **piercing** bolts; unlock
+  the three-bolt **Trident Wand** and then the five-bolt **Storm Wand**; raise your
+  **max health** (Vitality Charm), **move speed** (Swift Boots), **damage resistance**
+  (Aegis Ward), **lifesteal** (Vampiric Gem) and **coin magnet** range (Lodestone); or
+  grab a **healing brew**. Spend your coins between waves!
+- **Solid world:** trees, rocks, bushes, giant toadstools, lampposts and the river are
+  **solid** — you bump and slide around them instead of walking through. A winding
+  **river** crosses the meadow with **wooden bridges** at the crossings.
 - **Living sweets:** a dozen kinds — lollipops, gummy bears, cupcakes, donuts, candy
   canes, ice-cream cones, macarons, candy corn, chocolate bars, jelly beans,
   marshmallows and pretzels.
@@ -76,8 +86,19 @@ static-hosted game that needs to grow into a small RPG.
 index.html              # markup, overlays, HUD, CDN script tags
 css/style.css           # HUD, overlays, touch controls, responsive styling
 js/game.js              # engine, systems, gameplay
+test/harness.js         # headless Node harness that exercises the gameplay logic
 .github/workflows/      # GitHub Pages deploy on push
 .nojekyll               # serve files as-is (skip Jekyll processing)
+```
+
+### Tests
+
+`test/harness.js` stubs Babylon + the DOM (with faithful vector math) so the real
+gameplay code can run in Node — verifying collision, the river barrier, wave/boss
+spawning, the shop, and lifesteal without a browser:
+
+```bash
+node test/harness.js
 ```
 
 ### Architecture
@@ -92,11 +113,15 @@ js/game.js              # engine, systems, gameplay
 - **`Projectile`** — the wand's magic bolts (spawn, travel, hit-test, fizzle), parameterised
   by the player's weapon (damage, speed, size, colour) for multishot + upgrades.
 - **`Monster`** — a "living sweet" with chase AI, a hoppy bob, and a pop-on-death effect.
+- **`Boss`** — a giant "Sweet King" (shares the Monster interface) with scaling HP, a
+  health bar, heavier contact damage, and a coin-jackpot on death; spawned every 5 waves.
 - **`Coin` / `Merchant` / `Shop`** — coins drop from sweets and fund the plaza merchant's
   shop, where you buy a new weapon or upgrade the wand between waves.
 - **`WaveSystem`** — the timer that spawns escalating waves, then shows the **results window**
   (collapsible to a corner widget) and reveals the merchant once a wave is cleared.
-- **`buildWorld`** — lighting, ground, procedural scenery.
+- **`buildWorld`** — lighting, ground, procedural scenery, a river + bridges, and a
+  circle-based **collision** system (`obstacles` + `moveActor`) that slides the player
+  around solid props and keeps them out of the water.
 
 The bottom of `game.js` documents the remaining seams for **PuzzleSystem** and **DialogueSystem**.
 
@@ -124,7 +149,10 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 - [x] Player-paced waves with a Next Wave button + live monster counter
 - [x] Wave-results window (skip the wait) that collapses to a non-blocking corner widget
 - [x] Coins dropped by sweets, collected like artifacts, used as shop currency
-- [x] Central merchant NPC — buy new weapons & upgrade the wand between waves
+- [x] Central merchant NPC — a 12-item shop of weapons, upgrades & consumables
+- [x] Boss fights — a giant "Sweet King" with a health bar every 5 waves
+- [x] Solid scenery collision (trees, rocks, bushes, toadstools, lampposts)
+- [x] A larger map with a winding river + wooden bridges and richer scenery
 - [x] Score + health + game-over
 - [ ] Puzzles (levers, plates, gated doors)
 - [ ] NPC dialogue (Babylon GUI panels)

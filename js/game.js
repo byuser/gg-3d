@@ -38,7 +38,8 @@
     moveSpeed: 6.5,          // metres / second
     turnLerp: 0.2,
     interactRange: 2.6,
-    worldRadius: 44,         // playable area before the invisible fence
+    playerRadius: 0.55,      // collision radius vs scenery (trees, rocks, …)
+    worldRadius: 88,         // playable area before the invisible fence
 
     // Combat / wand
     castCooldown: 0.32,      // seconds between magic bolts
@@ -66,6 +67,16 @@
     monsterSpeedPerWave: 0.12,
     monsterMaxSpeed: 6.0,
     monsterHpPerWaves: 3,    // +1 HP every N waves
+
+    // Bosses — a giant "sweet king" storms in every few waves.
+    bossEveryWaves: 5,        // a boss appears on waves divisible by this
+    bossBaseHp: 38,           // boss HP on its first appearance (wave 5)
+    bossHpPerCycle: 26,       // +HP for each later boss (wave 10, 15, …)
+    bossSpeed: 2.0,           // bosses are slower but relentless
+    bossContactDamage: 22,    // they hit much harder than a regular sweet
+    bossRadius: 2.4,          // big body → big hit/contact radius
+    bossScore: 400,           // score for felling a boss
+    bossCoinDrop: 30,         // guaranteed coins when a boss is defeated
 
     // Score
     scorePerMonster: 25,
@@ -113,6 +124,9 @@
     shopCoins: document.getElementById("shopCoins"),
     shopItems: document.getElementById("shopItems"),
     healthFill: document.getElementById("healthFill"),
+    bossBar: document.getElementById("bossBar"),
+    bossName: document.getElementById("bossName"),
+    bossFill: document.getElementById("bossFill"),
     waveBanner: document.getElementById("waveBanner"),
     prompt: document.getElementById("prompt"),
     toast: document.getElementById("toast"),
@@ -135,6 +149,12 @@
   let gameStarted = false;   // gameplay (waves, monsters) waits on the start screen
   let uiPaused = false;      // true while a blocking menu (the shop) is open
   let waveSystem = null;     // the active WaveSystem (for the HUD buttons)
+  let playerRef = null;      // the Player (so HUD helpers can read max health)
+
+  // Coin pickup/magnet ranges live here (not in the frozen CONFIG) so the shop's
+  // "Lodestone" upgrade can widen them at runtime.
+  let coinMagnetRange = CONFIG.coinMagnetRange;
+  let coinPickupRange = CONFIG.coinPickupRange;
 
   // =========================================================================
   // Input
@@ -260,7 +280,11 @@
       this.carried = null;       // collectible mesh that flies up + poofs
       this.castCooldown = 0;     // counts down to 0 when ready to cast
       this.castAnim = 0;         // 0..1 quick wand-thrust animation
+      this.maxHealth = CONFIG.maxHealth;
       this.health = CONFIG.maxHealth;
+      this.damageReduction = 0;  // 0..~0.6, raised by the Aegis Ward upgrade
+      this.lifesteal = 0;        // HP restored per sweet defeated (Vampiric Gem)
+      this.world = null;         // set after construction; used for scenery collision
 
       // The wand's combat stats — the merchant's upgrades mutate these.
       this.weapon = {
@@ -271,6 +295,7 @@
         boltSpeed: CONFIG.boltSpeed,
         multishot: 1,            // bolts fired per cast
         spread: 0.22,            // radians between multishot bolts
+        pierce: 0,               // extra enemies each bolt passes through
         color: "#bfe3ff",
         haloColor: "#9fd0ff",
       };
@@ -442,8 +467,14 @@
         const dir = fwd.scale(input.z).add(right.scale(input.x));
         if (dir.lengthSquared() > 1e-4) {
           dir.normalize();
-          const next = this.root.position.add(dir.scale(this.speed * mag * dt));
-          if (Math.hypot(next.x, next.z) < CONFIG.worldRadius) this.root.position = next;
+          const cur = this.root.position;
+          const desired = cur.add(dir.scale(this.speed * mag * dt));
+          // Resolve against the world fence + solid scenery (trees, rocks, river…),
+          // sliding along obstacles instead of stopping dead.
+          const moved = this.world
+            ? this.world.moveActor(cur, desired, CONFIG.playerRadius)
+            : (Math.hypot(desired.x, desired.z) < CONFIG.worldRadius ? desired : cur);
+          this.root.position = moved;
           this.facing = lerpAngle(this.facing, Math.atan2(dir.x, dir.z), CONFIG.turnLerp);
         }
         this.state = "walk"; this.walkPhase += dt * 10 * mag;
@@ -528,6 +559,8 @@
       this.speed = opts.speed || CONFIG.boltSpeed;
       this.radius = opts.radius || CONFIG.boltRadius;  // hit radius vs monsters
       this.damage = opts.damage || 1;
+      this.pierce = opts.pierce || 0;                  // extra enemies a bolt passes through
+      this.hitSet = new Set();                         // monsters already struck (no double-hits)
       this.dead = false;
       const m = sphere(scene, "bolt", 0.32, emat(scene, "boltM", opts.color || "#bfe3ff", 1.0));
       m.position.copyFrom(origin);
@@ -567,6 +600,8 @@
       this.alive = true;
       this.dying = 0;                               // >0 while playing the pop animation
       this.radius = 0.85;
+      this.isBoss = false;
+      this.contactDamage = CONFIG.contactDamage;    // damage dealt to the player on contact
       this.bob = Math.random() * Math.PI * 2;
       this.biteTimer = 0;                           // cooldown before this sweet bites again
       this.kind = SWEETS[(Math.random() * SWEETS.length) | 0];
@@ -719,6 +754,127 @@
   }
 
   // =========================================================================
+  // Boss — a colossal "Sweet King" that storms in every few waves. Far more HP,
+  // hits harder, slower, and shows a dedicated health bar. Shares the Monster
+  // interface (update/hit/position/radius/alive/dying/biteTimer) so the wave,
+  // projectile and contact systems treat it like any other sweet.
+  // =========================================================================
+  const BOSS_KINDS = [
+    { name: "Gummy King",      color: "#ff4d6d", crown: "#ffd34e" },
+    { name: "Choco Overlord",  color: "#7a4a2a", crown: "#ffe27a" },
+    { name: "Lollipop Tyrant", color: "#a06cff", crown: "#ffd34e" },
+    { name: "Cupcake Colossus", color: "#ff7ac0", crown: "#fff3a0" },
+  ];
+
+  class Boss {
+    constructor(scene, shadow, pos, wave) {
+      this.scene = scene;
+      const cycle = Math.floor(wave / CONFIG.bossEveryWaves); // 1, 2, 3, …
+      this.maxHp = CONFIG.bossBaseHp + (cycle - 1) * CONFIG.bossHpPerCycle;
+      this.hp = this.maxHp;
+      this.speed = CONFIG.bossSpeed + (cycle - 1) * 0.15;
+      this.alive = true;
+      this.dying = 0;
+      this.radius = CONFIG.bossRadius;
+      this.isBoss = true;
+      this.contactDamage = CONFIG.bossContactDamage;
+      this.bob = 0;
+      this.biteTimer = 0;
+      this.kind = BOSS_KINDS[(cycle - 1) % BOSS_KINDS.length];
+      this.name = this.kind.name;
+      this._build(scene, shadow, pos);
+    }
+
+    _build(scene, shadow, pos) {
+      const root = new BABYLON.TransformNode("boss", scene);
+      root.position.copyFrom(pos);
+      this.root = root;
+      const body = new BABYLON.TransformNode("bossBody", scene);
+      body.parent = root; this.body = body;
+
+      const main = emat(scene, "bossM" + root.uniqueId, this.kind.color, 0.28);
+      const dark = emat(scene, "bossD" + root.uniqueId, "#2a1530", 0.05);
+      const gold = emat(scene, "bossG" + root.uniqueId, this.kind.crown, 0.5);
+      const cream = emat(scene, "bossC" + root.uniqueId, "#fff3e0", 0.12);
+      const add = (m) => { m.parent = body; shadow.addShadowCaster(m); return m; };
+
+      // A hulking gummy-bear-ish torso + head.
+      const torso = add(capsule(scene, "btor", 2.4, 1.2, main)); torso.position.y = 1.7;
+      const head = add(sphere(scene, "bhead", 2.0, main)); head.position.y = 3.2;
+      for (const s of [-1, 1]) {
+        const ear = add(sphere(scene, "bear", 0.8, main)); ear.position.set(0.9 * s, 4.1, 0);
+        const arm = add(capsule(scene, "barm", 1.5, 0.45, main)); arm.position.set(1.4 * s, 1.9, 0); arm.rotation.z = 0.7 * s;
+        const leg = add(capsule(scene, "bleg", 1.2, 0.5, main)); leg.position.set(0.6 * s, 0.6, 0);
+      }
+      const belly = add(sphere(scene, "bbelly", 1.5, cream)); belly.position.set(0, 1.5, 0.7); belly.scaling.set(1, 1.2, 0.5);
+
+      // A golden crown — the mark of a sweet monarch.
+      const band = add(cyl(scene, "bcrown", 1.5, 1.5, 0.5, gold)); band.position.y = 4.5;
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const spike = add(cone(scene, "bspike", 0.4, 0.02, 0.7, gold));
+        spike.position.set(Math.cos(a) * 0.7, 5.0, Math.sin(a) * 0.7);
+      }
+      const jewel = add(BABYLON.MeshBuilder.CreatePolyhedron("bjewel", { type: 1, size: 0.4 }, scene));
+      jewel.material = emat(scene, "bjewelM" + root.uniqueId, "#ff3b6b", 0.7); jewel.position.set(0, 4.55, 0.75);
+
+      // Menacing glowing eyes + a big scowl.
+      const eyeMat = emat(scene, "beye" + root.uniqueId, "#ff2a2a", 0.9);
+      const whiteMat = emat(scene, "bwhite" + root.uniqueId, "#ffffff", 0.05);
+      for (const s of [-1, 1]) {
+        const w = add(sphere(scene, "bw", 0.55, whiteMat)); w.position.set(0.45 * s, 3.35, 0.95); w.scaling.z = 0.5;
+        const e = add(sphere(scene, "be", 0.28, eyeMat)); e.position.set(0.45 * s, 3.3, 1.15);
+        const brow = add(box(scene, "bbrow", 0.6, 0.13, 0.13, dark)); brow.position.set(0.45 * s, 3.7, 1.1); brow.rotation.z = -0.5 * s;
+      }
+      const mouth = add(box(scene, "bmouth", 0.9, 0.16, 0.13, dark)); mouth.position.set(0, 2.7, 1.2);
+
+      // An ominous red glow + big blob shadow.
+      const glow = new BABYLON.PointLight("bossGlow", new BABYLON.Vector3(0, 3, 0), scene);
+      glow.parent = root; glow.diffuse = BABYLON.Color3.FromHexString("#ff5a6a");
+      glow.intensity = 0.7; glow.range = 14;
+      const blob = disc(scene, "bblob", this.radius * 1.3, emat(scene, "bblobM" + root.uniqueId, "#000000", 0));
+      blob.material.alpha = 0.3; blob.rotation.x = Math.PI / 2; blob.position.y = 0.03;
+      blob.parent = root; blob.isPickable = false;
+    }
+
+    update(dt, playerPos) {
+      if (this.biteTimer > 0) this.biteTimer -= dt;
+      if (this.dying > 0) {
+        this.dying -= dt;
+        const k = Math.max(0, this.dying / 0.8);
+        this.body.scaling.setAll(k);
+        this.body.rotation.y += dt * 8;
+        this.root.position.y = (1 - k) * -1;
+        if (this.dying <= 0) { this.alive = false; this.root.dispose(); }
+        return false;
+      }
+      this.bob += dt * 4;
+      if (this.body.scaling.x !== 1) this.body.scaling.setAll(lerp(this.body.scaling.x, 1, 0.2));
+      const to = playerPos.subtract(this.root.position); to.y = 0;
+      const dist = to.length();
+      if (dist > 0.001) {
+        to.normalize();
+        const step = Math.min(this.speed * dt, Math.max(0, dist - this.radius));
+        this.root.position.addInPlace(to.scale(step));
+        this.body.rotation.y = lerpAngle(this.body.rotation.y, Math.atan2(to.x, to.z), 0.12);
+      }
+      // A heavy, lumbering stomp.
+      this.body.position.y = Math.abs(Math.sin(this.bob)) * 0.3;
+      return dist <= this.radius + 1.2;
+    }
+
+    hit(dmg) {
+      this.hp -= dmg;
+      updateBossBar(this);
+      if (this.hp <= 0 && this.dying <= 0) { this.dying = 0.8; return true; }
+      this.body.scaling.setAll(1.12);
+      return false;
+    }
+
+    get position() { return this.root.position; }
+  }
+
+  // =========================================================================
   // Coin — a spinning golden coin dropped by defeated sweets. Walk near it to
   // scoop it up; coins are the currency spent at the merchant's shop.
   // =========================================================================
@@ -755,12 +911,12 @@
       const dz = playerPos.z - this.root.position.z;
       const dist = Math.hypot(dx, dz);
       // Magnet: drift toward the player when they're close, then collect.
-      if (dist < CONFIG.coinMagnetRange) {
-        const pull = (1 - dist / CONFIG.coinMagnetRange) * 8 * dt;
+      if (dist < coinMagnetRange) {
+        const pull = (1 - dist / coinMagnetRange) * 8 * dt;
         this.root.position.x += dx * pull / (dist || 1);
         this.root.position.z += dz * pull / (dist || 1);
       }
-      return dist <= CONFIG.coinPickupRange;
+      return dist <= coinPickupRange;
     }
 
     dispose() { this.root.dispose(); }
@@ -857,29 +1013,100 @@
     scene.clearColor = BABYLON.Color3.FromHexString("#86c5ff").toColor4(1);
     scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
     scene.fogColor = BABYLON.Color3.FromHexString("#a9d4ff");
-    scene.fogDensity = 0.008;
+    scene.fogDensity = 0.006;
 
     const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0.2, 1, 0.1), scene);
     hemi.intensity = 1.0; hemi.groundColor = BABYLON.Color3.FromHexString("#4a6a3a");
     const sun = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(-0.5, -1, -0.4), scene);
-    sun.position = new BABYLON.Vector3(40, 60, 40); sun.intensity = 1.0;
+    sun.position = new BABYLON.Vector3(60, 90, 60); sun.intensity = 1.0;
 
-    const shadow = new BABYLON.ShadowGenerator(1024, sun);
+    const shadow = new BABYLON.ShadowGenerator(2048, sun);
     shadow.useBlurExponentialShadowMap = true; shadow.blurScale = 2;
 
+    // The world grew a lot — size the ground/roads to the new playable radius.
+    const GROUND = CONFIG.worldRadius * 2 + 60; // a generous skirt beyond the fence
+
     // Grass ground.
-    const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 120, height: 120 }, scene);
+    const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: GROUND, height: GROUND }, scene);
     ground.material = mat(scene, "grass", "#5fae4f"); ground.receiveShadows = true;
+
+    // ---- Solid scenery is tracked here as {x,z,r} circles for collision. ----
+    const obstacles = [];
+    const addObstacle = (x, z, r) => obstacles.push({ x, z, r });
+
+    // ---- A winding RIVER with wooden bridges. -------------------------------
+    // The river is a straight band at a fixed orientation. Crossing it is the
+    // local +X of the deck (crossN); flowing along it is local +Z (alongT).
+    const riverAngle = 0.5 + Math.random() * 0.7;
+    const ca = Math.cos(riverAngle), sa = Math.sin(riverAngle);
+    const crossN = { x: ca, z: -sa };            // perpendicular to the flow
+    const alongT = { x: sa, z: ca };             // direction of flow
+    const riverPerp = 30 + Math.random() * 6;    // offset of the river from centre
+    const riverHalf = 6.5;                        // half-width of the water
+    const bridgeHalf = 5;                         // half-length of each bridge gap
+    const bridges = [0, 52, -52];                 // crossing points along the flow
+
+    const signedPerp = (x, z) => x * crossN.x + z * crossN.z;
+    const tangent = (x, z) => x * alongT.x + z * alongT.z;
+    const onBridge = (x, z) => {
+      const t = tangent(x, z);
+      for (const b of bridges) if (Math.abs(t - b) < bridgeHalf) return true;
+      return false;
+    };
+    // True if a point sits in open water (blocks movement); bridges are walkable.
+    const inRiver = (x, z) => Math.abs(signedPerp(x, z) - riverPerp) < riverHalf && !onBridge(x, z);
+
+    // Water surface (a long translucent blue band) + darker muddy banks.
+    const riverCenter = { x: riverPerp * crossN.x, z: riverPerp * crossN.z };
+    const riverLen = GROUND;
+    const bank = BABYLON.MeshBuilder.CreateGround("bank", { width: riverHalf * 2 + 4, height: riverLen }, scene);
+    bank.rotation.y = riverAngle; bank.position.set(riverCenter.x, 0.015, riverCenter.z);
+    bank.material = mat(scene, "bank", "#5c4a32"); bank.receiveShadows = true;
+    const waterMat = emat(scene, "water", "#3aa0e0", 0.18);
+    waterMat.alpha = 0.82; waterMat.specularColor = new BABYLON.Color3(0.5, 0.6, 0.7);
+    const water = BABYLON.MeshBuilder.CreateGround("water", { width: riverHalf * 2, height: riverLen }, scene);
+    water.rotation.y = riverAngle; water.position.set(riverCenter.x, 0.05, riverCenter.z);
+    water.material = waterMat; water.isPickable = false;
+
+    // Lily pads floating on the water (purely decorative).
+    const padMat = mat(scene, "pad", "#2f8f4a");
+    for (let i = 0; i < 14; i++) {
+      const t = (Math.random() - 0.5) * riverLen * 0.8;
+      if (Math.abs((((t) % 52) + 52) % 52) < bridgeHalf + 1) continue; // not on a bridge
+      const off = (Math.random() - 0.5) * (riverHalf * 1.4);
+      const x = riverCenter.x + alongT.x * t + crossN.x * off;
+      const z = riverCenter.z + alongT.z * t + crossN.z * off;
+      const pad = disc(scene, "pad", 0.5 + Math.random() * 0.4, padMat);
+      pad.rotation.x = Math.PI / 2; pad.position.set(x, 0.08, z); pad.isPickable = false;
+    }
+
+    // Bridges — a wooden plank deck + rails at each crossing.
+    const plankMat = mat(scene, "plank", "#9a6a3a");
+    const railMat = mat(scene, "rail", "#7a5230");
+    for (const b of bridges) {
+      const cx = riverCenter.x + alongT.x * b;
+      const cz = riverCenter.z + alongT.z * b;
+      const deck = box(scene, "bridge", riverHalf * 2 + 5, 0.25, bridgeHalf * 2, plankMat);
+      deck.rotation.y = riverAngle; deck.position.set(cx, 0.12, cz); deck.receiveShadows = true;
+      shadow.addShadowCaster(deck);
+      for (const side of [-1, 1]) {
+        const rail = box(scene, "rail", riverHalf * 2 + 5, 0.5, 0.18, railMat);
+        rail.rotation.y = riverAngle;
+        rail.position.set(cx + alongT.x * (bridgeHalf - 0.2) * side, 0.5, cz + alongT.z * (bridgeHalf - 0.2) * side);
+        shadow.addShadowCaster(rail);
+      }
+    }
 
     // ---- Roads: a randomly oriented crossroads of grey strips. ----
     const roadMat = mat(scene, "road", "#6b6f78");
     const roadEdge = mat(scene, "roadEdge", "#d9c47a");
     const baseAngle = Math.random() * Math.PI;
-    for (const ang of [baseAngle, baseAngle + Math.PI / 2]) {
-      const road = BABYLON.MeshBuilder.CreateGround("road", { width: 7, height: 120 }, scene);
+    const roadAngles = [baseAngle, baseAngle + Math.PI / 2];
+    for (const ang of roadAngles) {
+      const road = BABYLON.MeshBuilder.CreateGround("road", { width: 7, height: GROUND }, scene);
       road.rotation.y = ang; road.position.y = 0.02; road.material = roadMat; road.receiveShadows = true;
       for (const side of [-1, 1]) {
-        const edge = BABYLON.MeshBuilder.CreateGround("edge", { width: 0.35, height: 120 }, scene);
+        const edge = BABYLON.MeshBuilder.CreateGround("edge", { width: 0.35, height: GROUND }, scene);
         edge.rotation.y = ang; edge.position.y = 0.03; edge.material = roadEdge;
         edge.position.x = Math.cos(ang) * 3.3 * side;
         edge.position.z = -Math.sin(ang) * 3.3 * side;
@@ -892,53 +1119,126 @@
 
     // Helper: are we on/near a road centerline? (keep trees off the roads)
     const onRoad = (x, z) => {
-      for (const ang of [baseAngle, baseAngle + Math.PI / 2]) {
+      for (const ang of roadAngles) {
         const perp = Math.abs(x * Math.sin(ang) - z * Math.cos(ang));
         if (perp < 5) return true;
       }
       return false;
     };
 
-    // ---- Scatter trees, rocks, flowers, grass tufts. ----
-    const trunkMat = mat(scene, "trunk", "#7a5230");
-    const leafMats = ["#3f9d4a", "#46ad53", "#379142"].map((c, i) => mat(scene, "leaf" + i, c));
-    const rockMat = mat(scene, "rock", "#9aa0a6");
-    const tuftMat = mat(scene, "tuft", "#69bd55");
-
+    // Find a valid scatter spot: away from spawn/roads/water, inside the fence.
     const place = (minR, maxR) => {
-      for (let tries = 0; tries < 12; tries++) {
+      for (let tries = 0; tries < 16; tries++) {
         const ang = Math.random() * Math.PI * 2;
         const r = minR + Math.random() * (maxR - minR);
         const x = Math.cos(ang) * r, z = Math.sin(ang) * r;
-        if (r > 6 && !onRoad(x, z)) return { x, z };
+        if (r > 6 && !onRoad(x, z) &&
+            Math.abs(signedPerp(x, z) - riverPerp) > riverHalf + 1.5) return { x, z };
       }
       return null;
     };
 
-    const trees = 22 + ((Math.random() * 8) | 0);
-    for (let i = 0; i < trees; i++) {
-      const p = place(8, 52); if (!p) continue;
-      const h = 1.2 + Math.random() * 0.8;
-      const trunk = cyl(scene, "trunk", 0.5, 0.5, h * 1.4, trunkMat);
-      trunk.position.set(p.x, h * 0.7, p.z); shadow.addShadowCaster(trunk);
-      const lm = leafMats[(Math.random() * leafMats.length) | 0];
-      const n = 2 + ((Math.random() * 2) | 0);
-      for (let k = 0; k < n; k++) {
-        const leaf = sphere(scene, "leaf", 1.8 + Math.random(), lm);
-        leaf.position.set(p.x + (Math.random() - 0.5), h * 1.4 + 0.6 + k * 0.6, p.z + (Math.random() - 0.5));
-        leaf.scaling.y = 1.1; shadow.addShadowCaster(leaf);
+    const FAR = CONFIG.worldRadius - 6;
+
+    // ---- Lampposts marching along the roads (emissive, no extra GPU lights). ----
+    const poleMat = mat(scene, "pole", "#3a3f4a");
+    const lampMat = emat(scene, "lamp", "#ffe6a0", 0.9);
+    for (const ang of roadAngles) {
+      for (let d = -FAR + 8; d <= FAR - 8; d += 18) {
+        for (const side of [-1, 1]) {
+          const x = Math.cos(ang) * d + Math.sin(ang) * 4.4 * side;
+          const z = -Math.sin(ang) * d + Math.cos(ang) * 4.4 * side;
+          if (Math.hypot(x, z) > FAR || inRiver(x, z)) continue;
+          const pole = cyl(scene, "pole", 0.18, 0.22, 3.2, poleMat);
+          pole.position.set(x, 1.6, z); shadow.addShadowCaster(pole);
+          const lamp = sphere(scene, "lamp", 0.5, lampMat);
+          lamp.position.set(x, 3.35, z); lamp.isPickable = false;
+          addObstacle(x, z, 0.4);
+        }
       }
     }
 
-    for (let i = 0; i < 16; i++) {
-      const p = place(7, 54); if (!p) continue;
-      const rock = BABYLON.MeshBuilder.CreateIcoSphere("rock", { radius: 0.4 + Math.random() * 0.7, subdivisions: 1 }, scene);
-      rock.material = rockMat; rock.position.set(p.x, 0.3, p.z);
-      rock.rotation.set(Math.random(), Math.random(), Math.random()); shadow.addShadowCaster(rock);
+    // ---- Trees. ----
+    const trunkMat = mat(scene, "trunk", "#7a5230");
+    const leafMats = ["#3f9d4a", "#46ad53", "#379142"].map((c, i) => mat(scene, "leaf" + i, c));
+    const trees = 60 + ((Math.random() * 18) | 0);
+    for (let i = 0; i < trees; i++) {
+      const p = place(8, FAR); if (!p) continue;
+      const h = 1.3 + Math.random() * 1.0;
+      const trunk = cyl(scene, "trunk", 0.5, 0.6, h * 1.5, trunkMat);
+      trunk.position.set(p.x, h * 0.75, p.z); shadow.addShadowCaster(trunk);
+      const lm = leafMats[(Math.random() * leafMats.length) | 0];
+      const n = 2 + ((Math.random() * 2) | 0);
+      for (let k = 0; k < n; k++) {
+        const leaf = sphere(scene, "leaf", 1.9 + Math.random(), lm);
+        leaf.position.set(p.x + (Math.random() - 0.5), h * 1.5 + 0.6 + k * 0.6, p.z + (Math.random() - 0.5));
+        leaf.scaling.y = 1.1; shadow.addShadowCaster(leaf);
+      }
+      addObstacle(p.x, p.z, 0.9);
     }
 
-    for (let i = 0; i < 60; i++) {
-      const p = place(6, 56); if (!p) continue;
+    // ---- Rocks. ----
+    const rockMat = mat(scene, "rock", "#9aa0a6");
+    for (let i = 0; i < 40; i++) {
+      const p = place(7, FAR); if (!p) continue;
+      const rad = 0.5 + Math.random() * 0.9;
+      const rock = BABYLON.MeshBuilder.CreateIcoSphere("rock", { radius: rad, subdivisions: 1 }, scene);
+      rock.material = rockMat; rock.position.set(p.x, rad * 0.6, p.z);
+      rock.rotation.set(Math.random(), Math.random(), Math.random()); shadow.addShadowCaster(rock);
+      addObstacle(p.x, p.z, rad * 0.85);
+    }
+
+    // ---- Bushes (clusters of leafy spheres). ----
+    for (let i = 0; i < 34; i++) {
+      const p = place(7, FAR); if (!p) continue;
+      const lm = leafMats[(Math.random() * leafMats.length) | 0];
+      const lobes = 3 + ((Math.random() * 2) | 0);
+      for (let k = 0; k < lobes; k++) {
+        const b = sphere(scene, "bush", 0.7 + Math.random() * 0.5, lm);
+        b.position.set(p.x + (Math.random() - 0.5) * 1.1, 0.45, p.z + (Math.random() - 0.5) * 1.1);
+        b.scaling.y = 0.85; shadow.addShadowCaster(b);
+      }
+      addObstacle(p.x, p.z, 0.85);
+    }
+
+    // ---- Giant toadstools (red cap + cream stalk). ----
+    const stalkMat = mat(scene, "stalk", "#f3e6c8");
+    const capMat = mat(scene, "cap", "#d83a3a");
+    const spotMat = mat(scene, "spot", "#fff2e0");
+    for (let i = 0; i < 22; i++) {
+      const p = place(7, FAR); if (!p) continue;
+      const h = 0.8 + Math.random() * 0.7;
+      const stalk = cyl(scene, "stalk", 0.4, 0.55, h, stalkMat);
+      stalk.position.set(p.x, h / 2, p.z); shadow.addShadowCaster(stalk);
+      const cap = sphere(scene, "cap", 1.3 + Math.random() * 0.5, capMat);
+      cap.position.set(p.x, h, p.z); cap.scaling.y = 0.6; shadow.addShadowCaster(cap);
+      for (let s = 0; s < 4; s++) {
+        const spot = disc(scene, "spot", 0.12 + Math.random() * 0.08, spotMat);
+        spot.rotation.x = Math.PI / 2;
+        spot.position.set(p.x + (Math.random() - 0.5) * 1.0, h + 0.36, p.z + (Math.random() - 0.5) * 1.0);
+      }
+      addObstacle(p.x, p.z, 0.5);
+    }
+
+    // ---- Cattails / reeds hugging the riverbank (decorative). ----
+    const reedMat = mat(scene, "reed", "#3c8a3c");
+    const catMat = mat(scene, "cat", "#6b4a2a");
+    for (let i = 0; i < 40; i++) {
+      const t = (Math.random() - 0.5) * riverLen * 0.85;
+      const off = (riverHalf + 0.6 + Math.random() * 1.2) * (Math.random() < 0.5 ? 1 : -1);
+      const x = riverCenter.x + alongT.x * t + crossN.x * off;
+      const z = riverCenter.z + alongT.z * t + crossN.z * off;
+      if (Math.hypot(x, z) > FAR) continue;
+      const stem = cyl(scene, "reed", 0.05, 0.05, 1.1 + Math.random() * 0.6, reedMat);
+      stem.position.set(x, 0.6, z);
+      const head = capsule(scene, "cattail", 0.4, 0.09, catMat);
+      head.position.set(x, 1.25, z);
+    }
+
+    // ---- Flowers + grass tufts (decorative ground cover). ----
+    const tuftMat = mat(scene, "tuft", "#69bd55");
+    for (let i = 0; i < 140; i++) {
+      const p = place(6, FAR); if (!p) continue;
       if (Math.random() < 0.5) {
         const stem = cyl(scene, "stem", 0.04, 0.04, 0.4, mat(scene, "stem", "#3c8a3c"));
         stem.position.set(p.x, 0.2, p.z);
@@ -950,7 +1250,52 @@
       }
     }
 
-    return { shadow, onRoad };
+    // Resolve a desired move against the fence, solid scenery, and the river.
+    // Slides along obstacles/banks instead of stopping the player dead.
+    function moveActor(cur, desired, r) {
+      let tx = desired.x, tz = desired.z;
+
+      // River barrier: if the straight move would enter the water, slide along
+      // the bank by trying each axis independently.
+      if (inRiver(tx, tz) && !inRiver(cur.x, cur.z)) {
+        if (!inRiver(desired.x, cur.z)) tz = cur.z;
+        else if (!inRiver(cur.x, desired.z)) tx = cur.x;
+        else { tx = cur.x; tz = cur.z; }
+      }
+
+      // Push out of any solid scenery (two relaxation passes for stacked cases).
+      for (let it = 0; it < 2; it++) {
+        for (const o of obstacles) {
+          const dx = tx - o.x, dz = tz - o.z;
+          const md = o.r + r;
+          const d2 = dx * dx + dz * dz;
+          if (d2 < md * md) {
+            const d = Math.sqrt(d2) || 0.0001;
+            const push = md - d;
+            tx += (dx / d) * push; tz += (dz / d) * push;
+          }
+        }
+      }
+
+      // Keep inside the circular fence.
+      const fr = CONFIG.worldRadius - r;
+      const hyp = Math.hypot(tx, tz);
+      if (hyp > fr) { tx = (tx / hyp) * fr; tz = (tz / hyp) * fr; }
+
+      // If push-out shoved us into the river, refuse the move.
+      if (inRiver(tx, tz) && !inRiver(cur.x, cur.z)) return cur.clone();
+      return new BABYLON.Vector3(tx, cur.y, tz);
+    }
+
+    // A gentle shimmer + bob so the river reads as flowing water.
+    const baseWaterY = water.position.y;
+    scene.onBeforeRenderObservable.add(() => {
+      const t = performance.now() / 1000;
+      water.position.y = baseWaterY + Math.sin(t * 1.5) * 0.015;
+      waterMat.emissiveColor = BABYLON.Color3.FromHexString("#3aa0e0").scale(0.14 + Math.sin(t * 2) * 0.05);
+    });
+
+    return { shadow, onRoad, obstacles, inRiver, moveActor, water, waterMat };
   }
 
   // =========================================================================
@@ -979,10 +1324,12 @@
         const ang = Math.random() * Math.PI * 2, r = 2 + Math.random() * 8;
         x = near.x + Math.cos(ang) * r; z = near.z + Math.sin(ang) * r;
       } else {
-        const ang = Math.random() * Math.PI * 2, r = 9 + Math.random() * 24;
+        const ang = Math.random() * Math.PI * 2, r = 9 + Math.random() * (CONFIG.worldRadius - 16);
         x = Math.cos(ang) * r; z = Math.sin(ang) * r;
       }
-      if (Math.hypot(x, z) < CONFIG.worldRadius - 2 && !world.onRoad(x, z)) pos = new BABYLON.Vector3(x, 0, z);
+      if (Math.hypot(x, z) < CONFIG.worldRadius - 2 && !world.onRoad(x, z) && !world.inRiver(x, z)) {
+        pos = new BABYLON.Vector3(x, 0, z);
+      }
     }
     if (!pos) pos = new BABYLON.Vector3((Math.random() - 0.5) * 30, 0, (Math.random() - 0.5) * 30);
 
@@ -1030,19 +1377,62 @@
       apply: (p) => { p.weapon.boltRadius += 0.25; },
     },
     {
+      id: "pierce", name: "Piercing Rune", icon: "🏹",
+      desc: "Bolts punch through +1 more sweet", baseCost: 16, growth: 1.9, max: 3,
+      apply: (p) => { p.weapon.pierce += 1; },
+    },
+    {
       id: "trident", name: "Trident Wand", icon: "🔱",
       desc: "New weapon: fire 3 bolts in a spread", baseCost: 45, growth: 1, max: 1,
       apply: (p) => {
-        p.weapon.multishot = 3; p.weapon.name = "Trident Wand";
+        p.weapon.multishot = Math.max(3, p.weapon.multishot); p.weapon.name = "Trident Wand";
         p.weapon.color = "#ffd9f0"; p.weapon.haloColor = "#ff9de0";
       },
     },
     {
+      id: "storm", name: "Storm Wand", icon: "🌩️",
+      desc: "Upgrade to a 5-bolt storm spread", baseCost: 90, growth: 1, max: 1,
+      // Only useful once you already wield the Trident.
+      requires: (state) => (state.upgrades["trident"] || 0) >= 1,
+      apply: (p) => {
+        p.weapon.multishot = 5; p.weapon.spread = 0.18; p.weapon.name = "Storm Wand";
+        p.weapon.color = "#d8e8ff"; p.weapon.haloColor = "#88b8ff";
+      },
+    },
+    {
+      id: "vitality", name: "Vitality Charm", icon: "💗",
+      desc: "+25 max health (and heal up)", baseCost: 14, growth: 1.7, max: 5,
+      apply: (p) => {
+        p.maxHealth += 25; p.health = Math.min(p.maxHealth, p.health + 25);
+        updateHealthBar(p.health);
+      },
+    },
+    {
+      id: "speed", name: "Swift Boots", icon: "👢",
+      desc: "Move 12% faster", baseCost: 12, growth: 1.7, max: 4,
+      apply: (p) => { p.speed *= 1.12; },
+    },
+    {
+      id: "armor", name: "Aegis Ward", icon: "🛡️",
+      desc: "Take 12% less damage from sweets", baseCost: 14, growth: 1.8, max: 4,
+      apply: (p) => { p.damageReduction = Math.min(0.6, p.damageReduction + 0.12); },
+    },
+    {
+      id: "lifesteal", name: "Vampiric Gem", icon: "🩸",
+      desc: "Heal +2 health per sweet defeated", baseCost: 20, growth: 1.9, max: 3,
+      apply: (p) => { p.lifesteal += 2; },
+    },
+    {
+      id: "lodestone", name: "Coin Lodestone", icon: "🧲",
+      desc: "Coins are drawn in from much farther", baseCost: 10, growth: 1.8, max: 3,
+      apply: () => { coinMagnetRange += 2.5; coinPickupRange += 0.5; },
+    },
+    {
       id: "heal", name: "Healing Brew", icon: "❤️",
       desc: "Restore your health to full", baseCost: 6, growth: 1.4, max: Infinity, repeatable: true,
-      apply: (p) => { p.health = CONFIG.maxHealth; updateHealthBar(p.health); },
+      apply: (p) => { p.health = p.maxHealth; updateHealthBar(p.health); },
       // Healing is pointless at full health — let the UI grey it out.
-      unavailable: (p) => p.health >= CONFIG.maxHealth,
+      unavailable: (p) => p.health >= p.maxHealth,
     },
   ];
 
@@ -1071,6 +1461,7 @@
     buy(item) {
       const lvl = itemLevel(this.state, item);
       if (lvl >= item.max) return;
+      if (item.requires && !item.requires(this.state)) return;
       if (item.unavailable && item.unavailable(this.player)) return;
       const cost = itemCost(this.state, item);
       if (this.state.coins < cost) return;
@@ -1090,6 +1481,7 @@
         const maxed = lvl >= item.max;
         const cost = itemCost(this.state, item);
         const blocked = item.unavailable && item.unavailable(this.player);
+        const locked = item.requires && !item.requires(this.state);
         const tooPoor = this.state.coins < cost;
 
         const row = document.createElement("div");
@@ -1101,6 +1493,7 @@
 
         let btnLabel, btnClass = "buy-btn", disabled = false;
         if (maxed) { btnLabel = "Owned"; btnClass += " owned"; disabled = true; }
+        else if (locked) { btnLabel = "🔒"; disabled = true; }
         else if (blocked) { btnLabel = "Full"; disabled = true; }
         else { btnLabel = `🪙 ${cost}`; disabled = tooPoor; }
 
@@ -1208,24 +1601,40 @@
       // Reset the per-wave stat counters for the wave about to begin.
       this.state.waveStats = { kills: 0, artifacts: 0, coins: 0 };
 
-      const monsterCount = this.monstersForWave(this.wave);
+      const isBossWave = this.wave % CONFIG.bossEveryWaves === 0;
+      // On boss waves the king brings a smaller honour guard.
+      let monsterCount = this.monstersForWave(this.wave);
+      if (isBossWave) monsterCount = Math.round(monsterCount * 0.6);
       const artifactCount = this.artifactsForWave(this.wave);
-      this.state.waveTotal = monsterCount;
+      this.state.waveTotal = monsterCount + (isBossWave ? 1 : 0);
 
       // Monsters spawn around the ring, away from the player so they march in.
+      const ringMin = Math.min(34, CONFIG.worldRadius - 18);
       for (let i = 0; i < monsterCount; i++) {
         const ang = Math.random() * Math.PI * 2;
-        const r = 26 + Math.random() * 12;
+        const r = ringMin + Math.random() * 14;
         const pos = new BABYLON.Vector3(Math.cos(ang) * r, 0, Math.sin(ang) * r);
         this.state.monsters.push(new Monster(this.scene, this.world.shadow, pos, this.wave));
       }
+
+      // Every few waves, a colossal Sweet King storms in with a health bar.
+      if (isBossWave) {
+        const ang = Math.random() * Math.PI * 2;
+        const r = ringMin + 8;
+        const pos = new BABYLON.Vector3(Math.cos(ang) * r, 0, Math.sin(ang) * r);
+        const boss = new Boss(this.scene, this.world.shadow, pos, this.wave);
+        this.state.boss = boss;
+        this.state.monsters.push(boss);
+        showBossBar(boss);
+      }
+
       // Each wave also drops fresh artifacts to grab.
       for (let i = 0; i < artifactCount; i++) {
         spawnArtifact(this.scene, this.world, this.interaction, this.player, this.state);
       }
 
       updateMonsterCounter(this.state);
-      bannerWave(this.wave, monsterCount);
+      bannerWave(this.wave, monsterCount, isBossWave ? this.state.boss.name : null);
     }
   }
 
@@ -1244,6 +1653,8 @@
 
     const world = buildWorld(scene);
     const player = new Player(scene, world.shadow);
+    player.world = world;          // enable scenery/river collision
+    playerRef = player;            // HUD helpers read max health from here
     const interaction = new InteractionSystem();
 
     const state = {
@@ -1252,7 +1663,7 @@
       artifacts: [], monsters: [], bolts: [], coinsList: [],
       upgrades: Object.create(null),
       waveStats: { kills: 0, artifacts: 0, coins: 0 },
-      merchant: null,
+      merchant: null, boss: null,
     };
     updateHealthBar(player.health);
     updateMonsterCounter(state);
@@ -1296,7 +1707,7 @@
           for (const s of shots) {
             state.bolts.push(new Projectile(scene, world.shadow, s.origin, s.dir, {
               speed: w.boltSpeed, radius: w.boltRadius, damage: w.damage,
-              color: w.color, haloColor: w.haloColor,
+              pierce: w.pierce, color: w.color, haloColor: w.haloColor,
             }));
           }
         }
@@ -1324,18 +1735,15 @@
         // Hit-test against live monsters on the XZ plane (bolts fly at hand
         // height while a monster's root sits on the ground, so ignore Y).
         for (const m of state.monsters) {
-          if (!m.alive || m.dying > 0) continue;
+          if (!m.alive || m.dying > 0 || b.hitSet.has(m)) continue;
           const dx = b.mesh.position.x - m.position.x;
           const dz = b.mesh.position.z - m.position.z;
           if (Math.hypot(dx, dz) <= b.radius + m.radius) {
             const killed = m.hit(b.damage);
-            if (killed) {
-              addScore(state, CONFIG.scorePerMonster);
-              state.waveStats.kills++;
-              maybeDropCoin(state, m.position);
-              toast(`Splat! +${CONFIG.scorePerMonster}`);
-            }
-            b.dead = true;
+            b.hitSet.add(m);
+            if (killed) onMonsterDefeated(state, m);
+            // Pierce upgrades let a bolt punch through several sweets.
+            if (b.pierce > 0) b.pierce--; else b.dead = true;
             break;
           }
         }
@@ -1351,12 +1759,44 @@
       if (!m.alive) { state.monsters.splice(i, 1); continue; }
       if (touching && m.dying <= 0 && m.biteTimer <= 0) {
         m.biteTimer = CONFIG.biteCooldown;
-        const hp = player.takeDamage(CONFIG.contactDamage);
+        const dmg = (m.contactDamage || CONFIG.contactDamage) * (1 - player.damageReduction);
+        const hp = player.takeDamage(dmg);
         updateHealthBar(hp);
         flashHurt();
         if (hp <= 0) { gameOver(state); return; }
       }
     }
+  }
+
+  // A monster (regular sweet or boss) was just killed: award score/coins, apply
+  // lifesteal, and clean up the boss bar when a Sweet King falls.
+  function onMonsterDefeated(state, m) {
+    // Lifesteal heals the player a little per kill (Vampiric Gem upgrade).
+    if (playerRef && playerRef.lifesteal > 0) {
+      playerRef.health = Math.min(playerRef.maxHealth, playerRef.health + playerRef.lifesteal);
+      updateHealthBar(playerRef.health);
+    }
+    if (m.isBoss) {
+      addScore(state, CONFIG.bossScore);
+      state.waveStats.kills++;
+      // A boss always pays out a generous purse of coins.
+      let left = CONFIG.bossCoinDrop;
+      while (left > 0) {
+        const v = Math.min(left, 3 + ((Math.random() * 3) | 0));
+        left -= v;
+        const off = () => (Math.random() - 0.5) * 3;
+        state.coinsList.push(new Coin(state.scene, state.shadow,
+          new BABYLON.Vector3(m.position.x + off(), 0, m.position.z + off()), v));
+      }
+      hideBossBar();
+      if (state.boss === m) state.boss = null;
+      toast(`👑 ${m.name} defeated! +${CONFIG.bossScore}`);
+      return;
+    }
+    addScore(state, CONFIG.scorePerMonster);
+    state.waveStats.kills++;
+    maybeDropCoin(state, m.position);
+    toast(`Splat! +${CONFIG.scorePerMonster}`);
   }
 
   // Roll for a coin drop when a sweet is defeated, and spawn it at the kill spot.
@@ -1416,13 +1856,30 @@
   }
 
   function updateHealthBar(hp) {
-    const pct = Math.max(0, Math.min(100, (hp / CONFIG.maxHealth) * 100));
+    const max = playerRef ? playerRef.maxHealth : CONFIG.maxHealth;
+    const pct = Math.max(0, Math.min(100, (hp / max) * 100));
     dom.healthFill.style.width = pct + "%";
     dom.healthFill.style.background = pct > 50
       ? "linear-gradient(90deg, #5be0a0, #6cc6ff)"
       : pct > 25
       ? "linear-gradient(90deg, #ffd34e, #ff9d5c)"
       : "linear-gradient(90deg, #ff5c7a, #ff3b3b)";
+  }
+
+  // ---- Boss health bar (shown only while a boss is alive) ----
+  function showBossBar(boss) {
+    if (!dom.bossBar) return;
+    dom.bossName.textContent = "👑 " + boss.name;
+    updateBossBar(boss);
+    dom.bossBar.classList.remove("hidden");
+  }
+  function updateBossBar(boss) {
+    if (!dom.bossFill) return;
+    const pct = Math.max(0, Math.min(100, (boss.hp / boss.maxHp) * 100));
+    dom.bossFill.style.width = pct + "%";
+  }
+  function hideBossBar() {
+    if (dom.bossBar) dom.bossBar.classList.add("hidden");
   }
 
   let hurtTimer = null;
@@ -1432,8 +1889,10 @@
     hurtTimer = setTimeout(() => { dom.hud.style.boxShadow = "none"; }, 160);
   }
 
-  function bannerWave(n, monsterCount) {
-    dom.waveBanner.textContent = `Wave ${n} — ${monsterCount} sweets!`;
+  function bannerWave(n, monsterCount, bossName) {
+    dom.waveBanner.textContent = bossName
+      ? `Wave ${n} — 👑 ${bossName}!`
+      : `Wave ${n} — ${monsterCount} sweets!`;
     dom.waveBanner.classList.remove("show");
     void dom.waveBanner.offsetWidth; // restart the CSS animation
     dom.waveBanner.classList.add("show");
@@ -1443,6 +1902,7 @@
     state.over = true;
     dom.prompt.classList.add("hidden");
     dom.wavePanel.classList.add("hidden");
+    hideBossBar();
     dom.finalScore.textContent = state.score;
     dom.finalWave.textContent = state.wave;
     setTimeout(() => dom.over.classList.remove("hidden"), 600);
@@ -1546,6 +2006,18 @@
 
   dom.startBtn.disabled = true;
   boot();
+
+  // --- Test seam: exposes internals to the headless verification harness only.
+  // Inert in production — window.__GG_TEST__ is never set on the deployed site. ---
+  if (typeof window !== "undefined" && window.__GG_TEST__) {
+    window.__GG_TEST__ = {
+      CONFIG, Projectile, Monster, Boss, Shop, SHOP_ITEMS,
+      get waves() { return waveSystem; },
+      get player() { return playerRef; },
+      get state() { return Shop.state; },
+      startGame,
+    };
+  }
 
   /* ===========================================================================
    * ROADMAP SEAMS (inert, documented integration points):
