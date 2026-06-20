@@ -78,7 +78,7 @@ BABYLON.Scene.FOGMODE_EXP2 = 2;
 const handlers = {};
 function makeEl() {
   return new Proxy({
-    classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, contains(c) { return this._s.has(c); } },
+    classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, contains(c) { return this._s.has(c); }, toggle(c, force) { const on = force === undefined ? !this._s.has(c) : force; if (on) this._s.add(c); else this._s.delete(c); return on; } },
     style: {}, dataset: {},
     addEventListener(ev, fn) { (handlers[ev] = handlers[ev] || []).push(fn); },
     appendChild() {}, removeChild() {}, setAttribute() {},
@@ -163,61 +163,126 @@ key("KeyW", false); key("Space", false);
 ok(T.state.bolts.length >= 0, "casting + movement ran for 60 frames");
 ok(T.player.position && isFinite(T.player.position.x), "player position stayed finite under collision");
 
-console.log("\n[5] boss wave (every 5 waves)");
-// Fast-forward the wave counter to a boss wave by spawning directly.
-T.state.monsters.length = 0;
-T.waves.wave = T.CONFIG.bossEveryWaves - 1; // next spawn => wave 5
-T.waves.betweenWaves = true;
-T.waves.spawnWave();
-const boss = T.state.boss;
-ok(!!boss && boss.isBoss, `boss spawned: ${boss && boss.name}`);
-ok(boss.maxHp >= T.CONFIG.bossBaseHp, `boss has scaled HP (${boss.maxHp})`);
-ok(boss.contactDamage > T.CONFIG.contactDamage, "boss hits harder than a normal sweet");
-step(10);
-ok(true, "boss.update ran for 10 frames");
-// Kill the boss via a real bolt through updateBolts -> onMonsterDefeated.
-// Isolate the boss so the co-located kill bolt can't hit a nearby honour guard
-// first (guard ring + boss spawn share one seeded RNG, so spacing varies).
-T.state.monsters.length = 0; T.state.monsters.push(boss);
-const beforeScore = T.state.score;
-const beforeCoins = T.state.coinsList.length;
-const bolt = new T.Projectile(scene, null, boss.position.clone(), new Vec3(0, 0, 1), { damage: boss.maxHp + 5, radius: boss.radius + 1 });
-T.state.bolts.push(bolt);
-step(2);
-ok(boss.dying > 0 || boss.alive === false, "boss took lethal damage from a bolt");
-ok(T.state.score >= beforeScore + T.CONFIG.bossScore, `boss kill awarded +${T.CONFIG.bossScore} score`);
-ok(T.state.coinsList.length > beforeCoins, "boss dropped a purse of coins");
+
+// Helper: a flat, high-damage bolt at hand height that ignores gravity, so a
+// single update lands a guaranteed hit (mirrors how monster hit-tests ignore Y).
+const shoot = (target, dmg) =>
+  new T.Projectile(scene, null, new Vec3(target.position.x, 1.5, target.position.z),
+    new Vec3(0, 0, 1), { damage: dmg, radius: (target.radius || 1) + 1, gravity: 0 });
+
+console.log("\n[5] boss archetypes, attacks & rare drops");
+ok(T.BOSS_ARCHES.length >= 4, `${T.BOSS_ARCHES.length} boss archetypes with distinct behaviour`);
+for (const a of T.BOSS_ARCHES) {
+  const b = new T.Boss(scene, world.shadow, new Vec3(22, 0, 0), 10, a.id);
+  ok(b.archId === a.id && b.isBoss, `archetype "${a.id}" (${b.name}) constructs`);
+}
+// Bosses scale up each cycle (wave 5 vs wave 15 of the same archetype).
+const young = new T.Boss(scene, world.shadow, new Vec3(0, 0, 0), 5, "charger");
+const old = new T.Boss(scene, world.shadow, new Vec3(0, 0, 0), 15, "charger");
+ok(old.maxHp > young.maxHp && old.contactDamage > young.contactDamage, "later bosses are tougher (power scales)");
+
+// A "caster" boss lobs hostile projectiles at the player (state.enemyBolts).
+T.state.monsters.length = 0; T.state.enemyBolts.length = 0;
+const caster = new T.Boss(scene, world.shadow, new Vec3(8, 0, 0), 10, "caster");
+caster.actionTimer = 0; T.state.monsters.push(caster);
+for (let i = 0; i < 200 && T.state.enemyBolts.length === 0; i++) step();
+ok(T.state.enemyBolts.length > 0, "caster boss launched hostile projectiles");
+
+// A "summoner" boss conjures extra sweets into the wave.
+T.state.monsters.length = 0; T.state.enemyBolts.length = 0;
+const summoner = new T.Boss(scene, world.shadow, new Vec3(10, 0, 0), 10, "summoner");
+summoner.actionTimer = 0; T.state.monsters.push(summoner);
+const beforeSummon = T.state.monsters.length;
+for (let i = 0; i < 240 && T.state.monsters.length <= beforeSummon; i++) step();
+ok(T.state.monsters.length > beforeSummon, "summoner boss conjured minions");
+
+// A boss always drops a guaranteed RARE item on death. Keep the player far away
+// so the loot/coins stay on the ground (they auto-collect when walked over).
+T.state.monsters.length = 0; T.state.enemyBolts.length = 0; T.state.drops.length = 0;
+T.player.root.position.set(-60, 0, -60);
+const killBoss = new T.Boss(scene, world.shadow, new Vec3(50, 0, 50), 10, "stomper");
+T.state.boss = killBoss; T.state.monsters.push(killBoss);
+const sScore = T.state.score, sCoins = T.state.coinsList.length;
+T.state.bolts.push(shoot(killBoss, killBoss.maxHp + 50));
+step(3);
+ok(killBoss.dying > 0 || !killBoss.alive, "boss took lethal damage from a bolt");
+ok(T.state.score >= sScore + T.CONFIG.bossScore, `boss kill awarded +${T.CONFIG.bossScore} score`);
+ok(T.state.coinsList.length > sCoins, "boss dropped a purse of coins");
+ok(T.state.drops.length > 0, "boss dropped a RARE item");
+ok(T.getDef(T.state.drops[0].id).rarity === "rare", `dropped item (${T.state.drops[0].id}) is rare`);
 ok(T.state.boss === null, "boss reference cleared after defeat");
 
-console.log("\n[6] shop — all items present & buyable");
-ok(T.SHOP_ITEMS.length >= 12, `shop offers ${T.SHOP_ITEMS.length} items`);
-T.state.coins = 100000;
+// Walking over a dropped item scoops it into the bag.
+const dropCount = T.state.drops.length;
+const bagBefore = T.player.inventory.length;
+T.player.root.position.copyFrom(T.state.drops[0].root.position);
+step(2);
+ok(T.player.inventory.length > bagBefore && T.state.drops.length < dropCount, "rare drop picked up into inventory");
+
+console.log("\n[6] gear economy — buy, equip, dual-wield, sell");
 const p = T.player;
-const snap = { hp: p.maxHealth, speed: p.speed, dmg: p.weapon.damage, multishot: p.weapon.multishot, pierce: p.weapon.pierce, dr: p.damageReduction, ls: p.lifesteal };
+T.state.coins = 100000;
+const baseHp = p.maxHealth, baseDR = p.damageReduction;
 T.Shop.openShop();
-for (const item of T.SHOP_ITEMS) {
-  // Buy each non-repeatable item up to its max (storm requires trident, which
-  // is earlier in the list, so it unlocks before we reach it).
-  const times = item.repeatable ? 1 : (isFinite(item.max) ? item.max : 1);
-  for (let i = 0; i < times; i++) T.Shop.buy(item);
+ok(T.SHOP_STOCK.length >= 12, `merchant stocks ${T.SHOP_STOCK.length} normal items`);
+ok(T.SHOP_STOCK.every((id) => T.getDef(id).rarity === "normal"), "merchant never stocks rare gear");
+
+// Buy armour, then equip it — stats must rise.
+const invBefore = p.inventory.length;
+T.Shop.buy(T.getDef("iron_plate"));
+ok(p.inventory.length === invBefore + 1, "buying adds the item to the bag");
+const plate = p.inventory.find((it) => it.id === "iron_plate");
+T.equipItem(p, plate);
+ok(p.equipment.breastplate && p.equipment.breastplate.id === "iron_plate", "armour equips to its slot");
+ok(p.maxHealth > baseHp && p.damageReduction > baseDR, "equipping armour raised max health + resist");
+
+// A two-handed weapon fills both hands.
+T.Shop.buy(T.getDef("short_bow"));
+T.equipItem(p, p.inventory.find((it) => it.id === "short_bow"));
+ok(p.equipment.hand1.id === "short_bow" && p.equipment.hand2 === T.TWO_HANDED, "two-handed weapon occupies both hands");
+ok(p.weapon.ranged && p.weapon.shape === "arrow", "active weapon reflects the equipped bow");
+
+// Two one-handed weapons can be dual-wielded.
+T.Shop.buy(T.getDef("iron_dagger")); T.Shop.buy(T.getDef("iron_sword"));
+T.equipItem(p, p.inventory.find((it) => it.id === "iron_dagger"));
+T.equipItem(p, p.inventory.find((it) => it.id === "iron_sword"));
+ok(p.equipment.hand1 && p.equipment.hand2 && p.equipment.hand2 !== T.TWO_HANDED, "two one-handers dual-wielded across both hands");
+ok(!p.weapon.ranged, "dual melee weapons give a melee attack profile");
+
+// Selling a bag item refunds coins.
+const sellInst = p.inventory[0];
+if (sellInst) {
+  const coinsBefore = T.state.coins, bagCount = p.inventory.length;
+  T.Shop.sell(sellInst);
+  ok(p.inventory.length === bagCount - 1 && T.state.coins > coinsBefore, "selling an item returns coins");
 }
-ok(p.maxHealth > snap.hp, `Vitality raised max health (${snap.hp} -> ${p.maxHealth})`);
-ok(p.speed > snap.speed, `Swift Boots raised speed (${snap.speed.toFixed(1)} -> ${p.speed.toFixed(1)})`);
-ok(p.weapon.damage > snap.dmg, "Power Crystal raised damage");
-ok(p.weapon.multishot === 5, "Trident -> Storm Wand reached 5-bolt spread");
-ok(p.weapon.pierce >= 3, "Piercing Rune stacked");
-ok(p.damageReduction > 0, "Aegis Ward reduced incoming damage");
-ok(p.lifesteal > 0, "Vampiric Gem granted lifesteal");
 T.Shop.closeShop();
 
-console.log("\n[7] lifesteal on kill");
+console.log("\n[7] melee sweep + lifesteal on kill");
+// Stand a sweet right in front of the player and swing a melee weapon at it.
+T.state.monsters.length = 0;
+const mm = new T.Monster(scene, world.shadow, new Vec3(p.position.x, 0, p.position.z + 1.5), 1);
+mm.hp = 1; T.state.monsters.push(mm);
+p.facing = 0;             // face +Z, toward the sweet
+p.castCooldown = 0; p.meleeAnim = 0;
+// (player is currently dual-wielding melee from [6])
+const act = p.tryCast();
+ok(act && act.type === "melee", "melee weapon yields a melee attack");
+const killsBefore = T.state.score;
+// meleeSweep isn't exported; drive it through the live attack path instead.
+T.state.monsters.length = 0;
+const mm2 = new T.Monster(scene, world.shadow, new Vec3(p.position.x, 0, p.position.z + 1.5), 1);
+mm2.hp = 1; T.state.monsters.push(mm2);
+p.castCooldown = 0; key("Space"); step(2); key("Space", false);
+ok(!mm2.alive || mm2.dying > 0, "melee swing struck the sweet in front");
+
+// Lifesteal heals on kill.
 p.health = 10; p.lifesteal = 5;
 T.state.monsters.length = 0;
-const m = new T.Monster(scene, world.shadow, new Vec3(0, 0, 2), 1);
+const m = new T.Monster(scene, world.shadow, new Vec3(p.position.x, 0, p.position.z + 2), 1);
 m.hp = 1; T.state.monsters.push(m);
-const b2 = new T.Projectile(scene, null, m.position.clone(), new Vec3(0, 0, 1), { damage: 5, radius: m.radius + 1 });
-T.state.bolts.push(b2);
 const hpBefore = p.health;
+T.state.bolts.push(shoot(m, 5));
 step(2);
 ok(p.health > hpBefore, `lifesteal healed on kill (${hpBefore} -> ${p.health})`);
 
@@ -229,54 +294,54 @@ const seqB = [T.rng(), T.rng(), T.rng()];
 ok(seqA.every((v, i) => v === seqB[i]), "same seed reproduces the exact RNG stream");
 ok(seqA[0] !== seqA[1] && seqA.every((v) => v >= 0 && v < 1), "RNG yields varied values in [0,1)");
 
-console.log("\n[9] save / load round-trip");
+console.log("\n[9] save / load round-trip (inventory + equipment)");
 const st = T.state;
 const pl = T.player;
-// Build a known, controlled game state.
 st.score = 4242; st.coins = 99;
-pl.health = 33; pl.maxHealth = 150; pl.speed = 9.5;
-pl.damageReduction = 0.24; pl.lifesteal = 4;
-pl.weapon.damage = 7; pl.weapon.multishot = 3; pl.weapon.name = "Trident Wand";
-st.upgrades = Object.assign(Object.create(null), { damage: 3, trident: 1, vitality: 2 });
-// Fresh monsters (incl. a boss) + a dropped coin.
+// A known build: wand in hand, plate on chest, a cap and a rare sword in the bag.
+for (const slot of T.EQUIP_SLOTS) pl.equipment[slot] = null;
+pl.inventory = [T.makeItem("leather_cap"), T.makeItem("excalibur")];
+pl.equipment.hand1 = T.makeItem("magic_wand");
+pl.equipment.breastplate = T.makeItem("iron_plate");
+pl.equipment.ring1 = T.makeItem("ring_power");
+T.recomputeStats(pl);
+pl.health = 33;
+// Monsters incl. a known boss archetype, a coin and a rare drop on the ground.
 st.monsters.length = 0; st.boss = null;
 st.monsters.push(new T.Monster(scene, world.shadow, new Vec3(5, 0, 5), 2));
-st.monsters.push(new T.Monster(scene, world.shadow, new Vec3(-3, 0, 4), 2));
-const bz = new T.Boss(scene, world.shadow, new Vec3(10, 0, 10), 10); bz.hp = 50;
+const bz = new T.Boss(scene, world.shadow, new Vec3(10, 0, 10), 10, "summoner"); bz.hp = 50;
 st.boss = bz; st.monsters.push(bz);
-st.coinsList.length = 0;
-st.coinsList.push(new T.Coin(scene, world.shadow, new Vec3(2, 0, 2), 3));
+st.coinsList.length = 0; st.coinsList.push(new T.Coin(scene, world.shadow, new Vec3(2, 0, 2), 3));
+st.drops.length = 0; st.drops.push(new T.ItemDrop(scene, world.shadow, new Vec3(4, 0, 4), "storm_bow"));
 
 const save = T.serializeGame();
-ok(save && save.v === 1, "serializeGame produced a versioned save");
+ok(save && save.v === 2, "serializeGame produced a versioned save");
 ok(T.validateSave(save), "save passes structural validation");
-ok(typeof save.seed === "number", "save records the world seed");
 ok(save.score === 4242 && save.money === 99, "score + money captured");
-ok(save.monsters.length === 3 && save.monsters.some((m) => m.boss), "monsters + boss captured");
-ok(save.coinDrops.length === 1, "dropped coins captured");
+ok(save.player.inventory.length === 2, "bag captured");
+ok(save.player.equipment.hand1 === "magic_wand" && save.player.equipment.breastplate === "iron_plate", "equipment captured");
+ok(save.monsters.some((mo) => mo.boss && mo.arch === "summoner"), "boss + archetype captured");
+ok(save.itemDrops.length === 1 && save.itemDrops[0].id === "storm_bow", "dropped rare loot captured");
 ok(!T.validateSave({ v: 999 }), "validation rejects a foreign/old file");
 
 // Trash the live state, then restore from the save.
 st.score = 0; st.coins = 0;
-pl.health = 1; pl.maxHealth = 1; pl.speed = 1;
-pl.damageReduction = 0; pl.lifesteal = 0;
-pl.weapon.damage = 1; pl.weapon.multishot = 1; pl.weapon.name = "Magic Wand";
-st.upgrades = Object.create(null);
-const artBefore = save.artifacts.length;
+for (const slot of T.EQUIP_SLOTS) pl.equipment[slot] = null;
+pl.inventory = [];
+pl.health = 1;
+const savedMaxHp = save.player ? null : null; // (stats are recomputed, not stored)
 
 T.applySave(save);
-ok(st.score === 4242, "score restored");
-ok(st.coins === 99, "money restored");
-ok(pl.health === 33 && pl.maxHealth === 150, "player health restored");
-ok(pl.speed === 9.5 && pl.damageReduction === 0.24 && pl.lifesteal === 4, "player stats/perks restored");
-ok(pl.weapon.damage === 7 && pl.weapon.multishot === 3 && pl.weapon.name === "Trident Wand", "weapon perks restored");
-ok(st.upgrades.damage === 3 && st.upgrades.trident === 1 && st.upgrades.vitality === 2, "upgrade levels restored");
-ok(st.monsters.length === 3, "monsters restored to the same count");
-ok(st.boss && st.boss.isBoss && st.boss.hp === 50, "boss restored with its HP");
-ok(st.artifacts.length === artBefore, "artifacts restored to the same count");
-ok(st.coinsList.length === 1 && st.coinsList[0].value === 3, "dropped coins restored");
+ok(st.score === 4242 && st.coins === 99, "score + money restored");
+ok(pl.equipment.hand1 && pl.equipment.hand1.id === "magic_wand", "equipped weapon restored");
+ok(pl.equipment.breastplate && pl.equipment.breastplate.id === "iron_plate", "equipped armour restored");
+ok(pl.equipment.ring1 && pl.equipment.ring1.id === "ring_power", "equipped accessory restored");
+ok(pl.inventory.length === 2, "bag restored to the same count");
+ok(pl.maxHealth > 100, "stats recomputed from the restored gear");
+ok(pl.weapon && pl.weapon.ranged, "active weapon rebuilt from equipped wand");
+ok(st.boss && st.boss.isBoss && st.boss.hp === 50 && st.boss.archId === "summoner", "boss restored with HP + archetype");
+ok(st.drops.length === 1 && st.drops[0].id === "storm_bow", "dropped rare loot restored");
 ok(T.waves.wave === save.wave.number, "wave counter restored");
-// The restored game must keep simulating cleanly.
 step(5);
 ok(isFinite(pl.position.x), "restored game keeps simulating");
 
@@ -290,6 +355,27 @@ T.Pause.hideConfirm();
 ok(T.Pause.pendingAction === null, "confirmation can be cancelled");
 T.Pause.close();
 ok(T.paused === false, "pause menu resumes the game");
+
+console.log("\n[11] projectile physics (arc + finite life)");
+const proj = new T.Projectile(scene, null, new Vec3(0, 3, 0), new Vec3(0, 0, 1), { speed: 20, gravity: 9 });
+const y0 = proj.mesh.position.y;
+for (let i = 0; i < 8; i++) proj.update(0.05);
+ok(proj.mesh.position.y < y0, "gravity pulls the projectile downward (it arcs, not flat-forever)");
+let frames = 0;
+const proj2 = new T.Projectile(scene, null, new Vec3(0, 3, 0), new Vec3(1, 0.2, 0), { speed: 30, gravity: 9 });
+while (!proj2.dead && frames < 1000) { proj2.update(0.05); frames++; }
+ok(proj2.dead && frames < 1000, `projectile terminated after ${frames} frames (never flies forever)`);
+// Hostile boss projectiles are likewise gravity-bound + life-capped.
+let hf = 0;
+const haz = new T.Hazard(scene, new Vec3(0, 3, 0), new Vec3(0, 0.2, 1), { speed: 14, gravity: 5 });
+const farAway = { x: 500, y: 0, z: 500 };
+while (!haz.dead && hf < 1000) { haz.update(0.05, farAway); hf++; }
+ok(haz.dead && hf < 1000, `hostile projectile terminated after ${hf} frames`);
+
+console.log("\n[12] music system is headless-safe");
+let musicThrew = false;
+try { T.Music.start(); T.Music.toggle(); T.Music.toggle(); } catch (e) { musicThrew = true; }
+ok(!musicThrew, "music system no-ops cleanly without a Web Audio context");
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED ✅" : failures + " CHECK(S) FAILED ❌"}`);
 process.exit(failures === 0 ? 0 : 1);

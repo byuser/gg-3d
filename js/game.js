@@ -113,6 +113,244 @@
 
   const PALETTE = ["#6cc6ff", "#a06cff", "#ff6c8a", "#ffd34e", "#5be0a0", "#ff944e"];
 
+  // =========================================================================
+  // ITEMS, EQUIPMENT & INVENTORY
+  // -------------------------------------------------------------------------
+  // The game's economy is now gear-driven instead of fixed buffs. The merchant
+  // sells "normal" gear; bosses drop "rare" gear. Every item is a weapon,
+  // armour piece or accessory that the player carries in an INVENTORY and slots
+  // into EQUIPMENT. The player's stats (max health, damage, speed, resistance,
+  // …) are RECOMPUTED from whatever is equipped — see recomputeStats().
+  //
+  //   Slots: helmet · breastplate · boots · necklace · ring1 · ring2 · two
+  //   hands (hand1/hand2). A two-handed weapon fills both hands; two one-handed
+  //   weapons can be dual-wielded.
+  // =========================================================================
+  const RARITY = {
+    normal: { label: "Normal", color: "#bcd2ff" },
+    rare:   { label: "Rare",   color: "#ffb24e" },
+  };
+
+  // Equipment slots, in display order. A two-handed weapon lives in hand1 with
+  // a TWO_HANDED sentinel parked in hand2 so the off-hand reads as occupied.
+  const EQUIP_SLOTS = ["helmet", "breastplate", "boots", "necklace", "ring1", "ring2", "hand1", "hand2"];
+  const TWO_HANDED = "__2H__";
+  const SLOT_META = {
+    helmet:      { label: "Helmet",      icon: "🪖" },
+    breastplate: { label: "Breastplate", icon: "🦺" },
+    boots:       { label: "Boots",       icon: "🥾" },
+    necklace:    { label: "Necklace",    icon: "📿" },
+    ring1:       { label: "Ring",        icon: "💍" },
+    ring2:       { label: "Ring",        icon: "💍" },
+    hand1:       { label: "Main hand",   icon: "🤚" },
+    hand2:       { label: "Off hand",    icon: "✋" },
+  };
+
+  // The fallback "weapon" when the player holds nothing — bare-handed melee.
+  const FISTS = {
+    name: "Fists", ranged: false, damage: 1, cooldown: 0.5, multishot: 1,
+    melee: { range: 2.2, arc: 1.5 }, color: "#ffe0c0",
+  };
+
+  // ---- Item catalogue ----------------------------------------------------
+  // type: "weapon" | "helmet" | "breastplate" | "boots" | "ring" | "necklace"
+  // stats: maxHealth · damageReduction · lifesteal · moveSpeed · damage ·
+  //        haste(cooldown ×) · pierce · coinRange   (all optional, additive)
+  // weapon (weapons only): { ranged, shape, damage, cooldown, multishot, spread,
+  //        pierce, boltSpeed, boltRadius, gravity, color, haloColor, melee }
+  // cost: merchant buy price (normal items). value: sell/worth (auto-derived).
+  const ITEM_DB = {
+    // ----- Weapons (normal / buyable) -----
+    magic_wand: {
+      name: "Magic Wand", icon: "🪄", type: "weapon", rarity: "normal", hands: 1, cost: 12,
+      desc: "A trusty bolt-flinger.",
+      weapon: { ranged: true, shape: "bolt", damage: 1, cooldown: 0.32, multishot: 1, spread: 0.22,
+                pierce: 0, boltSpeed: 22, boltRadius: 0.8, gravity: 1.5, color: "#bfe3ff", haloColor: "#9fd0ff" },
+    },
+    short_bow: {
+      name: "Short Bow", icon: "🏹", type: "weapon", rarity: "normal", hands: 2, cost: 34,
+      desc: "Two-handed. Fast, piercing arrows that arc and drop.",
+      weapon: { ranged: true, shape: "arrow", damage: 2, cooldown: 0.5, multishot: 1, spread: 0.16,
+                pierce: 1, boltSpeed: 34, boltRadius: 0.55, gravity: 8, color: "#caa46a", haloColor: "#ffe9b0" },
+    },
+    apprentice_staff: {
+      name: "Apprentice Staff", icon: "🔮", type: "weapon", rarity: "normal", hands: 2, cost: 42,
+      desc: "Two-handed. Casts a 3-bolt spread.",
+      weapon: { ranged: true, shape: "bolt", damage: 1, cooldown: 0.42, multishot: 3, spread: 0.2,
+                pierce: 0, boltSpeed: 20, boltRadius: 0.85, gravity: 1.5, color: "#ffd9f0", haloColor: "#ff9de0" },
+    },
+    iron_dagger: {
+      name: "Iron Dagger", icon: "🗡️", type: "weapon", rarity: "normal", hands: 1, cost: 16,
+      desc: "One-handed. Quick short jabs — great dual-wielded.",
+      weapon: { ranged: false, damage: 1.5, cooldown: 0.2, multishot: 1, melee: { range: 2.3, arc: 1.3 }, color: "#cfd6e0" },
+    },
+    iron_sword: {
+      name: "Iron Sword", icon: "⚔️", type: "weapon", rarity: "normal", hands: 1, cost: 28,
+      desc: "One-handed. A balanced melee swing.",
+      weapon: { ranged: false, damage: 3, cooldown: 0.45, multishot: 1, melee: { range: 3.2, arc: 1.7 }, color: "#d7dde6" },
+    },
+    war_axe: {
+      name: "War Axe", icon: "🪓", type: "weapon", rarity: "normal", hands: 1, cost: 46,
+      desc: "One-handed. Slow but heavy, wide arc.",
+      weapon: { ranged: false, damage: 4, cooldown: 0.7, multishot: 1, melee: { range: 3.0, arc: 2.3 }, color: "#c8b08a" },
+    },
+
+    // ----- Armour (normal / buyable) -----
+    leather_cap:    { name: "Leather Cap",    icon: "🧢", type: "helmet",      rarity: "normal", cost: 14, desc: "+15 max health.", stats: { maxHealth: 15 } },
+    iron_helm:      { name: "Iron Helm",      icon: "⛑️", type: "helmet",      rarity: "normal", cost: 30, desc: "+25 health, +4% resist.", stats: { maxHealth: 25, damageReduction: 0.04 } },
+    leather_vest:   { name: "Leather Vest",   icon: "🦺", type: "breastplate", rarity: "normal", cost: 20, desc: "+20 health, +4% resist.", stats: { maxHealth: 20, damageReduction: 0.04 } },
+    iron_plate:     { name: "Iron Plate",     icon: "🛡️", type: "breastplate", rarity: "normal", cost: 40, desc: "+35 health, +10% resist.", stats: { maxHealth: 35, damageReduction: 0.1 } },
+    leather_boots:  { name: "Leather Boots",  icon: "🥾", type: "boots",       rarity: "normal", cost: 16, desc: "+0.8 move speed.", stats: { moveSpeed: 0.8 } },
+    iron_greaves:   { name: "Iron Greaves",   icon: "🦿", type: "boots",       rarity: "normal", cost: 30, desc: "+0.4 speed, +5% resist.", stats: { moveSpeed: 0.4, damageReduction: 0.05 } },
+
+    // ----- Accessories (normal / buyable) -----
+    amulet_vigor:   { name: "Amulet of Vigor", icon: "📿", type: "necklace", rarity: "normal", cost: 26, desc: "+25 max health.", stats: { maxHealth: 25 } },
+    coin_amulet:    { name: "Lodestone Pendant", icon: "🧲", type: "necklace", rarity: "normal", cost: 18, desc: "Draw coins from afar.", stats: { coinRange: 3 } },
+    ring_power:     { name: "Ring of Power",  icon: "💍", type: "ring", rarity: "normal", cost: 22, desc: "+1 weapon damage.", stats: { damage: 1 } },
+    ring_swift:     { name: "Ring of Haste",  icon: "💍", type: "ring", rarity: "normal", cost: 24, desc: "Attack 12% faster.", stats: { haste: 0.88 } },
+    ring_guard:     { name: "Ring of Guard",  icon: "💍", type: "ring", rarity: "normal", cost: 20, desc: "+6% damage resist.", stats: { damageReduction: 0.06 } },
+
+    // ----- RARE gear (boss drops only) -----
+    excalibur:      { name: "Excalibur", icon: "🗡️", type: "weapon", rarity: "rare", hands: 2, value: 120, desc: "Two-handed greatsword. Devastating wide arc.",
+                      weapon: { ranged: false, damage: 8, cooldown: 0.5, multishot: 1, melee: { range: 3.8, arc: 2.1 }, color: "#bfe0ff" } },
+    storm_bow:      { name: "Storm Bow", icon: "🏹", type: "weapon", rarity: "rare", hands: 2, value: 110, desc: "Two-handed. Looses 3 piercing arrows.",
+                      weapon: { ranged: true, shape: "arrow", damage: 3, cooldown: 0.46, multishot: 3, spread: 0.12, pierce: 2, boltSpeed: 40, boltRadius: 0.55, gravity: 7, color: "#a8e0ff", haloColor: "#d8f4ff" } },
+    archmage_wand:  { name: "Archmage Wand", icon: "✨", type: "weapon", rarity: "rare", hands: 1, value: 95, desc: "One-handed. A 3-bolt piercing storm.",
+                      weapon: { ranged: true, shape: "bolt", damage: 2, cooldown: 0.28, multishot: 3, spread: 0.16, pierce: 1, boltSpeed: 26, boltRadius: 0.95, gravity: 1.2, color: "#d8e8ff", haloColor: "#88b8ff" } },
+    twin_fang:      { name: "Fang Dagger", icon: "🔪", type: "weapon", rarity: "rare", hands: 1, value: 80, desc: "One-handed. Blistering, life-draining jabs.",
+                      weapon: { ranged: false, damage: 3, cooldown: 0.16, multishot: 1, melee: { range: 2.5, arc: 1.4 }, color: "#ff9db0" }, stats: { lifesteal: 1 } },
+    thunder_hammer: { name: "Thunder Hammer", icon: "🔨", type: "weapon", rarity: "rare", hands: 2, value: 130, desc: "Two-handed. Crushing, enormous arc.",
+                      weapon: { ranged: false, damage: 10, cooldown: 0.85, multishot: 1, melee: { range: 3.6, arc: 2.7 }, color: "#ffd76a" } },
+    dragon_helm:    { name: "Dragon Helm",   icon: "🐲", type: "helmet",      rarity: "rare", value: 80, desc: "+40 health, +10% resist.", stats: { maxHealth: 40, damageReduction: 0.1 } },
+    aegis_plate:    { name: "Aegis Plate",   icon: "🛡️", type: "breastplate", rarity: "rare", value: 100, desc: "+55 health, +16% resist.", stats: { maxHealth: 55, damageReduction: 0.16 } },
+    winged_boots:   { name: "Winged Boots",  icon: "🪽", type: "boots",       rarity: "rare", value: 80, desc: "+1.4 speed, +5% resist.", stats: { moveSpeed: 1.4, damageReduction: 0.05 } },
+    vampiric_ring:  { name: "Vampiric Ring", icon: "🩸", type: "ring",        rarity: "rare", value: 70, desc: "Heal +3 per kill.", stats: { lifesteal: 3 } },
+    titan_pendant:  { name: "Titan Pendant", icon: "💠", type: "necklace",    rarity: "rare", value: 110, desc: "+45 health, +8% resist, +2 damage.", stats: { maxHealth: 45, damageReduction: 0.08, damage: 2 } },
+  };
+
+  // Fill in derived fields (id, sell value) once.
+  for (const id in ITEM_DB) {
+    const d = ITEM_DB[id];
+    d.id = id;
+    if (d.value == null) d.value = d.cost != null ? Math.max(1, Math.round(d.cost * 0.5)) : 40;
+  }
+  const getDef = (id) => ITEM_DB[id];
+  const SHOP_STOCK = Object.keys(ITEM_DB).filter((id) => ITEM_DB[id].rarity === "normal" && ITEM_DB[id].cost != null);
+  const RARE_DROPS = Object.keys(ITEM_DB).filter((id) => ITEM_DB[id].rarity === "rare");
+
+  // A monotonically increasing id so inventory/equipment entries are distinct
+  // even when two of the same item are owned.
+  let _instSeq = 1;
+  function makeItem(id) { return { id, uid: _instSeq++ }; }
+
+  function cloneWeapon(w) {
+    const c = Object.assign({}, w);
+    if (w.melee) c.melee = Object.assign({}, w.melee);
+    return c;
+  }
+
+  // Build the player's *active* weapon profile from whatever is in their hands,
+  // folding in flat bonuses (damage/haste/pierce) from armour and accessories.
+  function computeWeapon(player, bonus) {
+    const eq = player.equipment;
+    const w1 = eq.hand1 && eq.hand1 !== TWO_HANDED ? getDef(eq.hand1.id) : null;
+    const w2 = eq.hand2 && eq.hand2 !== TWO_HANDED ? getDef(eq.hand2.id) : null;
+    let prof = null, name = null;
+    if (w1 && w1.weapon) { prof = cloneWeapon(w1.weapon); name = w1.name; }
+    else if (w2 && w2.weapon) { prof = cloneWeapon(w2.weapon); name = w2.name; }
+    if (!prof) { prof = cloneWeapon(FISTS); name = "Fists"; }
+
+    // Dual-wielding two one-handed weapons: faster, with bonus power/shots.
+    const dual = w1 && w2 && w1.weapon && w2.weapon;
+    if (dual) {
+      prof.cooldown *= 0.8;
+      prof.damage += (w2.weapon.damage || 0) * 0.5;
+      if (prof.ranged && w2.weapon.ranged) prof.multishot = (prof.multishot || 1) + (w2.weapon.multishot || 1);
+      name = `${w1.name} + ${w2.name}`;
+    }
+
+    prof.damage += bonus.damage;
+    prof.pierce = (prof.pierce || 0) + bonus.pierce;
+    prof.cooldown = Math.max(0.08, prof.cooldown * bonus.haste);
+    prof.multishot = prof.multishot || 1;
+    prof.name = name;
+    return prof;
+  }
+
+  // Recompute every derived player stat from base + equipped gear. Called after
+  // any equip/unequip and on load. Also widens the global coin magnet ranges.
+  function recomputeStats(player) {
+    const base = player.base;
+    let mh = base.maxHealth, dr = 0, ls = 0, spd = base.speed;
+    let dmg = 0, haste = 1, pierce = 0, coinRange = 0;
+    for (const slot of EQUIP_SLOTS) {
+      const inst = player.equipment[slot];
+      if (!inst || inst === TWO_HANDED) continue;
+      const s = getDef(inst.id).stats || {};
+      mh += s.maxHealth || 0; dr += s.damageReduction || 0; ls += s.lifesteal || 0;
+      spd += s.moveSpeed || 0; dmg += s.damage || 0; pierce += s.pierce || 0;
+      coinRange += s.coinRange || 0;
+      if (s.haste) haste *= s.haste;
+    }
+    player.maxHealth = mh;
+    if (player.health > mh) player.health = mh;
+    player.damageReduction = Math.min(0.75, dr);
+    player.lifesteal = ls;
+    player.speed = spd;
+    player.weapon = computeWeapon(player, { damage: dmg, haste, pierce });
+    if (player.refreshWeaponVisual) player.refreshWeaponVisual();
+    coinMagnetRange = CONFIG.coinMagnetRange + coinRange;
+    coinPickupRange = CONFIG.coinPickupRange + coinRange * 0.18;
+    updateHealthBar(player.health);
+  }
+
+  // ---- Inventory / equipment operations ----------------------------------
+  function invRemove(player, inst) {
+    const i = player.inventory.indexOf(inst);
+    if (i >= 0) player.inventory.splice(i, 1);
+  }
+  function invAdd(player, inst) {
+    if (player.inventory.length >= player.invCap) return false;
+    player.inventory.push(inst);
+    return true;
+  }
+  // Move whatever occupies a slot back into the bag. For a two-handed weapon
+  // (held in hand1) this also clears the hand2 sentinel.
+  function unequipSlot(player, slot) {
+    const occ = player.equipment[slot];
+    if (!occ || occ === TWO_HANDED) return;
+    player.equipment[slot] = null;
+    if (slot === "hand1" && player.equipment.hand2 === TWO_HANDED) player.equipment.hand2 = null;
+    if (slot === "hand2" && player.equipment.hand1 === TWO_HANDED) player.equipment.hand1 = null;
+    invAdd(player, occ);
+  }
+  function equipItem(player, inst) {
+    const d = getDef(inst.id);
+    invRemove(player, inst);
+    if (d.type === "weapon") {
+      if (d.hands === 2) {
+        unequipSlot(player, "hand1"); unequipSlot(player, "hand2");
+        player.equipment.hand1 = inst; player.equipment.hand2 = TWO_HANDED;
+      } else {
+        if (player.equipment.hand2 === TWO_HANDED) unequipSlot(player, "hand1"); // free a 2H
+        let slot;
+        if (!player.equipment.hand1) slot = "hand1";
+        else if (!player.equipment.hand2) slot = "hand2";
+        else slot = "hand1"; // both full → replace main hand
+        unequipSlot(player, slot);
+        player.equipment[slot] = inst;
+      }
+    } else if (d.type === "ring") {
+      const slot = !player.equipment.ring1 ? "ring1" : !player.equipment.ring2 ? "ring2" : "ring1";
+      unequipSlot(player, slot);
+      player.equipment[slot] = inst;
+    } else {
+      unequipSlot(player, d.type);
+      player.equipment[d.type] = inst;
+    }
+    recomputeStats(player);
+  }
+
   // ---- DOM ---------------------------------------------------------------
   const dom = {
     canvas: document.getElementById("renderCanvas"),
@@ -143,6 +381,18 @@
     shopDone: document.getElementById("shopDone"),
     shopCoins: document.getElementById("shopCoins"),
     shopItems: document.getElementById("shopItems"),
+    shopTabBuy: document.getElementById("shopTabBuy"),
+    shopTabSell: document.getElementById("shopTabSell"),
+    // Inventory / equipment overlay.
+    inventory: document.getElementById("inventory"),
+    invClose: document.getElementById("invClose"),
+    invDone: document.getElementById("invDone"),
+    invEquip: document.getElementById("invEquip"),
+    invBag: document.getElementById("invBag"),
+    invStats: document.getElementById("invStats"),
+    invBtn: document.getElementById("invBtn"),
+    bagBtn: document.getElementById("bagBtn"),
+    musicBtn: document.getElementById("musicBtn"),
     healthFill: document.getElementById("healthFill"),
     bossBar: document.getElementById("bossBar"),
     bossName: document.getElementById("bossName"),
@@ -320,27 +570,32 @@
       this.carried = null;       // collectible mesh that flies up + poofs
       this.castCooldown = 0;     // counts down to 0 when ready to cast
       this.castAnim = 0;         // 0..1 quick wand-thrust animation
+      // Base stats before any gear. recomputeStats() layers equipment on top.
+      this.base = { maxHealth: CONFIG.maxHealth, speed: CONFIG.moveSpeed };
       this.maxHealth = CONFIG.maxHealth;
       this.health = CONFIG.maxHealth;
-      this.damageReduction = 0;  // 0..~0.6, raised by the Aegis Ward upgrade
-      this.lifesteal = 0;        // HP restored per sweet defeated (Vampiric Gem)
+      this.damageReduction = 0;  // 0..0.75, summed from armour/accessories
+      this.lifesteal = 0;        // HP restored per sweet defeated
       this.world = null;         // set after construction; used for scenery collision
 
-      // The wand's combat stats — the merchant's upgrades mutate these.
-      this.weapon = {
-        name: "Magic Wand",
-        damage: 1,
-        cooldown: CONFIG.castCooldown,
-        boltRadius: CONFIG.boltRadius,
-        boltSpeed: CONFIG.boltSpeed,
-        multishot: 1,            // bolts fired per cast
-        spread: 0.22,            // radians between multishot bolts
-        pierce: 0,               // extra enemies each bolt passes through
-        color: "#bfe3ff",
-        haloColor: "#9fd0ff",
-      };
+      // Inventory + equipment. The active weapon profile (this.weapon) is
+      // derived from the equipped hands by recomputeStats(); FISTS until then.
+      this.invCap = 24;
+      this.inventory = [];       // owned-but-unequipped item instances
+      this.equipment = { helmet: null, breastplate: null, boots: null,
+                         necklace: null, ring1: null, ring2: null, hand1: null, hand2: null };
+      this.weapon = cloneWeapon(FISTS);
 
       this._build(scene, shadow);
+    }
+
+    // Give the player their starting gear: a Magic Wand in hand, a Leather Cap
+    // and Iron Dagger in the bag to try out the inventory immediately.
+    setupStartingLoadout() {
+      this.equipment.hand1 = makeItem("magic_wand");
+      this.inventory.push(makeItem("leather_cap"));
+      this.inventory.push(makeItem("iron_dagger"));
+      recomputeStats(this);
     }
 
     _build(scene, shadow) {
@@ -444,6 +699,49 @@
       glow.parent = tip; glow.diffuse = BABYLON.Color3.FromHexString("#9fd0ff");
       glow.intensity = 0.5; glow.range = 6;
       this.wandGlow = glow;
+
+      // ---- Alternate held weapons, toggled by refreshWeaponVisual(). ----
+      // A melee blade (sword/axe/hammer share this silhouette, recoloured).
+      const bladeMat = emat(scene, "heldBlade", "#d7dde6", 0.06);
+      const blade = box(scene, "heldBlade", 0.12, 1.1, 0.03, bladeMat);
+      blade.parent = grip; blade.position.y = 0.7; shadow.addShadowCaster(blade);
+      const guard = box(scene, "heldGuard", 0.42, 0.1, 0.1, emat(scene, "heldGuardM", "#8a6a3a", 0.05));
+      guard.parent = grip; guard.position.y = 0.18;
+      this.heldBladeMat = bladeMat;
+      this.meleeMesh = new BABYLON.TransformNode("meleeMesh", scene);
+      blade.parent = this.meleeMesh; guard.parent = this.meleeMesh;
+      this.meleeMesh.parent = grip;
+
+      // A bow (a thin arc + string) for ranged "arrow" weapons.
+      const bowMat = emat(scene, "heldBow", "#9a6a3a", 0.05);
+      const bow = BABYLON.MeshBuilder.CreateTorus("heldBow", { diameter: 1.1, thickness: 0.07, tessellation: 12 }, scene);
+      bow.material = bowMat; bow.rotation.x = Math.PI / 2; bow.position.y = 0.55;
+      const bowMesh = new BABYLON.TransformNode("bowMesh", scene);
+      bow.parent = bowMesh; bowMesh.parent = grip; shadow.addShadowCaster(bow);
+      this.bowMesh = bowMesh; this.bowMat = bowMat;
+
+      this.refreshWeaponVisual();
+    }
+
+    // Show the mesh that matches the active weapon and tint it to its colour.
+    refreshWeaponVisual() {
+      const w = this.weapon || FISTS;
+      const ranged = !!w.ranged;
+      const isArrow = ranged && w.shape === "arrow";
+      const isBolt = ranged && !isArrow;
+      const col = w.color || "#bfe3ff";
+      if (this.wandCrystal) this.wandCrystal.setEnabled(isBolt);
+      if (this.wandHalo) this.wandHalo.setEnabled(isBolt);
+      if (this.meleeMesh) this.meleeMesh.setEnabled(!ranged);
+      if (this.bowMesh) this.bowMesh.setEnabled(isArrow);
+      // The handle stays for wand/melee; hide it for the bow.
+      try {
+        const c = BABYLON.Color3.FromHexString(col);
+        if (this.wandCrystal && this.wandCrystal.material) { this.wandCrystal.material.diffuseColor = c; this.wandCrystal.material.emissiveColor = c.scale(1.0); }
+        if (this.wandHalo && this.wandHalo.material) this.wandHalo.material.emissiveColor = c;
+        if (this.wandGlow) this.wandGlow.diffuse = c;
+        if (this.heldBladeMat) this.heldBladeMat.diffuseColor = c;
+      } catch (e) { /* hex parse can fail in the headless stub */ }
     }
 
     startPickup(itemMesh, onPicked) {
@@ -452,13 +750,20 @@
     }
     get busy() { return this.state === "pickup"; }
 
-    // Returns an array of { origin, dir } bolts to fire (one per multishot),
-    // or null if still on cooldown / busy.
+    // Trigger an attack with the active weapon. Returns a descriptor the loop
+    // turns into projectiles or a melee sweep, or null if on cooldown / busy.
+    //   ranged → { type:"ranged", shots:[{origin,dir}], weapon }
+    //   melee  → { type:"melee", origin, dir, weapon }
     tryCast() {
       if (this.castCooldown > 0 || this.busy) return null;
       const w = this.weapon;
       this.castCooldown = w.cooldown;
       this.castAnim = 1;
+      if (!w.ranged) {
+        this.meleeAnim = 1; // drives the swing animation
+        const dir = new BABYLON.Vector3(Math.sin(this.facing), 0, Math.cos(this.facing)).normalize();
+        return { type: "melee", origin: this.root.position.clone(), dir, weapon: w };
+      }
       const origin = this.wandTip.getAbsolutePosition().clone();
       const n = Math.max(1, w.multishot);
       const shots = [];
@@ -470,18 +775,24 @@
         const dir = new BABYLON.Vector3(Math.sin(ang), 0.04, Math.cos(ang)).normalize();
         shots.push({ origin: origin.clone(), dir });
       }
-      return shots;
+      return { type: "ranged", shots, weapon: w };
     }
 
     update(dt, camera) {
       if (this.castCooldown > 0) this.castCooldown -= dt;
       if (this.castAnim > 0) this.castAnim = Math.max(0, this.castAnim - dt / 0.22);
+      if (this.meleeAnim > 0) this.meleeAnim = Math.max(0, this.meleeAnim - dt / 0.26);
 
       if (this.state === "pickup") { this._updatePickup(dt); }
       else { this._updateMove(dt, camera); }
 
-      // Cast thrust is layered on top of whatever the right arm is doing.
-      if (this.castAnim > 0) {
+      // A melee swing arcs the whole arm across the body; a ranged cast thrusts
+      // the wand forward. Both layer on top of the locomotion pose.
+      if (this.meleeAnim > 0) {
+        const sw = Math.sin(this.meleeAnim * Math.PI); // 0->1->0
+        this.armR.rotation.x = lerp(this.armR.rotation.x, -1.4, sw);
+        this.armR.rotation.z = lerp(this.armR.rotation.z || 0, 1.1 * sw, 0.6);
+      } else if (this.castAnim > 0) {
         const thrust = Math.sin(this.castAnim * Math.PI); // 0->1->0
         this.armR.rotation.x = lerp(this.armR.rotation.x, -1.9, thrust);
       }
@@ -594,29 +905,77 @@
   // =========================================================================
   class Projectile {
     constructor(scene, shadow, origin, dir, opts = {}) {
-      this.dir = dir.clone();
-      this.life = CONFIG.boltLife;
       this.speed = opts.speed || CONFIG.boltSpeed;
+      // Velocity is integrated with gravity each frame so bolts/arrows follow a
+      // real ballistic arc and always come down — they never fly forever.
+      this.vel = dir.clone().normalize().scale(this.speed);
+      this.gravity = opts.gravity != null ? opts.gravity : 1.5; // m/s² downward
+      this.life = opts.life || CONFIG.boltLife;
       this.radius = opts.radius || CONFIG.boltRadius;  // hit radius vs monsters
       this.damage = opts.damage || 1;
       this.pierce = opts.pierce || 0;                  // extra enemies a bolt passes through
       this.hitSet = new Set();                         // monsters already struck (no double-hits)
       this.dead = false;
-      const m = sphere(scene, "bolt", 0.32, emat(scene, "boltM", opts.color || "#bfe3ff", 1.0));
+      const arrow = opts.shape === "arrow";
+      const m = arrow
+        ? capsule(scene, "arrow", 0.7, 0.08, emat(scene, "arrowM", opts.color || "#caa46a", 0.7))
+        : sphere(scene, "bolt", 0.32, emat(scene, "boltM", opts.color || "#bfe3ff", 1.0));
       m.position.copyFrom(origin);
       m.isPickable = false;
-      // Scale the visible bolt with its hit radius so upgrades read on-screen.
-      m.scaling.setAll(this.radius / CONFIG.boltRadius);
+      if (!arrow) m.scaling.setAll(this.radius / CONFIG.boltRadius); // size reads the hit radius
       this.mesh = m;
-      // A trailing glow.
-      const halo = sphere(scene, "boltHalo", 0.6, emat(scene, "boltHaloM", opts.haloColor || "#9fd0ff", 1.0));
-      halo.material.alpha = 0.3; halo.parent = m; halo.isPickable = false;
+      this.isArrow = arrow;
+      if (!arrow) {
+        const halo = sphere(scene, "boltHalo", 0.6, emat(scene, "boltHaloM", opts.haloColor || "#9fd0ff", 1.0));
+        halo.material.alpha = 0.3; halo.parent = m; halo.isPickable = false;
+      }
     }
     update(dt) {
       this.life -= dt;
       if (this.life <= 0) { this.dead = true; return; }
-      this.mesh.position.addInPlace(this.dir.scale(this.speed * dt));
+      this.vel.y -= this.gravity * dt;                       // gravity pulls it down
+      this.mesh.position.addInPlace(this.vel.scale(dt));
+      // Point an arrow along its flight path so the arc reads.
+      if (this.isArrow) this.mesh.rotation.x = Math.atan2(this.vel.y, Math.hypot(this.vel.x, this.vel.z)) - Math.PI / 2;
+      // Die when it hits the ground or leaves the playable area.
+      if (this.mesh.position.y <= 0.15) { this.dead = true; return; }
       if (Math.hypot(this.mesh.position.x, this.mesh.position.z) > CONFIG.worldRadius + 6) this.dead = true;
+    }
+    dispose() { this.mesh.dispose(); }
+  }
+
+  // =========================================================================
+  // Hostile projectiles — sweets that shoot back (boss "caster" attacks). Same
+  // ballistic physics; they damage the PLAYER on contact, then fizzle. Like the
+  // wand bolts they are gravity-bound and life-capped, so they never persist.
+  // =========================================================================
+  class Hazard {
+    constructor(scene, origin, dir, opts = {}) {
+      this.speed = opts.speed || 13;
+      this.vel = dir.clone().normalize().scale(this.speed);
+      this.gravity = opts.gravity != null ? opts.gravity : 5;
+      this.life = opts.life || 3.5;
+      this.radius = opts.radius || 0.8;
+      this.damage = opts.damage || 10;
+      this.dead = false;
+      const m = sphere(scene, "hazard", 0.6, emat(scene, "hazardM", opts.color || "#ff5a6a", 1.0));
+      m.position.copyFrom(origin); m.isPickable = false;
+      const halo = sphere(scene, "hazardHalo", 1.0, emat(scene, "hazardHaloM", opts.color || "#ff8a6a", 1.0));
+      halo.material.alpha = 0.3; halo.parent = m; halo.isPickable = false;
+      this.mesh = m;
+    }
+    // Returns true on the frame it strikes the player (within its hit radius).
+    update(dt, playerPos) {
+      this.life -= dt;
+      if (this.life <= 0) { this.dead = true; return false; }
+      this.vel.y -= this.gravity * dt;
+      this.mesh.position.addInPlace(this.vel.scale(dt));
+      if (this.mesh.position.y <= 0.15) { this.dead = true; return false; }
+      if (Math.hypot(this.mesh.position.x, this.mesh.position.z) > CONFIG.worldRadius + 6) { this.dead = true; return false; }
+      const dx = this.mesh.position.x - playerPos.x;
+      const dz = this.mesh.position.z - playerPos.z;
+      const dy = this.mesh.position.y - (playerPos.y + 1.2);
+      return Math.hypot(dx, dy, dz) <= this.radius + CONFIG.playerRadius;
     }
     dispose() { this.mesh.dispose(); }
   }
@@ -801,35 +1160,64 @@
   }
 
   // =========================================================================
-  // Boss — a colossal "Sweet King" that storms in every few waves. Far more HP,
-  // hits harder, slower, and shows a dedicated health bar. Shares the Monster
-  // interface (update/hit/position/radius/alive/dying/biteTimer) so the wave,
-  // projectile and contact systems treat it like any other sweet.
+  // Bosses — colossal "Sweet Kings" that storm in every few waves. Each is one
+  // of several ARCHETYPES with its own attack pattern and behaviour; the type
+  // is rolled randomly per boss wave and grows tougher (and harder to read)
+  // with each cycle. They share the Monster interface (update/hit/position/…)
+  // so the wave, projectile and contact systems treat them like any sweet.
+  //
+  //   charger  — periodically winds up and dashes at the player.
+  //   caster   — lobs hostile candy projectiles (Hazard) from range.
+  //   summoner — conjures swarms of extra sweets to overwhelm you.
+  //   stomper  — slow tank that ground-pounds a damaging shockwave when close.
   // =========================================================================
-  const BOSS_KINDS = [
-    { name: "Gummy King",      color: "#ff4d6d", crown: "#ffd34e" },
-    { name: "Choco Overlord",  color: "#7a4a2a", crown: "#ffe27a" },
-    { name: "Lollipop Tyrant", color: "#a06cff", crown: "#ffd34e" },
-    { name: "Cupcake Colossus", color: "#ff7ac0", crown: "#fff3a0" },
+  const BOSS_ARCHES = [
+    { id: "charger",  name: "Gummy King",       color: "#ff4d6d", crown: "#ffd34e" },
+    { id: "caster",   name: "Choco Overlord",   color: "#7a4a2a", crown: "#ffe27a" },
+    { id: "summoner", name: "Lollipop Tyrant",  color: "#a06cff", crown: "#ffd34e" },
+    { id: "stomper",  name: "Cupcake Colossus", color: "#ff7ac0", crown: "#fff3a0" },
   ];
+  const BOSS_ARCH_BY_ID = {};
+  for (const a of BOSS_ARCHES) BOSS_ARCH_BY_ID[a.id] = a;
 
   class Boss {
-    constructor(scene, shadow, pos, wave) {
+    // `archId` (optional) forces an archetype — used by save/restore. Otherwise
+    // one is rolled at random so every boss wave is a fresh surprise.
+    constructor(scene, shadow, pos, wave, archId) {
       this.scene = scene;
       this.wave = wave;                                       // recorded for save/restore
       const cycle = Math.floor(wave / CONFIG.bossEveryWaves); // 1, 2, 3, …
-      this.maxHp = CONFIG.bossBaseHp + (cycle - 1) * CONFIG.bossHpPerCycle;
+      this.cycle = cycle;
+      this.arch = archId ? BOSS_ARCH_BY_ID[archId] : BOSS_ARCHES[(rng() * BOSS_ARCHES.length) | 0];
+      if (!this.arch) this.arch = BOSS_ARCHES[0];
+      this.kind = this.arch; // back-compat alias
+      this.archId = this.arch.id;
+      this.name = this.arch.name;
+
+      // Tougher each cycle. The stomper is a slow tank with extra HP; the
+      // charger is faster; the caster/summoner sit a touch back from the brawl.
+      const hpMul = this.arch.id === "stomper" ? 1.3 : 1.0;
+      this.maxHp = Math.round((CONFIG.bossBaseHp + (cycle - 1) * CONFIG.bossHpPerCycle) * hpMul);
       this.hp = this.maxHp;
-      this.speed = CONFIG.bossSpeed + (cycle - 1) * 0.15;
+      const baseSpd = this.arch.id === "stomper" ? CONFIG.bossSpeed * 0.8 : CONFIG.bossSpeed;
+      this.speed = baseSpd + (cycle - 1) * 0.15;
       this.alive = true;
       this.dying = 0;
       this.radius = CONFIG.bossRadius;
       this.isBoss = true;
-      this.contactDamage = CONFIG.bossContactDamage;
+      this.contactDamage = CONFIG.bossContactDamage + (cycle - 1) * 4;
       this.bob = 0;
       this.biteTimer = 0;
-      this.kind = BOSS_KINDS[(cycle - 1) % BOSS_KINDS.length];
-      this.name = this.kind.name;
+
+      // Behaviour timers. Higher cycles attack more often — the pattern itself
+      // gets harder, not just the numbers. First action is slightly delayed.
+      const tighten = Math.max(0.45, 1 - (cycle - 1) * 0.12); // shrink cooldowns each cycle
+      this.actionCd = { charger: 3.4, caster: 2.6, summoner: 6.5, stomper: 2.4 }[this.arch.id] * tighten;
+      this.actionTimer = this.actionCd * 0.7 + 1.0;
+      this.charging = 0;        // >0 while dashing
+      this.chargeDir = null;
+      this.windup = 0;          // telegraph before a charge/stomp
+      this.shockT = 0;          // shockwave visual timer
       this._build(scene, shadow, pos);
     }
 
@@ -840,9 +1228,9 @@
       const body = new BABYLON.TransformNode("bossBody", scene);
       body.parent = root; this.body = body;
 
-      const main = emat(scene, "bossM" + root.uniqueId, this.kind.color, 0.28);
+      const main = emat(scene, "bossM" + root.uniqueId, this.arch.color, 0.28);
       const dark = emat(scene, "bossD" + root.uniqueId, "#2a1530", 0.05);
-      const gold = emat(scene, "bossG" + root.uniqueId, this.kind.crown, 0.5);
+      const gold = emat(scene, "bossG" + root.uniqueId, this.arch.crown, 0.5);
       const cream = emat(scene, "bossC" + root.uniqueId, "#fff3e0", 0.12);
       const add = (m) => { m.parent = body; shadow.addShadowCaster(m); return m; };
 
@@ -883,9 +1271,19 @@
       const blob = disc(scene, "bblob", this.radius * 1.3, emat(scene, "bblobM" + root.uniqueId, "#000000", 0));
       blob.material.alpha = 0.3; blob.rotation.x = Math.PI / 2; blob.position.y = 0.03;
       blob.parent = root; blob.isPickable = false;
+
+      // A shockwave ring used by the stomper's ground-pound (hidden until then).
+      const ringMat = emat(scene, "bring" + root.uniqueId, "#ffd34e", 1.0);
+      ringMat.alpha = 0.4;
+      const ring = disc(scene, "bringD" + root.uniqueId, 1, ringMat);
+      ring.rotation.x = Math.PI / 2; ring.position.y = 0.1; ring.parent = root;
+      ring.isPickable = false; ring.setEnabled(false);
+      this.ring = ring; this.ringMat = ringMat;
     }
 
-    update(dt, playerPos) {
+    // dt + the player position drive movement & attacks; `state` lets ranged
+    // and summoning bosses spawn hazards / minions into the live world.
+    update(dt, playerPos, state) {
       if (this.biteTimer > 0) this.biteTimer -= dt;
       if (this.dying > 0) {
         this.dying -= dt;
@@ -898,17 +1296,120 @@
       }
       this.bob += dt * 4;
       if (this.body.scaling.x !== 1) this.body.scaling.setAll(lerp(this.body.scaling.x, 1, 0.2));
+
       const to = playerPos.subtract(this.root.position); to.y = 0;
       const dist = to.length();
-      if (dist > 0.001) {
-        to.normalize();
-        const step = Math.min(this.speed * dt, Math.max(0, dist - this.radius));
-        this.root.position.addInPlace(to.scale(step));
-        this.body.rotation.y = lerpAngle(this.body.rotation.y, Math.atan2(to.x, to.z), 0.12);
+      const dir = dist > 0.001 ? to.scale(1 / dist) : new BABYLON.Vector3(0, 0, 1);
+
+      // ---- Behaviour: each archetype runs its own attack pattern. ----
+      let speed = this.speed;
+      let extraContact = false;
+      this.actionTimer -= dt;
+
+      if (this.charging > 0) {
+        // Mid-dash: barrel forward fast in the locked-in direction.
+        this.charging -= dt;
+        speed = this.speed * 4.5;
+        extraContact = true;
+        if (this.chargeDir) this.root.position.addInPlace(this.chargeDir.scale(speed * dt));
+        this.body.rotation.y = lerpAngle(this.body.rotation.y, Math.atan2((this.chargeDir || dir).x, (this.chargeDir || dir).z), 0.2);
+        this.body.position.y = 0.1;
+        // keep inside the fence
+        const hyp = Math.hypot(this.root.position.x, this.root.position.z);
+        const fr = CONFIG.worldRadius - this.radius;
+        if (hyp > fr) { this.root.position.x *= fr / hyp; this.root.position.z *= fr / hyp; this.charging = 0; }
+        return dist <= this.radius + (extraContact ? 1.8 : 1.2);
       }
-      // A heavy, lumbering stomp.
+
+      if (this.windup > 0) {
+        // Telegraph: stand still and pulse before unleashing the attack.
+        this.windup -= dt;
+        this.body.scaling.setAll(1 + Math.sin(this.bob * 4) * 0.08);
+        if (this.windup <= 0) this._unleash(playerPos, dir, state);
+        this.body.rotation.y = lerpAngle(this.body.rotation.y, Math.atan2(dir.x, dir.z), 0.1);
+        return dist <= this.radius + 1.2;
+      }
+
+      // Decide whether to start an attack this frame.
+      if (this.actionTimer <= 0) this._beginAction(dist, dir);
+
+      // Default pursuit. Casters/summoners hang back at a stand-off distance.
+      const standoff = this.arch.id === "caster" ? 14 : this.arch.id === "summoner" ? 11 : this.radius;
+      if (dist > standoff + 0.2) {
+        const step = Math.min(speed * dt, dist - standoff);
+        this.root.position.addInPlace(dir.scale(step));
+      } else if (dist < standoff - 1 && (this.arch.id === "caster" || this.arch.id === "summoner")) {
+        // Too close — back away to keep firing.
+        this.root.position.addInPlace(dir.scale(-speed * 0.6 * dt));
+      }
+      this.body.rotation.y = lerpAngle(this.body.rotation.y, Math.atan2(dir.x, dir.z), 0.12);
       this.body.position.y = Math.abs(Math.sin(this.bob)) * 0.3;
+
+      // Fade out a lingering shockwave ring.
+      if (this.shockT > 0) {
+        this.shockT -= dt;
+        const k = 1 - Math.max(0, this.shockT / 0.5);
+        this.ring.scaling.setAll(0.5 + k * (this.stompRange || 7));
+        this.ringMat.alpha = 0.45 * (1 - k);
+        if (this.shockT <= 0) this.ring.setEnabled(false);
+      }
+
       return dist <= this.radius + 1.2;
+    }
+
+    // Kick off an archetype attack (some have a wind-up telegraph first).
+    _beginAction(dist, dir) {
+      this.actionTimer = this.actionCd;
+      const id = this.arch.id;
+      if (id === "charger") {
+        // Only charge from a distance, with a brief telegraph.
+        if (dist > 6) { this.windup = 0.5; this._pendingDir = dir.clone(); }
+      } else if (id === "stomper") {
+        if (dist < 9) this.windup = 0.55; else this.actionTimer = 0.4; // close in first
+      } else if (id === "caster") {
+        this.windup = 0.35;
+      } else if (id === "summoner") {
+        this.windup = 0.5;
+      }
+    }
+
+    // Fire off the actual attack once the telegraph completes.
+    _unleash(playerPos, dir, state) {
+      const id = this.arch.id;
+      if (id === "charger") {
+        this.chargeDir = (this._pendingDir || dir).clone();
+        this.charging = 0.7 + this.cycle * 0.05;
+      } else if (id === "caster") {
+        const n = 1 + Math.min(4, this.cycle);  // more bolts each cycle
+        const origin = this.root.position.add(new BABYLON.Vector3(0, 3, 0));
+        for (let i = 0; i < n; i++) {
+          const spread = (i - (n - 1) / 2) * 0.16;
+          const ang = Math.atan2(dir.x, dir.z) + spread;
+          const aim = new BABYLON.Vector3(Math.sin(ang), 0.28, Math.cos(ang));
+          state.enemyBolts.push(new Hazard(this.scene, origin.clone(), aim, {
+            speed: 15 + this.cycle, damage: 10 + this.cycle * 2, gravity: 4,
+            color: this.arch.color, radius: 0.9,
+          }));
+        }
+      } else if (id === "summoner") {
+        const n = 2 + Math.min(5, this.cycle);
+        for (let i = 0; i < n; i++) {
+          const a = rng() * Math.PI * 2, r = this.radius + 2 + rng() * 3;
+          const pos = new BABYLON.Vector3(this.root.position.x + Math.cos(a) * r, 0, this.root.position.z + Math.sin(a) * r);
+          const m = new Monster(this.scene, state.shadow, pos, this.wave);
+          state.monsters.push(m);
+          state.waveTotal++;
+        }
+        toast("👹 The Tyrant summons minions!");
+      } else if (id === "stomper") {
+        this.stompRange = 6 + this.cycle * 0.6;
+        this.shockT = 0.5;
+        this.ring.setEnabled(true); this.ring.scaling.setAll(0.5); this.ringMat.alpha = 0.45;
+        const dx = playerPos.x - this.root.position.x, dz = playerPos.z - this.root.position.z;
+        if (Math.hypot(dx, dz) <= this.stompRange) {
+          damagePlayer(state, (14 + this.cycle * 3));
+        }
+      }
     }
 
     hit(dmg) {
@@ -967,6 +1468,42 @@
       return dist <= coinPickupRange;
     }
 
+    dispose() { this.root.dispose(); }
+  }
+
+  // =========================================================================
+  // ItemDrop — a glowing rare item left behind by a defeated boss. Walk over it
+  // to scoop it straight into your inventory (like a coin, but it's gear).
+  // =========================================================================
+  class ItemDrop {
+    constructor(scene, shadow, pos, id) {
+      this.id = id;
+      this.life = 60;               // lingers a good while before fading
+      this.spin = 0;
+      const def = getDef(id);
+      const root = new BABYLON.TransformNode("drop", scene);
+      root.position.copyFrom(pos); root.position.y = 1.0;
+      this.root = root;
+      const col = (RARITY[def.rarity] || RARITY.normal).color;
+      // A floating gem in a beam of light marks the loot.
+      const gem = BABYLON.MeshBuilder.CreatePolyhedron("dropGem", { type: 1, size: 0.4 }, scene);
+      gem.material = emat(scene, "dropM" + root.uniqueId, col, 0.7); gem.parent = root;
+      shadow.addShadowCaster(gem); this.gem = gem;
+      const halo = sphere(scene, "dropHalo", 1.1, emat(scene, "dropHaloM" + root.uniqueId, col, 1));
+      halo.material.alpha = 0.28; halo.parent = root; halo.isPickable = false; this.halo = halo;
+      const beam = cyl(scene, "dropBeam", 0.1, 1.0, 6, emat(scene, "dropBeamM" + root.uniqueId, col, 1));
+      beam.material.alpha = 0.14; beam.parent = root; beam.position.y = 2.5; beam.isPickable = false;
+    }
+    // Returns true once the player has walked over it.
+    update(dt, playerPos) {
+      this.life -= dt;
+      this.spin += dt * 1.6;
+      this.gem.rotation.y = this.spin;
+      this.root.position.y = 1.0 + Math.sin(this.spin * 1.5) * 0.18;
+      this.halo.scaling.setAll(1 + Math.sin(this.spin * 2) * 0.14);
+      const dx = playerPos.x - this.root.position.x, dz = playerPos.z - this.root.position.z;
+      return Math.hypot(dx, dz) <= 2.0;
+    }
     dispose() { this.root.dispose(); }
   }
 
@@ -1413,98 +1950,60 @@
   }
 
   // =========================================================================
-  // Shop — the merchant's wares. Each item buys a weapon upgrade with coins.
-  // Levelled items cost more each purchase; one-time items unlock once.
+  // Item cards — shared rendering for the shop and inventory. Builds a row for
+  // one item def with its icon, name (rarity-tinted), stat summary and a button.
   // =========================================================================
-  const SHOP_ITEMS = [
-    {
-      id: "damage", name: "Power Crystal", icon: "💥",
-      desc: "+1 magic bolt damage", baseCost: 8, growth: 1.8, max: 5,
-      apply: (p) => { p.weapon.damage += 1; },
-    },
-    {
-      id: "firerate", name: "Swift Sigil", icon: "⚡",
-      desc: "Cast 15% faster", baseCost: 10, growth: 1.7, max: 5,
-      apply: (p) => { p.weapon.cooldown = Math.max(0.08, p.weapon.cooldown * 0.85); },
-    },
-    {
-      id: "boltsize", name: "Giant Bolt", icon: "🔮",
-      desc: "Bigger bolts that are easier to land", baseCost: 12, growth: 1.8, max: 3,
-      apply: (p) => { p.weapon.boltRadius += 0.25; },
-    },
-    {
-      id: "pierce", name: "Piercing Rune", icon: "🏹",
-      desc: "Bolts punch through +1 more sweet", baseCost: 16, growth: 1.9, max: 3,
-      apply: (p) => { p.weapon.pierce += 1; },
-    },
-    {
-      id: "trident", name: "Trident Wand", icon: "🔱",
-      desc: "New weapon: fire 3 bolts in a spread", baseCost: 45, growth: 1, max: 1,
-      apply: (p) => {
-        p.weapon.multishot = Math.max(3, p.weapon.multishot); p.weapon.name = "Trident Wand";
-        p.weapon.color = "#ffd9f0"; p.weapon.haloColor = "#ff9de0";
-      },
-    },
-    {
-      id: "storm", name: "Storm Wand", icon: "🌩️",
-      desc: "Upgrade to a 5-bolt storm spread", baseCost: 90, growth: 1, max: 1,
-      // Only useful once you already wield the Trident.
-      requires: (state) => (state.upgrades["trident"] || 0) >= 1,
-      apply: (p) => {
-        p.weapon.multishot = 5; p.weapon.spread = 0.18; p.weapon.name = "Storm Wand";
-        p.weapon.color = "#d8e8ff"; p.weapon.haloColor = "#88b8ff";
-      },
-    },
-    {
-      id: "vitality", name: "Vitality Charm", icon: "💗",
-      desc: "+25 max health (and heal up)", baseCost: 14, growth: 1.7, max: 5,
-      apply: (p) => {
-        p.maxHealth += 25; p.health = Math.min(p.maxHealth, p.health + 25);
-        updateHealthBar(p.health);
-      },
-    },
-    {
-      id: "speed", name: "Swift Boots", icon: "👢",
-      desc: "Move 12% faster", baseCost: 12, growth: 1.7, max: 4,
-      apply: (p) => { p.speed *= 1.12; },
-    },
-    {
-      id: "armor", name: "Aegis Ward", icon: "🛡️",
-      desc: "Take 12% less damage from sweets", baseCost: 14, growth: 1.8, max: 4,
-      apply: (p) => { p.damageReduction = Math.min(0.6, p.damageReduction + 0.12); },
-    },
-    {
-      id: "lifesteal", name: "Vampiric Gem", icon: "🩸",
-      desc: "Heal +2 health per sweet defeated", baseCost: 20, growth: 1.9, max: 3,
-      apply: (p) => { p.lifesteal += 2; },
-    },
-    {
-      id: "lodestone", name: "Coin Lodestone", icon: "🧲",
-      desc: "Coins are drawn in from much farther", baseCost: 10, growth: 1.8, max: 3,
-      apply: () => { coinMagnetRange += 2.5; coinPickupRange += 0.5; },
-    },
-    {
-      id: "heal", name: "Healing Brew", icon: "❤️",
-      desc: "Restore your health to full", baseCost: 6, growth: 1.4, max: Infinity, repeatable: true,
-      apply: (p) => { p.health = p.maxHealth; updateHealthBar(p.health); },
-      // Healing is pointless at full health — let the UI grey it out.
-      unavailable: (p) => p.health >= p.maxHealth,
-    },
-  ];
-
-  function itemLevel(state, item) { return state.upgrades[item.id] || 0; }
-  function itemCost(state, item) {
-    return Math.round(item.baseCost * Math.pow(item.growth, itemLevel(state, item)));
+  function statSummary(def) {
+    const parts = [];
+    const s = def.stats || {};
+    if (def.weapon) {
+      const w = def.weapon;
+      parts.push(w.ranged ? (w.shape === "arrow" ? "🏹 ranged" : "🔮 ranged") : "⚔️ melee");
+      parts.push(`${w.damage} dmg`);
+      if (w.multishot > 1) parts.push(`×${w.multishot}`);
+      if (w.pierce) parts.push(`pierce ${w.pierce}`);
+      parts.push(def.hands === 2 ? "2-handed" : "1-handed");
+    }
+    if (s.maxHealth) parts.push(`+${s.maxHealth} HP`);
+    if (s.damageReduction) parts.push(`+${Math.round(s.damageReduction * 100)}% resist`);
+    if (s.moveSpeed) parts.push(`+${s.moveSpeed} speed`);
+    if (s.damage) parts.push(`+${s.damage} dmg`);
+    if (s.haste) parts.push(`+${Math.round((1 - s.haste) * 100)}% haste`);
+    if (s.lifesteal) parts.push(`+${s.lifesteal} lifesteal`);
+    if (s.coinRange) parts.push("coin magnet");
+    return parts.join(" · ");
   }
 
+  function itemCard(def, btnLabel, btnClass, disabled, onClick, extraTag) {
+    const row = document.createElement("div");
+    row.className = "shop-item rarity-" + def.rarity;
+    const rar = RARITY[def.rarity] || RARITY.normal;
+    const tag = extraTag ? `<span class="tag">${extraTag}</span>` : "";
+    row.innerHTML =
+      `<div class="icon">${def.icon}</div>` +
+      `<div class="info"><div class="name" style="color:${rar.color}">${def.name}${tag}</div>` +
+      `<div class="desc">${statSummary(def) || def.desc || ""}</div></div>`;
+    const btn = document.createElement("button");
+    btn.className = btnClass; btn.textContent = btnLabel; btn.disabled = !!disabled;
+    if (!disabled && onClick) btn.addEventListener("click", onClick);
+    row.appendChild(btn);
+    return row;
+  }
+
+  // =========================================================================
+  // Shop — the merchant BUYS your gear and SELLS normal wares. Rare gear can
+  // only be won from bosses, so it's never stocked here — but you can sell it.
+  // Two tabs: Buy (the merchant's stock) and Sell (your bag).
+  // =========================================================================
   const Shop = {
-    state: null, player: null, open: false,
+    state: null, player: null, open: false, tab: "buy",
 
     init(state, player) { this.state = state; this.player = player; },
 
     openShop() {
       if (this.open) return;
-      this.open = true; uiPaused = true;
+      if (Inventory.open) Inventory.close();
+      this.open = true; uiPaused = true; this.tab = "buy";
       dom.shop.classList.remove("hidden");
       this.render();
     },
@@ -1513,55 +2012,140 @@
       this.open = false; uiPaused = false;
       dom.shop.classList.add("hidden");
     },
+    setTab(tab) { this.tab = tab; this.render(); },
 
-    buy(item) {
-      const lvl = itemLevel(this.state, item);
-      if (lvl >= item.max) return;
-      if (item.requires && !item.requires(this.state)) return;
-      if (item.unavailable && item.unavailable(this.player)) return;
-      const cost = itemCost(this.state, item);
-      if (this.state.coins < cost) return;
-      this.state.coins -= cost;
-      this.state.upgrades[item.id] = lvl + 1;
-      item.apply(this.player);
+    buy(def) {
+      if (this.state.coins < def.cost) { toast("Not enough coins"); return; }
+      if (this.player.inventory.length >= this.player.invCap) { toast("Bag full"); return; }
+      this.state.coins -= def.cost;
+      invAdd(this.player, makeItem(def.id));
       updateCoins(this.state);
-      toast(`${item.icon} ${item.name} purchased!`);
+      toast(`${def.icon} Bought ${def.name}`);
+      this.render();
+    },
+    sell(inst) {
+      const def = getDef(inst.id);
+      invRemove(this.player, inst);
+      this.state.coins += def.value;
+      updateCoins(this.state);
+      toast(`Sold ${def.name} for 🪙 ${def.value}`);
       this.render();
     },
 
     render() {
+      if (!this.open) return;
       dom.shopCoins.textContent = this.state.coins;
+      if (dom.shopTabBuy) dom.shopTabBuy.classList.toggle("active", this.tab === "buy");
+      if (dom.shopTabSell) dom.shopTabSell.classList.toggle("active", this.tab === "sell");
       dom.shopItems.innerHTML = "";
-      for (const item of SHOP_ITEMS) {
-        const lvl = itemLevel(this.state, item);
-        const maxed = lvl >= item.max;
-        const cost = itemCost(this.state, item);
-        const blocked = item.unavailable && item.unavailable(this.player);
-        const locked = item.requires && !item.requires(this.state);
-        const tooPoor = this.state.coins < cost;
 
-        const row = document.createElement("div");
-        row.className = "shop-item";
+      if (this.tab === "buy") {
+        for (const id of SHOP_STOCK) {
+          const def = getDef(id);
+          const tooPoor = this.state.coins < def.cost;
+          const full = this.player.inventory.length >= this.player.invCap;
+          const card = itemCard(def, `🪙 ${def.cost}`, "buy-btn", tooPoor || full,
+            () => this.buy(def));
+          dom.shopItems.appendChild(card);
+        }
+      } else {
+        if (this.player.inventory.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "shop-empty";
+          empty.textContent = "Your bag is empty. Unequip gear in your inventory (🎒) to sell it.";
+          dom.shopItems.appendChild(empty);
+        }
+        for (const inst of this.player.inventory.slice()) {
+          const def = getDef(inst.id);
+          const card = itemCard(def, `Sell 🪙 ${def.value}`, "buy-btn sell-btn", false,
+            () => this.sell(inst), def.rarity === "rare" ? "RARE" : "");
+          dom.shopItems.appendChild(card);
+        }
+      }
+    },
+  };
 
-        const levelLabel = item.repeatable
-          ? ""
-          : (item.max > 1 ? ` <span class="lvl">Lv ${lvl}/${item.max}</span>` : "");
+  // =========================================================================
+  // Inventory — the player's bag + equipment paper-doll. Click a bag item to
+  // equip it; click an equipped slot to unequip it back to the bag. Live stats
+  // update as gear changes. Opens with the 🎒 button or the "I" key.
+  // =========================================================================
+  const Inventory = {
+    state: null, player: null, open: false,
 
-        let btnLabel, btnClass = "buy-btn", disabled = false;
-        if (maxed) { btnLabel = "Owned"; btnClass += " owned"; disabled = true; }
-        else if (locked) { btnLabel = "🔒"; disabled = true; }
-        else if (blocked) { btnLabel = "Full"; disabled = true; }
-        else { btnLabel = `🪙 ${cost}`; disabled = tooPoor; }
+    init(state, player) { this.state = state; this.player = player; },
 
-        row.innerHTML =
-          `<div class="icon">${item.icon}</div>` +
-          `<div class="info"><div class="name">${item.name}${levelLabel}</div>` +
-          `<div class="desc">${item.desc}</div></div>`;
-        const btn = document.createElement("button");
-        btn.className = btnClass; btn.textContent = btnLabel; btn.disabled = disabled;
-        if (!disabled) btn.addEventListener("click", () => this.buy(item));
-        row.appendChild(btn);
-        dom.shopItems.appendChild(row);
+    toggle() { if (this.open) this.close(); else this.openInv(); },
+    openInv() {
+      if (this.open) return;
+      if (Shop.open) Shop.closeShop();
+      this.open = true; uiPaused = true;
+      dom.inventory.classList.remove("hidden");
+      this.render();
+    },
+    close() {
+      if (!this.open) return;
+      this.open = false; uiPaused = false;
+      dom.inventory.classList.add("hidden");
+    },
+
+    equip(inst) { equipItem(this.player, inst); this.render(); if (Shop.open) Shop.render(); },
+    unequip(slot) { unequipSlot(this.player, slot); recomputeStats(this.player); this.render(); },
+
+    render() {
+      if (!this.open) return;
+      const p = this.player;
+
+      // ---- Equipment slots ----
+      dom.invEquip.innerHTML = "";
+      for (const slot of EQUIP_SLOTS) {
+        const meta = SLOT_META[slot];
+        const occ = p.equipment[slot];
+        const cell = document.createElement("div");
+        cell.className = "equip-slot";
+        if (occ === TWO_HANDED) {
+          cell.classList.add("filled", "two-handed");
+          cell.innerHTML = `<div class="slot-label">${meta.label}</div><div class="slot-item">⟵ two-handed</div>`;
+        } else if (occ) {
+          const def = getDef(occ.id);
+          const rar = RARITY[def.rarity] || RARITY.normal;
+          cell.classList.add("filled");
+          cell.innerHTML = `<div class="slot-label">${meta.label}</div>` +
+            `<div class="slot-item" style="color:${rar.color}">${def.icon} ${def.name}</div>`;
+          cell.title = "Unequip " + def.name;
+          cell.addEventListener("click", () => this.unequip(slot));
+        } else {
+          cell.innerHTML = `<div class="slot-label">${meta.label}</div><div class="slot-empty">${meta.icon} empty</div>`;
+        }
+        dom.invEquip.appendChild(cell);
+      }
+
+      // ---- Live stat block ----
+      const w = p.weapon;
+      dom.invStats.innerHTML =
+        `<div class="stat-row"><span>❤ Max health</span><b>${Math.round(p.maxHealth)}</b></div>` +
+        `<div class="stat-row"><span>🛡️ Resist</span><b>${Math.round(p.damageReduction * 100)}%</b></div>` +
+        `<div class="stat-row"><span>👟 Speed</span><b>${p.speed.toFixed(1)}</b></div>` +
+        `<div class="stat-row"><span>🩸 Lifesteal</span><b>${p.lifesteal}</b></div>` +
+        `<div class="stat-row"><span>⚔️ Weapon</span><b>${w.name}</b></div>` +
+        `<div class="stat-row"><span>💥 Damage</span><b>${(+w.damage.toFixed(1))}${w.multishot > 1 ? " ×" + w.multishot : ""}</b></div>`;
+
+      // ---- Bag ----
+      dom.invBag.innerHTML = "";
+      const bagTitle = document.createElement("div");
+      bagTitle.className = "bag-title";
+      bagTitle.textContent = `🎒 Bag (${p.inventory.length}/${p.invCap})`;
+      dom.invBag.appendChild(bagTitle);
+      if (p.inventory.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "shop-empty"; empty.textContent = "Empty — buy gear from the merchant or beat a boss for rare loot.";
+        dom.invBag.appendChild(empty);
+      }
+      for (const inst of p.inventory.slice()) {
+        const def = getDef(inst.id);
+        const card = itemCard(def, "Equip", "buy-btn equip-btn", false,
+          () => this.equip(inst), def.rarity === "rare" ? "RARE" : "");
+        dom.invBag.appendChild(card);
       }
     },
   };
@@ -1737,10 +2321,15 @@
       scene, shadow: world.shadow,
       score: 0, coins: 0, wave: 0, waveTotal: 0, over: false,
       artifacts: [], monsters: [], bolts: [], coinsList: [],
-      upgrades: Object.create(null),
+      enemyBolts: [],   // hostile boss projectiles (Hazard)
+      drops: [],        // rare gear dropped on the ground (ItemDrop)
       waveStats: { kills: 0, artifacts: 0, coins: 0 },
       merchant: null, boss: null,
     };
+
+    // Hand out the starting gear and compute the initial stat block.
+    player.setupStartingLoadout();
+
     updateHealthBar(player.health);
     updateMonsterCounter(state);
     updateCoins(state);
@@ -1749,6 +2338,7 @@
     const merchant = new Merchant(scene, world.shadow, interaction, () => Shop.openShop());
     state.merchant = merchant;
     Shop.init(state, player);
+    Inventory.init(state, player);
 
     // A few artifacts to find before the first wave even arrives.
     for (let i = 0; i < 3; i++) spawnArtifact(scene, world, interaction, player, state);
@@ -1780,22 +2370,28 @@
       waves.update(dt);
       merchant.update(dt);
 
-      // Casting — the weapon may fire several bolts per cast (multishot).
+      // Attacking — ranged weapons fire ballistic bolts/arrows (possibly a
+      // multishot spread); melee weapons sweep an arc in front of the player.
       if (Input.wantsCast()) {
-        const shots = player.tryCast();
-        if (shots) {
-          const w = player.weapon;
-          for (const s of shots) {
+        const act = player.tryCast();
+        if (act && act.type === "ranged") {
+          const w = act.weapon;
+          for (const s of act.shots) {
             state.bolts.push(new Projectile(scene, world.shadow, s.origin, s.dir, {
               speed: w.boltSpeed, radius: w.boltRadius, damage: w.damage,
               pierce: w.pierce, color: w.color, haloColor: w.haloColor,
+              gravity: w.gravity, shape: w.shape,
             }));
           }
+        } else if (act && act.type === "melee") {
+          meleeSweep(state, act);
         }
       }
 
       updateBolts(state, dt);
+      updateHazards(state, player, dt);
       updateMonsters(state, player, dt);
+      updateItemDrops(state, player, dt);
       updateCoinDrops(state, player, dt);
       updateMonsterCounter(state);
 
@@ -1836,15 +2432,55 @@
   function updateMonsters(state, player, dt) {
     for (let i = state.monsters.length - 1; i >= 0; i--) {
       const m = state.monsters[i];
-      const touching = m.update(dt, player.position);
+      const touching = m.update(dt, player.position, state);
       if (!m.alive) { state.monsters.splice(i, 1); continue; }
       if (touching && m.dying <= 0 && m.biteTimer <= 0) {
         m.biteTimer = CONFIG.biteCooldown;
-        const dmg = (m.contactDamage || CONFIG.contactDamage) * (1 - player.damageReduction);
-        const hp = player.takeDamage(dmg);
-        updateHealthBar(hp);
-        flashHurt();
-        if (hp <= 0) { gameOver(state); return; }
+        damagePlayer(state, m.contactDamage || CONFIG.contactDamage);
+        if (state.over) return;
+      }
+    }
+  }
+
+  // Apply damage to the player from any source (a sweet bite, a boss stomp, a
+  // hostile candy bolt). Honours damage reduction and ends the run at 0 HP.
+  function damagePlayer(state, rawAmount) {
+    if (!playerRef || state.over) return;
+    const dmg = rawAmount * (1 - playerRef.damageReduction);
+    const hp = playerRef.takeDamage(dmg);
+    updateHealthBar(hp);
+    flashHurt();
+    if (hp <= 0) gameOver(state);
+  }
+
+  // Advance hostile boss projectiles; a hit damages the player, then it fizzles.
+  function updateHazards(state, player, dt) {
+    if (!state.enemyBolts) return;
+    for (let i = state.enemyBolts.length - 1; i >= 0; i--) {
+      const h = state.enemyBolts[i];
+      const hit = h.update(dt, player.position);
+      if (hit) { damagePlayer(state, h.damage); h.dead = true; }
+      if (h.dead) { h.dispose(); state.enemyBolts.splice(i, 1); }
+    }
+  }
+
+  // A melee swing: damage every monster within the weapon's reach + arc in
+  // front of the player. Wide weapons (axe/hammer) can hit several at once.
+  function meleeSweep(state, act) {
+    const w = act.weapon, reach = (w.melee && w.melee.range) || 2.5;
+    const arc = (w.melee && w.melee.arc) || 1.6;
+    const aim = Math.atan2(act.dir.x, act.dir.z);
+    for (const m of state.monsters) {
+      if (!m.alive || m.dying > 0) continue;
+      const dx = m.position.x - act.origin.x, dz = m.position.z - act.origin.z;
+      const d = Math.hypot(dx, dz);
+      if (d > reach + m.radius) continue;
+      // Within the frontal cone?
+      const ang = Math.atan2(dx, dz);
+      let diff = Math.abs(((ang - aim + Math.PI) % (Math.PI * 2)) - Math.PI);
+      if (diff <= arc / 2) {
+        const killed = m.hit(w.damage);
+        if (killed) onMonsterDefeated(state, m);
       }
     }
   }
@@ -1869,15 +2505,41 @@
         state.coinsList.push(new Coin(state.scene, state.shadow,
           new BABYLON.Vector3(m.position.x + off(), 0, m.position.z + off()), v));
       }
+      // A boss always drops a guaranteed RARE item — the only way to get one.
+      const rareId = RARE_DROPS[(rng() * RARE_DROPS.length) | 0];
+      const dpos = new BABYLON.Vector3(m.position.x, 0, m.position.z + 2);
+      state.drops.push(new ItemDrop(state.scene, state.shadow, dpos, rareId));
       hideBossBar();
       if (state.boss === m) state.boss = null;
-      toast(`👑 ${m.name} defeated! +${CONFIG.bossScore}`);
+      toast(`👑 ${m.name} defeated! Dropped ${getDef(rareId).name}!`);
       return;
     }
     addScore(state, CONFIG.scorePerMonster);
     state.waveStats.kills++;
     maybeDropCoin(state, m.position);
     toast(`Splat! +${CONFIG.scorePerMonster}`);
+  }
+
+  // Spin/float dropped rare loot; scoop it into the bag when the player nears.
+  function updateItemDrops(state, player, dt) {
+    if (!state.drops) return;
+    for (let i = state.drops.length - 1; i >= 0; i--) {
+      const d = state.drops[i];
+      const got = d.update(dt, player.position);
+      if (got) {
+        const def = getDef(d.id);
+        if (invAdd(player, makeItem(d.id))) {
+          toast(`✨ Picked up ${def.name}!`);
+          if (Inventory.open) Inventory.render();
+        } else {
+          toast("Bag full — drop something!");
+          continue; // leave it on the ground to grab later
+        }
+        d.dispose(); state.drops.splice(i, 1);
+      } else if (d.life <= 0) {
+        d.dispose(); state.drops.splice(i, 1);
+      }
+    }
   }
 
   // Roll for a coin drop when a sweet is defeated, and spawn it at the kill spot.
@@ -1998,7 +2660,7 @@
   // monsters, the boss, artifacts and dropped coins, plus the wave clock) is
   // serialized explicitly so the run resumes exactly where it left off.
   // =========================================================================
-  const SAVE_VERSION = 1;
+  const SAVE_VERSION = 2;
   const PENDING_LOAD_KEY = "gg3d_pending_load"; // sessionStorage hand-off across reload
   const AUTOSTART_KEY = "gg3d_autostart";       // restart -> skip the start screen
 
@@ -2027,9 +2689,6 @@
       seed: worldSeed,
       score: state.score,
       money: state.coins,
-      coinMagnetRange,
-      coinPickupRange,
-      upgrades: Object.assign({}, state.upgrades),
       waveStats: Object.assign({}, state.waveStats),
       wave: {
         number: waves.wave,
@@ -2040,18 +2699,17 @@
       },
       player: {
         health: round(player.health),
-        maxHealth: player.maxHealth,
-        speed: round(player.speed),
-        damageReduction: round(player.damageReduction),
-        lifesteal: player.lifesteal,
         facing: round(player.facing),
         pos: xz(player.position),
-        weapon: Object.assign({}, player.weapon),
+        // The gear *is* the build now: save the bag + equipped slots and the
+        // stat block rebuilds itself via recomputeStats() on load.
+        inventory: player.inventory.map((it) => it.id),
+        equipment: serializeEquipment(player),
       },
       monsters: state.monsters
         .filter((m) => m.alive && m.dying <= 0)
         .map((m) => m.isBoss
-          ? { boss: true, wave: m.wave, hp: round(m.hp), pos: xz(m.position) }
+          ? { boss: true, wave: m.wave, arch: m.archId, hp: round(m.hp), pos: xz(m.position) }
           : { kind: m.kind, hp: m.hp, speed: round(m.speed), pos: xz(m.position) }),
       artifacts: state.artifacts
         .filter((a) => a._it && a._it.enabled)
@@ -2059,7 +2717,20 @@
       coinDrops: state.coinsList
         .filter((c) => !c.collected && c.life > 0)
         .map((c) => ({ pos: xz(c.root.position), value: c.value, life: round(c.life) })),
+      itemDrops: (state.drops || [])
+        .filter((dr) => dr.life > 0)
+        .map((dr) => ({ pos: xz(dr.root.position), id: dr.id, life: round(dr.life) })),
     };
+  }
+
+  // Equipment → a plain { slot: id | "__2H__" | null } map for the save file.
+  function serializeEquipment(player) {
+    const out = {};
+    for (const slot of EQUIP_SLOTS) {
+      const occ = player.equipment[slot];
+      out[slot] = occ === TWO_HANDED ? TWO_HANDED : occ ? occ.id : null;
+    }
+    return out;
   }
 
   // Basic structural validation so a bad/old/foreign file fails cleanly.
@@ -2078,6 +2749,8 @@
     state.bolts.length = 0;
     for (const c of state.coinsList) c.dispose();
     state.coinsList.length = 0;
+    if (state.enemyBolts) { for (const h of state.enemyBolts) h.dispose(); state.enemyBolts.length = 0; }
+    if (state.drops) { for (const dr of state.drops) dr.dispose(); state.drops.length = 0; }
     state.boss = null;
     hideBossBar();
   }
@@ -2090,29 +2763,33 @@
 
     clearWorldEntities(state, interaction);
 
-    // Score / money / perk economy.
+    // Score / money economy.
     state.score = d.score | 0;
     state.coins = d.money | 0;
-    state.upgrades = Object.assign(Object.create(null), d.upgrades || {});
     state.waveStats = Object.assign({ kills: 0, artifacts: 0, coins: 0 }, d.waveStats || {});
-    coinMagnetRange = (typeof d.coinMagnetRange === "number") ? d.coinMagnetRange : CONFIG.coinMagnetRange;
-    coinPickupRange = (typeof d.coinPickupRange === "number") ? d.coinPickupRange : CONFIG.coinPickupRange;
 
-    // Player stats, perks (weapon) and pose.
+    // Player pose + gear. Rebuild the bag and equipped slots from item ids, then
+    // recompute the whole derived stat block (health/speed/resist/weapon).
     const ps = d.player;
-    player.maxHealth = ps.maxHealth;
-    player.health = ps.health;
-    player.speed = ps.speed;
-    player.damageReduction = ps.damageReduction || 0;
-    player.lifesteal = ps.lifesteal || 0;
+    player.health = ps.health != null ? ps.health : player.maxHealth;
     player.facing = ps.facing || 0;
-    Object.assign(player.weapon, ps.weapon || {});
     player.root.position.set(ps.pos[0], 0, ps.pos[1]);
+    player.inventory = (ps.inventory || []).filter((id) => getDef(id)).map((id) => makeItem(id));
+    const eq = player.equipment;
+    for (const slot of EQUIP_SLOTS) eq[slot] = null;
+    const savedEq = ps.equipment || {};
+    for (const slot of EQUIP_SLOTS) {
+      const v = savedEq[slot];
+      if (v === TWO_HANDED) eq[slot] = TWO_HANDED;
+      else if (v && getDef(v)) eq[slot] = makeItem(v);
+    }
+    recomputeStats(player);
+    if (ps.health != null) { player.health = Math.min(player.maxHealth, ps.health); updateHealthBar(player.health); }
 
-    // Monsters + boss.
+    // Monsters + boss (the boss restores its exact archetype).
     for (const md of d.monsters || []) {
       if (md.boss) {
-        const boss = new Boss(sceneRef, world.shadow, new BABYLON.Vector3(md.pos[0], 0, md.pos[1]), md.wave);
+        const boss = new Boss(sceneRef, world.shadow, new BABYLON.Vector3(md.pos[0], 0, md.pos[1]), md.wave, md.arch);
         boss.hp = md.hp;
         state.boss = boss;
         state.monsters.push(boss);
@@ -2125,7 +2802,7 @@
       }
     }
 
-    // Artifacts + dropped coins.
+    // Artifacts + dropped coins + dropped rare loot.
     for (const ad of d.artifacts || []) {
       spawnArtifact(sceneRef, world, interaction, player, state, null, ad);
     }
@@ -2133,6 +2810,12 @@
       const c = new Coin(sceneRef, world.shadow, new BABYLON.Vector3(cd.pos[0], 0, cd.pos[1]), cd.value);
       c.life = cd.life;
       state.coinsList.push(c);
+    }
+    for (const it of d.itemDrops || []) {
+      if (!getDef(it.id)) continue;
+      const dr = new ItemDrop(sceneRef, world.shadow, new BABYLON.Vector3(it.pos[0], 0, it.pos[1]), it.id);
+      dr.life = it.life;
+      state.drops.push(dr);
     }
 
     // Wave clock + the merchant (present during a cleared-wave rest).
@@ -2200,7 +2883,7 @@
   const Pause = {
     pendingAction: null, // "restart" | "exit" while the confirm dialog is up
 
-    canOpen() { return gameStarted && stateRef && !stateRef.over && !paused && !Shop.open; },
+    canOpen() { return gameStarted && stateRef && !stateRef.over && !paused && !Shop.open && !Inventory.open; },
 
     open() {
       if (!this.canOpen()) return;
@@ -2272,7 +2955,94 @@
     if (isTouch) dom.touch.classList.remove("hidden");
     dom.canvas.focus();
     gameStarted = true;
+    Music.start(); // browsers only allow audio after a user gesture (the click)
   }
+
+  // =========================================================================
+  // Music — a small procedurally-synthesised soundtrack via the Web Audio API.
+  // Synthesised (no audio files) so it ships on static hosting with zero assets
+  // and starts instantly. A gentle looping chord progression with a plucky
+  // arpeggio + soft bass. Toggle with the 🔊 button or the "M" key. Audio can
+  // only start after a user gesture, so we kick it off from startGame().
+  // =========================================================================
+  const Music = {
+    ctx: null, master: null, timer: null, on: true, step: 0, started: false,
+    // A wistful candy-land loop: chords as semitone offsets from A2 (≈110 Hz).
+    chords: [[0, 4, 7, 11], [-3, 0, 4, 9], [-7, -3, 0, 5], [2, 5, 9, 12]],
+    bpm: 96,
+
+    _freq(semi) { return 110 * Math.pow(2, semi / 12); },
+
+    _ensure() {
+      if (this.ctx) return true;
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return false;
+        this.ctx = new AC();
+        this.master = this.ctx.createGain();
+        this.master.gain.value = 0.0;
+        this.master.connect(this.ctx.destination);
+        return true;
+      } catch (e) { return false; }
+    },
+
+    // One short synth note (osc → its own envelope → master).
+    _note(freq, t, dur, type, peak) {
+      const ctx = this.ctx;
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = type; osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(peak, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(g); g.connect(this.master);
+      osc.start(t); osc.stop(t + dur + 0.05);
+    },
+
+    _tick() {
+      if (!this.ctx) return;
+      const beat = 60 / this.bpm;
+      const t = this.ctx.currentTime + 0.05;
+      const chord = this.chords[(this.step >> 2) % this.chords.length];
+      const arpNote = chord[this.step % chord.length];
+      // Plucky lead arpeggio.
+      this._note(this._freq(arpNote + 12), t, beat * 0.9, "triangle", 0.18);
+      // Soft bass on the downbeat of each chord.
+      if (this.step % 4 === 0) this._note(this._freq(chord[0] - 12), t, beat * 1.8, "sine", 0.22);
+      // A pad shimmer mid-bar.
+      if (this.step % 4 === 2) this._note(this._freq(chord[2]), t, beat * 1.4, "sawtooth", 0.05);
+      this.step++;
+    },
+
+    start() {
+      if (!this._ensure()) return;
+      if (this.ctx.state === "suspended") this.ctx.resume();
+      this.started = true;
+      this._applyVolume();
+      if (this.timer == null && this.on) {
+        const beat = 60 / this.bpm;
+        this._tick();
+        this.timer = setInterval(() => this._tick(), beat * 1000);
+      }
+    },
+    _applyVolume() {
+      if (!this.master) return;
+      try {
+        const target = this.on ? 0.5 : 0.0;
+        this.master.gain.setTargetAtTime(target, this.ctx.currentTime, 0.3);
+      } catch (e) { this.master.gain.value = this.on ? 0.5 : 0.0; }
+    },
+    toggle() {
+      this.on = !this.on;
+      if (this.on) { this.start(); } else if (this.timer != null) { clearInterval(this.timer); this.timer = null; }
+      this._applyVolume();
+      if (dom.musicBtn) {
+        dom.musicBtn.textContent = this.on ? "🔊" : "🔇";
+        dom.musicBtn.title = this.on ? "Mute music" : "Play music";
+      }
+      return this.on;
+    },
+  };
 
   // ---- Fullscreen (whole page, so the HUD/joystick stay visible) ----------
   const Fullscreen = {
@@ -2348,9 +3118,20 @@
       dom.miniNextBtn.addEventListener("click", () => { Input.nextWaveQueued = true; });
       // The × collapses the results window into the corner widget (frees the view).
       dom.wavePanelClose.addEventListener("click", () => { if (waveSystem) waveSystem.minimize(); });
-      // Shop open/close.
+      // Shop open/close + Buy/Sell tabs.
       dom.shopClose.addEventListener("click", () => Shop.closeShop());
       dom.shopDone.addEventListener("click", () => Shop.closeShop());
+      if (dom.shopTabBuy) dom.shopTabBuy.addEventListener("click", () => Shop.setTab("buy"));
+      if (dom.shopTabSell) dom.shopTabSell.addEventListener("click", () => Shop.setTab("sell"));
+
+      // Inventory overlay: open via the 🎒 buttons or the "I" key.
+      if (dom.invBtn) dom.invBtn.addEventListener("click", () => Inventory.toggle());
+      if (dom.bagBtn) dom.bagBtn.addEventListener("click", () => Inventory.toggle());
+      if (dom.invClose) dom.invClose.addEventListener("click", () => Inventory.close());
+      if (dom.invDone) dom.invDone.addEventListener("click", () => Inventory.close());
+
+      // Music toggle (🔊 / 🔇).
+      if (dom.musicBtn) dom.musicBtn.addEventListener("click", () => Music.toggle());
 
       // Start-screen "Load progress" -> pick a file -> reload into the save.
       if (dom.loadBtn && dom.loadFile) {
@@ -2368,8 +3149,14 @@
       // open, otherwise toggles the pause menu (or backs out of a confirm).
       Pause.init();
       window.addEventListener("keydown", (e) => {
+        // Inventory hotkey (only once playing, and not while another menu is up).
+        if ((e.code === "KeyI" || e.code === "KeyB") && gameStarted && !paused && !Shop.open) {
+          Inventory.toggle(); e.preventDefault(); return;
+        }
+        if (e.code === "KeyM") { Music.toggle(); return; }
         if (e.code !== "Escape") return;
         if (Shop.open) { Shop.closeShop(); return; }
+        if (Inventory.open) { Inventory.close(); return; }
         if (paused && Pause.pendingAction) { Pause.hideConfirm(); return; }
         Pause.toggle();
       });
@@ -2411,12 +3198,14 @@
   // Inert in production — window.__GG_TEST__ is never set on the deployed site. ---
   if (typeof window !== "undefined" && window.__GG_TEST__) {
     window.__GG_TEST__ = {
-      CONFIG, Projectile, Monster, Boss, Coin, Shop, SHOP_ITEMS,
+      CONFIG, Projectile, Hazard, Monster, Boss, Coin, ItemDrop, Shop, Inventory,
+      ITEM_DB, RARE_DROPS, SHOP_STOCK, BOSS_ARCHES, getDef, makeItem,
+      equipItem, unequipSlot, recomputeStats, TWO_HANDED, EQUIP_SLOTS,
       get waves() { return waveSystem; },
       get player() { return playerRef; },
       get state() { return Shop.state; },
       startGame,
-      serializeGame, applySave, validateSave, setSeed, rng, Pause,
+      serializeGame, applySave, validateSave, setSeed, rng, Pause, Music,
       get seed() { return worldSeed; },
       get paused() { return paused; },
     };
@@ -2430,10 +3219,15 @@
    *                     opens an HTML overlay; swap/extend it for a BABYLON.GUI
    *                     dialogue panel (babylon.gui is loaded) for talking NPCs.
    *
-   * SHIPPED THIS RELEASE: coins (currency) dropped by sweets, the plaza Merchant
-   * + Shop (buy/upgrade weapons), and the between-waves results window that
-   * collapses into a non-blocking corner widget. See Coin / Merchant / Shop /
-   * SHOP_ITEMS and WaveSystem above.
+   * SHIPPED THIS RELEASE: a full GEAR system — weapons (wand/bow/staff/sword/
+   * axe/dagger, one- and two-handed), armour (helmet/breastplate/boots) and
+   * accessories (two rings + a necklace), carried in an INVENTORY and slotted
+   * into EQUIPMENT that recomputes the player's stats. Normal gear is bought
+   * from the Merchant; RARE gear drops from bosses; anything can be sold back.
+   * Four BOSS archetypes (charger/caster/summoner/stomper) with their own
+   * attacks roll in randomly every 5 waves and scale each cycle. Projectiles
+   * are gravity-bound + life-capped (Projectile / Hazard). Procedural Music.
+   * See ITEM_DB / Inventory / Shop / Boss / Projectile / Music above.
    * ===========================================================================
    */
 })();

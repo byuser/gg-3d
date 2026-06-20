@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="description" content="Good Game 3D — a third-person browser adventure. Wield a magic wand, blast waves of living sweets, and collect artifacts for points." />
   <meta name="theme-color" content="#0b0f1a" />
-  <link rel="stylesheet" href="css/style.css?v=8" />
+  <link rel="stylesheet" href="css/style.css?v=9" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
@@ -22,8 +22,9 @@
       <ul class="controls">
         <li><b>Move</b><span>WASD / Arrows · or the on-screen stick</span></li>
         <li><b>Look</b><span>Drag the screen / mouse</span></li>
-        <li><b>Cast&nbsp;magic</b><span>Space / F · or the ✨ button</span></li>
-        <li><b>Collect&nbsp;artifact</b><span>E · or the action button</span></li>
+        <li><b>Attack</b><span>Space / F · or the ✨ button</span></li>
+        <li><b>Inventory</b><span>I · or the 🎒 button</span></li>
+        <li><b>Interact / shop</b><span>E · or the action button</span></li>
         <li><b>Next&nbsp;wave</b><span>Enter / N · or the Next Wave button</span></li>
       </ul>
       <button id="startBtn" class="start-btn">Start Adventure</button>
@@ -79,6 +80,8 @@
     </div>
     <button id="fsBtn" class="fs-btn" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
     <button id="pauseBtn" class="pause-btn" title="Menu (Esc)" aria-label="Open menu">☰</button>
+    <button id="invBtn" class="icon-btn inv-btn" title="Inventory (I)" aria-label="Open inventory">🎒</button>
+    <button id="musicBtn" class="icon-btn music-btn" title="Mute music (M)" aria-label="Toggle music">🔊</button>
     <div id="toast" class="toast"></div>
   </div>
 
@@ -87,6 +90,7 @@
     <div id="joystick" class="joystick"><div id="stick" class="stick"></div></div>
     <button id="castBtn" class="cast-btn">✨</button>
     <button id="actionBtn" class="action-btn">E</button>
+    <button id="bagBtn" class="bag-btn" title="Inventory" aria-label="Open inventory">🎒</button>
   </div>
 
   <!-- Game over screen -->
@@ -122,20 +126,42 @@
     </div>
   </div>
 
-  <!-- Merchant shop: opened by walking up to the NPC at the plaza and pressing E. -->
+  <!-- Merchant shop: opened by walking up to the NPC at the plaza and pressing E.
+       Buy normal gear, or sell items from your bag for coins. -->
   <div id="shop" class="shop-overlay hidden">
     <div class="shop-panel">
       <button id="shopClose" class="shop-close" title="Close" aria-label="Close shop">×</button>
       <h2>🧙 Travelling Merchant</h2>
-      <p class="shop-tagline">Buy a new weapon or upgrade your wand between waves.</p>
+      <p class="shop-tagline">Buy weapons, armour &amp; accessories — or sell your spare gear.</p>
       <div class="shop-coins">🪙 <span id="shopCoins">0</span> coins</div>
+      <div class="shop-tabs">
+        <button id="shopTabBuy" class="shop-tab active">Buy</button>
+        <button id="shopTabSell" class="shop-tab">Sell</button>
+      </div>
       <div id="shopItems" class="shop-items"></div>
       <button id="shopDone" class="start-btn shop-done">Done</button>
     </div>
   </div>
 
+  <!-- Inventory & equipment: opened with the 🎒 button or the "I" key. -->
+  <div id="inventory" class="inv-overlay hidden">
+    <div class="inv-panel">
+      <button id="invClose" class="shop-close" title="Close" aria-label="Close inventory">×</button>
+      <h2>🎒 Inventory &amp; Equipment</h2>
+      <p class="shop-tagline">Click a bag item to equip it; click an equipped slot to remove it.</p>
+      <div class="inv-cols">
+        <div class="inv-left">
+          <div id="invEquip" class="equip-grid"></div>
+          <div id="invStats" class="inv-stats"></div>
+        </div>
+        <div id="invBag" class="inv-bag"></div>
+      </div>
+      <button id="invDone" class="start-btn shop-done">Done</button>
+    </div>
+  </div>
+
   <canvas id="renderCanvas"></canvas>
 
-  <script src="js/game.js?v=8"></script>
+  <script src="js/game.js?v=9"></script>
 </body>
 </html>
