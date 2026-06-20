@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="description" content="Good Game 3D — a third-person browser adventure. Wield a magic wand, blast waves of living sweets, and collect artifacts for points." />
   <meta name="theme-color" content="#0b0f1a" />
-  <link rel="stylesheet" href="css/style.css?v=9" />
+  <link rel="stylesheet" href="css/style.css?v=10" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
@@ -78,6 +78,11 @@
       <button id="miniNextBtn" class="mini-next-btn">Start Wave <span id="miniWaveNum">1</span> ▶</button>
       <div class="mini-sub">auto in <span id="miniCountdown">—</span></div>
     </div>
+    <!-- Potion belt: up to 3 stackable potion slots (use with 1/2/3 or a tap),
+         with active-buff countdown pills above it. -->
+    <div id="buffBar" class="buff-bar"></div>
+    <div id="potionBar" class="potion-bar"></div>
+
     <button id="fsBtn" class="fs-btn" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
     <button id="pauseBtn" class="pause-btn" title="Menu (Esc)" aria-label="Open menu">☰</button>
     <button id="invBtn" class="icon-btn inv-btn" title="Inventory (I)" aria-label="Open inventory">🎒</button>
@@ -136,6 +141,7 @@
       <div class="shop-coins">🪙 <span id="shopCoins">0</span> coins</div>
       <div class="shop-tabs">
         <button id="shopTabBuy" class="shop-tab active">Buy</button>
+        <button id="shopTabRare" class="shop-tab">✨ Rare</button>
         <button id="shopTabSell" class="shop-tab">Sell</button>
       </div>
       <div id="shopItems" class="shop-items"></div>
@@ -160,8 +166,21 @@
     </div>
   </div>
 
+  <!-- Blacksmith anvil: opened by walking up to the smith at the plaza and
+       pressing E. Spend coins to enhance weapons & equipment. -->
+  <div id="anvil" class="shop-overlay hidden">
+    <div class="shop-panel">
+      <button id="anvilClose" class="shop-close" title="Close" aria-label="Close anvil">×</button>
+      <h2>🔨 Blacksmith</h2>
+      <p class="shop-tagline">Enhance your weapons &amp; equipment. Rarer gear forges further and gains more per level.</p>
+      <div class="shop-coins">🪙 <span id="anvilCoins">0</span> coins</div>
+      <div id="anvilItems" class="shop-items"></div>
+      <button id="anvilDone" class="start-btn shop-done">Done</button>
+    </div>
+  </div>
+
   <canvas id="renderCanvas"></canvas>
 
-  <script src="js/game.js?v=9"></script>
+  <script src="js/game.js?v=10"></script>
 </body>
 </html>

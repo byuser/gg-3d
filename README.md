@@ -18,9 +18,10 @@ to rack up your **score**.
 | Look | drag mouse | drag the screen |
 | Zoom | mouse wheel | two-finger pinch |
 | Attack (weapon) | `Space` or `F` (hold) | ✨ button (bottom-right) |
+| Use potion (belt 1/2/3) | `1` `2` `3` | tap a potion slot (bottom-left) |
 | Inventory / equipment | `I` (or `B`) | 🎒 button |
-| Collect / shop (`E`) | `E` | action button (bottom-right) |
-| Start next wave | `Enter` / `N` | Next Wave button |
+| Collect / shop / forge (`E`) | `E` | action button (bottom-right) |
+| Start next wave | `Enter` / `N` | corner widget (top-right) |
 | Music on/off | `M` | 🔊 button (top-right) |
 | Pause / menu | `Esc` | ☰ button (top-right) |
 
@@ -28,11 +29,24 @@ to rack up your **score**.
 
 - **Waves:** each wave a swarm of **living sweets** marches in from the meadow's edge.
   Clear them all and a **wave-results window** pops up — it shows your tally (sweets
-  defeated, artifacts, coins earned) and a **Start Next Wave** button that skips the
-  wait. Close it with the **×** and it shrinks to a small **corner widget** so you can
-  roam the map (and visit the merchant) with the view unblocked; the next wave still
-  starts from there, or auto-starts after 60 seconds. Every wave brings **more sweets**
-  (faster and tougher) and **more artifacts**.
+  defeated, artifacts, coins earned) and an **OK** button that just closes it. Close it
+  with **OK** (or the **×**) and it shrinks to a small **corner widget** (top-right) so
+  you can roam the map (and visit the merchant + blacksmith) with the view unblocked.
+  **Starting the next wave early is done only from that corner widget** (or `Enter`/`N`),
+  so you're never rushed; otherwise it auto-starts after 60 seconds. Every wave brings
+  **more sweets** (faster and tougher) and **more artifacts**.
+- **Potions & the belt:** buy **health potions** (minor / standard / **greater**) and
+  **elixirs** (Might, Swiftness) from the merchant. They go onto a **3-slot potion belt**
+  in the **bottom-left corner** — each slot **stacks** one kind. Quaff one with `1`/`2`/`3`
+  (or a tap): health potions heal instantly; elixirs grant a **timed buff** shown as a
+  countdown pill above the belt.
+- **The blacksmith:** a burly **🔨 smith** sets up at the plaza between waves beside the
+  merchant. Walk up + press **E** to open the **anvil** and spend coins to **enhance**
+  your weapons and equipment (`+1`, `+2`, …). Rarer gear (**common → rare → epic →
+  legendary**) forges to a higher level and gains more per level, so prize loot is worth
+  investing in. Enhancement boosts the item's stats / weapon damage and its resale value.
+- **Artifacts:** grabbing a glowing artifact now also **heals** you a little and pays a
+  small **coin** reward on top of the score — handy mid-fight.
 - **Coins:** defeated sweets sometimes drop **golden coins**. Walk near one and it's
   scooped up (coins even magnet toward you). Coins are the currency you spend at the
   merchant's shop.
@@ -49,17 +63,22 @@ to rack up your **score**.
 - **Bosses:** every **5th wave** a colossal **Sweet King** 👑 storms in — its **type is
   random** and grows tougher each time. A **Charger** winds up and dashes at you; a
   **Caster** lobs hostile candy bolts; a **Summoner** conjures swarms of extra sweets; a
-  **Stomper** is a slow tank that ground-pounds a damaging shockwave. Each has a
-  dedicated **health bar**, scales up every cycle, and drops a guaranteed **rare item**
-  plus a **purse of coins**.
+  **Stomper** is a slow tank that ground-pounds a damaging shockwave; a **Bomber** rains
+  a volley of high-arcing candy bombs you must keep moving to dodge; and a **Splitter**
+  sheds knots of minions while alive and **bursts into more on death**. Each telegraphs
+  its attacks (a flashing wind-up), has its own attack **sound**, a dedicated **health
+  bar**, scales up every cycle, and drops a guaranteed **rare item** plus a **purse of
+  coins**.
 - **Coins:** defeated sweets sometimes drop **golden coins** (and bosses a whole purse).
   Walk near one and it's scooped up (coins even magnet toward you). Coins are the
   currency you spend at the merchant's shop.
 - **The merchant:** once a wave is cleared a **travelling merchant** 🧙 appears at the
   central plaza and leaves when the next wave begins. Walk up and press **E** (or the
-  action button) to open the **shop**. Two tabs: **Buy** normal weapons, armour and
-  accessories, or **Sell** any spare gear from your bag (including rare boss loot) for
-  coins. **Rare gear is never sold here — only bosses drop it.**
+  action button) to open the **shop**. Three tabs: **Buy** normal weapons, armour,
+  accessories and **potions**; **✨ Rare** — a **rotating selection of rare/epic/legendary
+  wares that changes every wave** (a premium, but no need to wait for a boss); or **Sell**
+  any spare gear from your bag (enhanced gear sells for more). Bosses still **drop**
+  guaranteed rare loot too.
 - **Solid world:** trees, rocks, bushes, giant toadstools, lampposts and the river are
   **solid** — you bump and slide around them instead of walking through. A winding
   **river** crosses the meadow with **wooden bridges** at the crossings.
@@ -198,8 +217,11 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 - [x] Player-paced waves with a Next Wave button + live monster counter
 - [x] Wave-results window (skip the wait) that collapses to a non-blocking corner widget
 - [x] Coins dropped by sweets, collected like artifacts, used as shop currency
-- [x] Boss fights — four archetypes (charger/caster/summoner/stomper), random every 5 waves
-- [x] Procedural background music (Web Audio, no assets) with a mute toggle
+- [x] Boss fights — six archetypes (charger/caster/summoner/stomper/bomber/splitter), random every 5 waves, with telegraphs + per-attack sound
+- [x] Potions + a 3-slot stacking potion belt (health potions & timed-buff elixirs)
+- [x] Blacksmith NPC — enhance gear for coins, scaling by rarity (common→rare→epic→legendary)
+- [x] Rotating "Featured" rare shop tab that refreshes every wave
+- [x] Procedural background music **and sound effects** (Web Audio, no assets) with a mute toggle
 - [x] Solid scenery collision (trees, rocks, bushes, toadstools, lampposts)
 - [x] A larger map with a winding river + wooden bridges and richer scenery
 - [x] Score + health + game-over

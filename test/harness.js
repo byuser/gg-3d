@@ -127,8 +127,12 @@ ok(Array.isArray(world.obstacles) && world.obstacles.length > 0, `world has ${wo
 ok(typeof world.inRiver === "function", "world exposes a river test");
 // Verify penetration resolution: start just outside an obstacle and push into it
 // with a realistic small step; the player must be shoved back out, not through.
-const o = world.obstacles.find((x) => x.r > 0.8) || world.obstacles[0];
+// Pick a roomy obstacle with no neighbour close enough to interfere with the
+// single-obstacle push-out (otherwise an overlapping prop skews the result).
 const pr = T.CONFIG.playerRadius;
+const o = world.obstacles.find((x) => x.r > 0.8 && !world.obstacles.some((y) =>
+  y !== x && Math.hypot(y.x - x.x, y.z - x.z) < x.r + y.r + 2 * pr + 1)) ||
+  world.obstacles.find((x) => x.r > 0.8) || world.obstacles[0];
 const start = new Vec3(o.x - (o.r + pr + 0.02), 0, o.z); // touching from the left
 const into = new Vec3(o.x + 0.2, 0, o.z);                // small step aimed into the centre
 const res = world.moveActor(start, into, pr);
@@ -315,11 +319,11 @@ st.coinsList.length = 0; st.coinsList.push(new T.Coin(scene, world.shadow, new V
 st.drops.length = 0; st.drops.push(new T.ItemDrop(scene, world.shadow, new Vec3(4, 0, 4), "storm_bow"));
 
 const save = T.serializeGame();
-ok(save && save.v === 2, "serializeGame produced a versioned save");
+ok(save && save.v === 3, "serializeGame produced a versioned save");
 ok(T.validateSave(save), "save passes structural validation");
 ok(save.score === 4242 && save.money === 99, "score + money captured");
 ok(save.player.inventory.length === 2, "bag captured");
-ok(save.player.equipment.hand1 === "magic_wand" && save.player.equipment.breastplate === "iron_plate", "equipment captured");
+ok(save.player.equipment.hand1.id === "magic_wand" && save.player.equipment.breastplate.id === "iron_plate", "equipment captured");
 ok(save.monsters.some((mo) => mo.boss && mo.arch === "summoner"), "boss + archetype captured");
 ok(save.itemDrops.length === 1 && save.itemDrops[0].id === "storm_bow", "dropped rare loot captured");
 ok(!T.validateSave({ v: 999 }), "validation rejects a foreign/old file");
@@ -372,10 +376,134 @@ const farAway = { x: 500, y: 0, z: 500 };
 while (!haz.dead && hf < 1000) { haz.update(0.05, farAway); hf++; }
 ok(haz.dead && hf < 1000, `hostile projectile terminated after ${hf} frames`);
 
-console.log("\n[12] music system is headless-safe");
+console.log("\n[12] music + sfx systems are headless-safe");
 let musicThrew = false;
 try { T.Music.start(); T.Music.toggle(); T.Music.toggle(); } catch (e) { musicThrew = true; }
 ok(!musicThrew, "music system no-ops cleanly without a Web Audio context");
+let sfxThrew = false;
+try {
+  T.Sfx.unlock();
+  ["bolt", "arrow", "staff", "melee", "heavy", "hit", "kill", "coin", "artifact",
+   "potion", "enhance", "buy", "hurt", "boss_charge", "boss_cast", "boss_stomp",
+   "boss_summon", "boss_spawn", "boss_death", "nope"].forEach((n) => T.Sfx.play(n));
+} catch (e) { sfxThrew = true; }
+ok(!sfxThrew, "sfx system no-ops cleanly for every cue without Web Audio");
+
+console.log("\n[13] potion belt — buy, stack, use (heal + timed buff)");
+const pp = T.player;
+pp.potions = [null, null, null];
+pp.buffs = [];
+ok(T.POTION_STOCK.length >= 3 && T.POTION_STOCK.every((id) => T.getDef(id).type === "potion"), `${T.POTION_STOCK.length} potions stocked`);
+ok(T.potionAdd(pp, "minor_potion") && T.potionAdd(pp, "minor_potion"), "potions stack into one belt slot");
+ok(pp.potions[0] && pp.potions[0].count === 2, "two minor potions stacked (count 2)");
+T.potionAdd(pp, "health_potion"); T.potionAdd(pp, "greater_potion");
+ok(pp.potions[1] && pp.potions[2], "different potions take separate slots");
+ok(!T.potionAdd(pp, "elixir_might"), "a 4th kind is rejected — belt holds 3 kinds");
+// Using a health potion heals and decrements the stack.
+pp.health = 10; pp.maxHealth = 100;
+const before = pp.potions[0].count;
+ok(T.potionUse(pp, 0) && pp.health === 40 && pp.potions[0].count === before - 1, "health potion heals +30 and decrements");
+// Empty a stack and the slot frees up.
+T.potionUse(pp, 0);
+ok(pp.potions[0] === null, "emptied potion stack clears its slot");
+// A buff elixir applies a timed stat boost folded into recomputeStats.
+pp.potions = [{ id: "elixir_might", count: 1 }, null, null];
+const dmgBefore = pp.weapon.damage;
+ok(T.potionUse(pp, 0), "elixir consumed");
+ok(pp.buffs.length === 1 && pp.weapon.damage > dmgBefore, "Elixir of Might raised weapon damage via a timed buff");
+
+console.log("\n[14] blacksmith enhancement");
+const bp = T.player;
+T.state.coins = 100000;
+for (const slot of T.EQUIP_SLOTS) bp.equipment[slot] = null;
+bp.inventory = [T.makeItem("iron_sword")];
+const sword = bp.inventory[0];
+T.equipItem(bp, sword); // now in a hand slot
+const dmg0 = bp.weapon.damage;
+const cost1 = T.enhanceCost(T.getDef("iron_sword"), 0);
+ok(cost1 > 0, `enhance cost computed (🪙 ${cost1})`);
+ok(T.enhanceItem(bp, sword, T.state), "iron sword enhanced to +1");
+ok(sword.level === 1 && bp.weapon.damage > dmg0, "enhancement raised the held weapon's damage");
+// Rarity caps differ: a common item maxes at 3, a legendary much higher.
+ok(T.ENHANCE.normal.max === 3 && T.ENHANCE.legendary.max > T.ENHANCE.normal.max, "rarer gear forges further");
+const common = T.makeItem("iron_sword"); common.level = T.ENHANCE.normal.max;
+ok(!T.enhanceItem(bp, common, T.state), "a maxed common item can't be enhanced further");
+// Enhanced armour scales its stat bonus.
+const cap = T.makeItem("iron_helm");
+const baseHelmHp = (T.getDef("iron_helm").stats.maxHealth);
+cap.level = 2;
+ok(T.effectiveStats(cap).maxHealth > baseHelmHp, "enhanced armour grants more than its base stat");
+
+console.log("\n[15] featured rare shop rotates every wave");
+const f1 = T.featuredForWave(1), f2 = T.featuredForWave(2), f1b = T.featuredForWave(1);
+ok(Array.isArray(f1) && f1.length > 0, `featured tab offers ${f1.length} wares`);
+ok(f1.every((id) => ["rare", "epic", "legendary"].includes(T.getDef(id).rarity)), "featured wares are all rare+ gear");
+ok(JSON.stringify(f1) === JSON.stringify(f1b), "featured stock is deterministic for a given wave");
+ok(JSON.stringify(f1) !== JSON.stringify(f2), "featured stock changes between waves");
+
+console.log("\n[16] new boss archetypes (bomber + splitter)");
+ok(T.BOSS_ARCHES.some((a) => a.id === "bomber") && T.BOSS_ARCHES.some((a) => a.id === "splitter"), "bomber + splitter archetypes registered");
+// Bomber lobs a volley of hostile bombs.
+T.state.monsters.length = 0; T.state.enemyBolts.length = 0;
+const bomber = new T.Boss(scene, world.shadow, new Vec3(8, 0, 0), 10, "bomber");
+bomber.actionTimer = 0; T.state.monsters.push(bomber);
+for (let i = 0; i < 200 && T.state.enemyBolts.length === 0; i++) step();
+ok(T.state.enemyBolts.length > 0, "bomber boss lobbed a bomb volley");
+// Splitter sheds minions while alive, and bursts into more on death.
+T.state.monsters.length = 0; T.state.enemyBolts.length = 0; T.state.drops.length = 0;
+T.player.root.position.set(-60, 0, -60);
+const splitter = new T.Boss(scene, world.shadow, new Vec3(50, 0, 50), 10, "splitter");
+T.state.boss = splitter; T.state.monsters.push(splitter);
+const beforeKill = T.state.monsters.length;
+T.state.bolts.push(shoot(splitter, splitter.maxHp + 50));
+step(3);
+ok(T.state.monsters.length > beforeKill - 1, "splitter burst into a knot of sweets on death");
+
+console.log("\n[17] artifacts heal + pay coins on pickup");
+const ap = T.player;
+ap.state = "idle"; ap.pickT = 0; ap.carried = null; ap.pendingItem = null;
+ap.health = 10; ap.maxHealth = 100;
+T.state.coins = 0; T.state.artifacts.length = 0;
+T.state.waveStats = { kills: 0, artifacts: 0, coins: 0 };
+ap.root.position.set(0, 0, 0);
+// Spawn an artifact at a fixed spot and trigger its "collect" interaction.
+const art = T.spawnArtifact(scene, world, T.interaction, ap, T.state, null, { pos: [0, 0], color: "#ffffff" });
+const aHpBefore = ap.health, aCoinBefore = T.state.coins, aScoreBefore = T.state.score;
+art._it.onInteract(art._it);          // begins the pick-up animation
+for (let i = 0; i < 60 && ap.state === "pickup"; i++) ap.update(0.05, { alpha: 0 });
+ok(ap.health > aHpBefore, `artifact pickup healed the player (${aHpBefore} -> ${ap.health})`);
+ok(T.state.coins > aCoinBefore, "artifact pickup paid out coins");
+ok(T.state.score === aScoreBefore + T.CONFIG.scorePerArtifact, "artifact pickup still awards score");
+
+console.log("\n[18] save/load round-trips enhancement levels + potion belt");
+const sp = T.player;
+for (const slot of T.EQUIP_SLOTS) sp.equipment[slot] = null;
+const lvlSword = T.makeItem("iron_sword"); lvlSword.level = 2;
+sp.equipment.hand1 = lvlSword;
+sp.inventory = [Object.assign(T.makeItem("excalibur"), { level: 3 })];
+sp.potions = [{ id: "minor_potion", count: 4 }, { id: "health_potion", count: 2 }, null];
+sp.buffs = [];
+T.recomputeStats(sp);
+const save2 = T.serializeGame();
+ok(save2.player.equipment.hand1.lvl === 2, "equipped enhancement level serialized");
+ok(save2.player.inventory[0].lvl === 3, "bag enhancement level serialized");
+ok(save2.player.potions[0].count === 4 && save2.player.potions[1].id === "health_potion", "potion belt serialized");
+// Trash + restore.
+for (const slot of T.EQUIP_SLOTS) sp.equipment[slot] = null;
+sp.inventory = []; sp.potions = [null, null, null];
+T.applySave(save2);
+ok(sp.equipment.hand1 && sp.equipment.hand1.level === 2, "equipped enhancement level restored");
+ok(sp.inventory[0] && sp.inventory[0].level === 3, "bag enhancement level restored");
+ok(sp.potions[0] && sp.potions[0].count === 4 && sp.potions[1] && sp.potions[1].id === "health_potion", "potion belt restored");
+// A legacy v2 save (plain string ids, no potions) still loads.
+const legacy = T.serializeGame();
+legacy.v = 2;
+legacy.player.inventory = ["iron_sword"];
+legacy.player.equipment = { helmet: null, breastplate: null, boots: null, necklace: null, ring1: null, ring2: null, hand1: "magic_wand", hand2: null };
+delete legacy.player.potions;
+ok(T.validateSave(legacy), "a legacy v2 save still validates");
+T.applySave(legacy);
+ok(sp.equipment.hand1 && sp.equipment.hand1.id === "magic_wand", "legacy string-id equipment restored");
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED ✅" : failures + " CHECK(S) FAILED ❌"}`);
 process.exit(failures === 0 ? 0 : 1);
