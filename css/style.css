@@ -487,3 +487,70 @@ html, body {
 .inv-bag { display: grid; gap: 8px; align-content: start; }
 .inv-bag .bag-title { font-size: 13px; font-weight: 700; opacity: 0.75; text-align: left; }
 .equip-btn { background: linear-gradient(135deg, #5be0a0, #6cc6ff); }
+
+/* ---------- Rarity accents (rare / epic / legendary) ---------- */
+.shop-item.rarity-epic { border-color: rgba(199, 125, 255, 0.55); background: rgba(199, 125, 255, 0.09); }
+.shop-item.rarity-legendary {
+  border-color: rgba(255, 93, 93, 0.6); background: rgba(255, 93, 93, 0.1);
+  box-shadow: inset 0 0 18px rgba(255, 120, 80, 0.12);
+}
+.shop-item .name .lvl { color: #5be0a0; font-weight: 800; }
+
+/* Shop section headings + the rotating-rare note. */
+.shop-heading {
+  text-align: left; font-size: 13px; font-weight: 800; letter-spacing: 0.4px;
+  opacity: 0.8; margin: 6px 2px 2px; text-transform: uppercase;
+}
+.shop-note {
+  font-size: 13px; line-height: 1.4; color: #ffd9a0; text-align: left;
+  background: rgba(255, 178, 78, 0.1); border: 1px solid rgba(255, 178, 78, 0.25);
+  border-radius: 10px; padding: 8px 12px;
+}
+.featured-btn { background: linear-gradient(135deg, #c77dff, #6cc6ff); color: #15233b; }
+.potion-buy-btn { background: linear-gradient(135deg, #ff6c8a, #ff9d5c); }
+.enhance-anvil-btn { background: linear-gradient(135deg, #ff944e, #ffd34e); }
+
+/* ---------- Potion belt (bottom-left corner) ---------- */
+.potion-bar {
+  position: absolute;
+  left: max(16px, env(safe-area-inset-left));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  display: flex; gap: 8px; pointer-events: none; z-index: 22;
+}
+.buff-bar {
+  position: absolute;
+  left: max(16px, env(safe-area-inset-left));
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 64px);
+  display: flex; gap: 6px; flex-wrap: wrap; max-width: 60vw; pointer-events: none; z-index: 22;
+}
+.buff-pill {
+  font-size: 12px; font-weight: 700; color: #eaf0ff;
+  background: rgba(91, 224, 160, 0.16); border: 1px solid rgba(91, 224, 160, 0.4);
+  border-radius: 999px; padding: 3px 10px;
+}
+.buff-pill b { color: #5be0a0; }
+.potion-slot {
+  position: relative; width: 54px; height: 54px; border-radius: 14px;
+  background: rgba(11, 15, 26, 0.62); border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--ink); cursor: pointer; pointer-events: auto;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.1s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.potion-slot.filled { border-color: rgba(255, 108, 138, 0.55); }
+.potion-slot.filled:hover { background: rgba(255, 108, 138, 0.18); }
+.potion-slot.filled:active { transform: scale(0.92); }
+.potion-slot.empty { opacity: 0.55; cursor: default; }
+.potion-slot .pk {
+  position: absolute; top: 3px; left: 6px; font-size: 11px; font-weight: 800; opacity: 0.6;
+}
+.potion-slot .pi { font-size: 26px; line-height: 1; }
+.potion-slot .pe { font-size: 22px; opacity: 0.4; }
+.potion-slot .pc {
+  position: absolute; bottom: 2px; right: 5px; font-size: 12px; font-weight: 800; color: var(--accent);
+}
+/* On touch devices the joystick owns the bottom-left, so lift the belt above it. */
+@media (pointer: coarse) {
+  .potion-bar { bottom: 172px; }
+  .buff-bar { bottom: 232px; }
+  .potion-slot { width: 48px; height: 48px; }
+}

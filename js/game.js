@@ -102,6 +102,11 @@
     scorePerMonster: 25,
     scorePerArtifact: 50,
 
+    // Artifacts also restore a little health and pay a small coin reward.
+    artifactHeal: 12,
+    artifactCoinMin: 2,
+    artifactCoinMax: 5,
+
     // Coins (the shop currency, dropped by defeated sweets)
     coinDropChance: 0.55,     // chance a defeated sweet drops coins
     coinValueMin: 1,
@@ -127,9 +132,53 @@
   //   weapons can be dual-wielded.
   // =========================================================================
   const RARITY = {
-    normal: { label: "Normal", color: "#bcd2ff" },
-    rare:   { label: "Rare",   color: "#ffb24e" },
+    normal:    { label: "Common",    color: "#bcd2ff", tier: 0 },
+    rare:      { label: "Rare",      color: "#ffb24e", tier: 1 },
+    epic:      { label: "Epic",      color: "#c77dff", tier: 2 },
+    legendary: { label: "Legendary", color: "#ff5d5d", tier: 3 },
   };
+
+  // ---- Enhancement (blacksmith) -----------------------------------------
+  // Every gear instance carries an enhancement `level` (0 by default). The
+  // blacksmith raises it for coins, scaling the item's stats / weapon damage.
+  // Higher-rarity gear can be pushed further and gains more per level — so
+  // legendary loot is worth investing in.
+  const ENHANCE = {
+    normal:    { max: 3,  step: 0.10, baseCost: 18 },
+    rare:      { max: 5,  step: 0.12, baseCost: 42 },
+    epic:      { max: 7,  step: 0.14, baseCost: 85 },
+    legendary: { max: 10, step: 0.16, baseCost: 150 },
+  };
+  const enhanceRule = (def) => ENHANCE[def.rarity] || ENHANCE.normal;
+  const instLevel = (inst) => (inst && inst.level) ? inst.level : 0;
+  // Multiplier applied to an item's numeric bonuses at a given enhancement level.
+  function enhanceMult(def, level) {
+    if (!level) return 1;
+    return 1 + level * enhanceRule(def).step;
+  }
+  // Coin cost to raise an item from its current level to the next one.
+  function enhanceCost(def, level) {
+    const r = enhanceRule(def);
+    const tier = (RARITY[def.rarity] || RARITY.normal).tier;
+    return Math.round(r.baseCost * (level + 1) * (1 + tier * 0.35));
+  }
+  // Append a "+N" suffix to an enhanced item's name (e.g. "Iron Sword +3").
+  const enhanceName = (name, level) => level ? `${name} +${level}` : name;
+
+  // An item's effective stat block once its enhancement level is folded in.
+  // `haste` (a sub-1 cooldown multiplier) improves *toward* zero, so we scale
+  // its distance from 1 instead of the raw value.
+  function effectiveStats(inst) {
+    const def = getDef(inst.id);
+    const base = def.stats || {};
+    const mult = enhanceMult(def, instLevel(inst));
+    if (mult === 1) return base;
+    const out = {};
+    for (const k in base) {
+      out[k] = k === "haste" ? 1 - (1 - base[k]) * mult : base[k] * mult;
+    }
+    return out;
+  }
 
   // Equipment slots, in display order. A two-handed weapon lives in hand1 with
   // a TWO_HANDED sentinel parked in hand2 so the off-hand reads as occupied.
@@ -226,6 +275,28 @@
     winged_boots:   { name: "Winged Boots",  icon: "🪽", type: "boots",       rarity: "rare", value: 80, desc: "+1.4 speed, +5% resist.", stats: { moveSpeed: 1.4, damageReduction: 0.05 } },
     vampiric_ring:  { name: "Vampiric Ring", icon: "🩸", type: "ring",        rarity: "rare", value: 70, desc: "Heal +3 per kill.", stats: { lifesteal: 3 } },
     titan_pendant:  { name: "Titan Pendant", icon: "💠", type: "necklace",    rarity: "rare", value: 110, desc: "+45 health, +8% resist, +2 damage.", stats: { maxHealth: 45, damageReduction: 0.08, damage: 2 } },
+
+    // ----- EPIC gear (featured shop / blacksmith showcase) -----
+    void_scythe:    { name: "Void Scythe", icon: "🌑", type: "weapon", rarity: "epic", hands: 2, value: 200, desc: "Two-handed. A reaping, life-draining arc.",
+                      weapon: { ranged: false, damage: 12, cooldown: 0.55, multishot: 1, melee: { range: 4.0, arc: 2.6 }, color: "#b07aff" }, stats: { lifesteal: 2 } },
+    sunfire_staff:  { name: "Sunfire Staff", icon: "☀️", type: "weapon", rarity: "epic", hands: 2, value: 190, desc: "Two-handed. A 5-bolt searing fan.",
+                      weapon: { ranged: true, shape: "bolt", damage: 3, cooldown: 0.3, multishot: 5, spread: 0.14, pierce: 1, boltSpeed: 28, boltRadius: 0.95, gravity: 1.1, color: "#ffb24e", haloColor: "#ffe27a" } },
+    phoenix_plate:  { name: "Phoenix Plate", icon: "🔥", type: "breastplate", rarity: "epic", value: 180, desc: "+75 health, +20% resist.", stats: { maxHealth: 75, damageReduction: 0.2 } },
+    seraph_ring:    { name: "Seraph Ring", icon: "💫", type: "ring", rarity: "epic", value: 150, desc: "+3 damage, +5 lifesteal.", stats: { damage: 3, lifesteal: 5 } },
+
+    // ----- LEGENDARY gear (the apex featured / blacksmith showcase) -----
+    world_ender:    { name: "World-Ender", icon: "💥", type: "weapon", rarity: "legendary", hands: 2, value: 320, desc: "Two-handed. Cataclysmic, sweeping ruin.",
+                      weapon: { ranged: false, damage: 18, cooldown: 0.6, multishot: 1, melee: { range: 4.4, arc: 2.9 }, color: "#ff5d5d" }, stats: { lifesteal: 4 } },
+    astral_bow:     { name: "Astral Bow", icon: "🌟", type: "weapon", rarity: "legendary", hands: 2, value: 300, desc: "Two-handed. A 5-arrow piercing storm.",
+                      weapon: { ranged: true, shape: "arrow", damage: 5, cooldown: 0.4, multishot: 5, spread: 0.1, pierce: 3, boltSpeed: 46, boltRadius: 0.6, gravity: 6, color: "#a8e0ff", haloColor: "#eaffff" } },
+    crown_eternal:  { name: "Crown Eternal", icon: "👑", type: "helmet", rarity: "legendary", value: 280, desc: "+90 health, +18% resist, +3 damage.", stats: { maxHealth: 90, damageReduction: 0.18, damage: 3 } },
+
+    // ----- Potions / consumables (the potion belt) -----
+    minor_potion:   { name: "Minor Health Potion", icon: "🧪", type: "potion", rarity: "normal", cost: 8,  desc: "Restore 30 health.", potion: { heal: 30 } },
+    health_potion:  { name: "Health Potion",       icon: "❤️", type: "potion", rarity: "normal", cost: 16, desc: "Restore 65 health.", potion: { heal: 65 } },
+    greater_potion: { name: "Greater Health Potion", icon: "💖", type: "potion", rarity: "rare", cost: 30, desc: "Restore 140 health.", potion: { heal: 140 } },
+    elixir_might:   { name: "Elixir of Might",     icon: "⚗️", type: "potion", rarity: "rare", cost: 34, desc: "+4 damage for 18s.", potion: { buff: { damage: 4 }, time: 18, label: "Might" } },
+    elixir_swift:   { name: "Elixir of Swiftness", icon: "🌀", type: "potion", rarity: "rare", cost: 30, desc: "+2.5 speed for 18s.", potion: { buff: { moveSpeed: 2.5 }, time: 18, label: "Swift" } },
   };
 
   // Fill in derived fields (id, sell value) once.
@@ -235,8 +306,17 @@
     if (d.value == null) d.value = d.cost != null ? Math.max(1, Math.round(d.cost * 0.5)) : 40;
   }
   const getDef = (id) => ITEM_DB[id];
-  const SHOP_STOCK = Object.keys(ITEM_DB).filter((id) => ITEM_DB[id].rarity === "normal" && ITEM_DB[id].cost != null);
-  const RARE_DROPS = Object.keys(ITEM_DB).filter((id) => ITEM_DB[id].rarity === "rare");
+  const isGear = (id) => ITEM_DB[id].type !== "potion";
+  // The merchant's normal gear stock (potions are stocked separately).
+  const SHOP_STOCK = Object.keys(ITEM_DB).filter((id) => ITEM_DB[id].rarity === "normal" && ITEM_DB[id].cost != null && isGear(id));
+  // Potions sold by the merchant (any consumable with a price).
+  const POTION_STOCK = Object.keys(ITEM_DB).filter((id) => ITEM_DB[id].type === "potion" && ITEM_DB[id].cost != null);
+  // Rare gear bosses can drop (rare-rarity gear only — never potions/epic/legend).
+  const RARE_DROPS = Object.keys(ITEM_DB).filter((id) => ITEM_DB[id].rarity === "rare" && isGear(id));
+  // The pool the rotating "Featured" shop tab draws its wares from: every piece
+  // of rare/epic/legendary gear. A wave-seeded subset is offered each wave.
+  const FEATURED_POOL = Object.keys(ITEM_DB).filter((id) =>
+    isGear(id) && ["rare", "epic", "legendary"].includes(ITEM_DB[id].rarity));
 
   // A monotonically increasing id so inventory/equipment entries are distinct
   // even when two of the same item are owned.
@@ -253,20 +333,24 @@
   // folding in flat bonuses (damage/haste/pierce) from armour and accessories.
   function computeWeapon(player, bonus) {
     const eq = player.equipment;
-    const w1 = eq.hand1 && eq.hand1 !== TWO_HANDED ? getDef(eq.hand1.id) : null;
-    const w2 = eq.hand2 && eq.hand2 !== TWO_HANDED ? getDef(eq.hand2.id) : null;
+    const i1 = eq.hand1 && eq.hand1 !== TWO_HANDED ? eq.hand1 : null;
+    const i2 = eq.hand2 && eq.hand2 !== TWO_HANDED ? eq.hand2 : null;
+    const w1 = i1 ? getDef(i1.id) : null;
+    const w2 = i2 ? getDef(i2.id) : null;
+    const m1 = i1 ? enhanceMult(w1, instLevel(i1)) : 1;
+    const m2 = i2 ? enhanceMult(w2, instLevel(i2)) : 1;
     let prof = null, name = null;
-    if (w1 && w1.weapon) { prof = cloneWeapon(w1.weapon); name = w1.name; }
-    else if (w2 && w2.weapon) { prof = cloneWeapon(w2.weapon); name = w2.name; }
+    if (w1 && w1.weapon) { prof = cloneWeapon(w1.weapon); prof.damage *= m1; name = enhanceName(w1.name, instLevel(i1)); }
+    else if (w2 && w2.weapon) { prof = cloneWeapon(w2.weapon); prof.damage *= m2; name = enhanceName(w2.name, instLevel(i2)); }
     if (!prof) { prof = cloneWeapon(FISTS); name = "Fists"; }
 
     // Dual-wielding two one-handed weapons: faster, with bonus power/shots.
     const dual = w1 && w2 && w1.weapon && w2.weapon;
     if (dual) {
       prof.cooldown *= 0.8;
-      prof.damage += (w2.weapon.damage || 0) * 0.5;
+      prof.damage += (w2.weapon.damage || 0) * 0.5 * m2;
       if (prof.ranged && w2.weapon.ranged) prof.multishot = (prof.multishot || 1) + (w2.weapon.multishot || 1);
-      name = `${w1.name} + ${w2.name}`;
+      name = `${enhanceName(w1.name, instLevel(i1))} + ${enhanceName(w2.name, instLevel(i2))}`;
     }
 
     prof.damage += bonus.damage;
@@ -286,10 +370,17 @@
     for (const slot of EQUIP_SLOTS) {
       const inst = player.equipment[slot];
       if (!inst || inst === TWO_HANDED) continue;
-      const s = getDef(inst.id).stats || {};
+      const s = effectiveStats(inst);
       mh += s.maxHealth || 0; dr += s.damageReduction || 0; ls += s.lifesteal || 0;
       spd += s.moveSpeed || 0; dmg += s.damage || 0; pierce += s.pierce || 0;
       coinRange += s.coinRange || 0;
+      if (s.haste) haste *= s.haste;
+    }
+    // Fold in any active potion buffs (Elixir of Might / Swiftness, …).
+    for (const b of player.buffs || []) {
+      const s = b.stats || {};
+      mh += s.maxHealth || 0; dr += s.damageReduction || 0; ls += s.lifesteal || 0;
+      spd += s.moveSpeed || 0; dmg += s.damage || 0; pierce += s.pierce || 0;
       if (s.haste) haste *= s.haste;
     }
     player.maxHealth = mh;
@@ -351,6 +442,65 @@
     recomputeStats(player);
   }
 
+  // ---- Potion belt + buffs ----------------------------------------------
+  // The belt is a fixed array of up to POTION_SLOTS stacks, each { id, count }
+  // of a single potion kind. Buying a potion fills/stacks it; using one quaffs
+  // the top of a stack and applies its effect (instant heal or a timed buff).
+  const POTION_SLOTS = 3;
+  const POTION_STACK_MAX = 9;
+
+  function potionAdd(player, id) {
+    const belt = player.potions;
+    for (const s of belt) {
+      if (s && s.id === id && s.count < POTION_STACK_MAX) { s.count++; return true; }
+    }
+    for (let i = 0; i < belt.length; i++) {
+      if (!belt[i]) { belt[i] = { id, count: 1 }; return true; }
+    }
+    return false; // belt full (3 different kinds already, none stackable)
+  }
+
+  function potionUse(player, slot) {
+    const s = player.potions[slot];
+    if (!s || s.count <= 0 || player.health <= 0) return false;
+    const def = getDef(s.id);
+    const p = def.potion || {};
+    if (p.heal) {
+      if (player.health >= player.maxHealth) { toast("Already at full health"); return false; }
+      player.health = Math.min(player.maxHealth, player.health + p.heal);
+      updateHealthBar(player.health);
+      toast(`${def.icon} +${p.heal} health`);
+    } else if (p.buff) {
+      applyBuff(player, { id: s.id, label: p.label || def.name, stats: p.buff, time: p.time || 12 });
+      toast(`${def.icon} ${p.label || def.name}!`);
+    }
+    if (typeof Sfx !== "undefined") Sfx.play("potion");
+    s.count--;
+    if (s.count <= 0) player.potions[slot] = null;
+    recomputeStats(player);
+    updatePotionBar(player);
+    return true;
+  }
+
+  // Apply (or refresh) a timed buff, then recompute stats so it takes effect.
+  function applyBuff(player, buff) {
+    const existing = (player.buffs || []).find((b) => b.id === buff.id);
+    if (existing) { existing.time = buff.time; }
+    else { player.buffs.push({ id: buff.id, label: buff.label, stats: buff.stats, time: buff.time }); }
+  }
+
+  // Tick active buffs down; drop the expired ones and recompute when one ends.
+  function updateBuffs(player, dt) {
+    if (!player.buffs || player.buffs.length === 0) return;
+    let changed = false;
+    for (let i = player.buffs.length - 1; i >= 0; i--) {
+      player.buffs[i].time -= dt;
+      if (player.buffs[i].time <= 0) { player.buffs.splice(i, 1); changed = true; }
+    }
+    if (changed) recomputeStats(player);
+    updateBuffBar(player); // refresh the countdown each frame while buffs run
+  }
+
   // ---- DOM ---------------------------------------------------------------
   const dom = {
     canvas: document.getElementById("renderCanvas"),
@@ -382,7 +532,17 @@
     shopCoins: document.getElementById("shopCoins"),
     shopItems: document.getElementById("shopItems"),
     shopTabBuy: document.getElementById("shopTabBuy"),
+    shopTabRare: document.getElementById("shopTabRare"),
     shopTabSell: document.getElementById("shopTabSell"),
+    // Blacksmith / anvil overlay.
+    anvil: document.getElementById("anvil"),
+    anvilClose: document.getElementById("anvilClose"),
+    anvilDone: document.getElementById("anvilDone"),
+    anvilCoins: document.getElementById("anvilCoins"),
+    anvilItems: document.getElementById("anvilItems"),
+    // Potion belt + active-buff pills.
+    potionBar: document.getElementById("potionBar"),
+    buffBar: document.getElementById("buffBar"),
     // Inventory / equipment overlay.
     inventory: document.getElementById("inventory"),
     invClose: document.getElementById("invClose"),
@@ -584,6 +744,8 @@
       this.inventory = [];       // owned-but-unequipped item instances
       this.equipment = { helmet: null, breastplate: null, boots: null,
                          necklace: null, ring1: null, ring2: null, hand1: null, hand2: null };
+      this.potions = [null, null, null]; // the 3-slot potion belt
+      this.buffs = [];           // active timed potion buffs
       this.weapon = cloneWeapon(FISTS);
 
       this._build(scene, shadow);
@@ -595,6 +757,9 @@
       this.equipment.hand1 = makeItem("magic_wand");
       this.inventory.push(makeItem("leather_cap"));
       this.inventory.push(makeItem("iron_dagger"));
+      // A couple of starter potions so the belt is useful from the first wave.
+      potionAdd(this, "minor_potion");
+      potionAdd(this, "minor_potion");
       recomputeStats(this);
     }
 
@@ -1176,6 +1341,8 @@
     { id: "caster",   name: "Choco Overlord",   color: "#7a4a2a", crown: "#ffe27a" },
     { id: "summoner", name: "Lollipop Tyrant",  color: "#a06cff", crown: "#ffd34e" },
     { id: "stomper",  name: "Cupcake Colossus", color: "#ff7ac0", crown: "#fff3a0" },
+    { id: "bomber",   name: "Jawbreaker Warlord", color: "#4ec0ff", crown: "#ffe27a" },
+    { id: "splitter", name: "Gelatin Hydra",    color: "#5be0a0", crown: "#ffd34e" },
   ];
   const BOSS_ARCH_BY_ID = {};
   for (const a of BOSS_ARCHES) BOSS_ARCH_BY_ID[a.id] = a;
@@ -1196,10 +1363,11 @@
 
       // Tougher each cycle. The stomper is a slow tank with extra HP; the
       // charger is faster; the caster/summoner sit a touch back from the brawl.
-      const hpMul = this.arch.id === "stomper" ? 1.3 : 1.0;
+      const hpMul = this.arch.id === "stomper" ? 1.3 : this.arch.id === "splitter" ? 1.2 : 1.0;
       this.maxHp = Math.round((CONFIG.bossBaseHp + (cycle - 1) * CONFIG.bossHpPerCycle) * hpMul);
       this.hp = this.maxHp;
-      const baseSpd = this.arch.id === "stomper" ? CONFIG.bossSpeed * 0.8 : CONFIG.bossSpeed;
+      const baseSpd = this.arch.id === "stomper" ? CONFIG.bossSpeed * 0.8
+        : this.arch.id === "charger" ? CONFIG.bossSpeed * 1.15 : CONFIG.bossSpeed;
       this.speed = baseSpd + (cycle - 1) * 0.15;
       this.alive = true;
       this.dying = 0;
@@ -1212,7 +1380,7 @@
       // Behaviour timers. Higher cycles attack more often — the pattern itself
       // gets harder, not just the numbers. First action is slightly delayed.
       const tighten = Math.max(0.45, 1 - (cycle - 1) * 0.12); // shrink cooldowns each cycle
-      this.actionCd = { charger: 3.4, caster: 2.6, summoner: 6.5, stomper: 2.4 }[this.arch.id] * tighten;
+      this.actionCd = ({ charger: 3.4, caster: 2.6, summoner: 6.5, stomper: 2.4, bomber: 3.0, splitter: 5.5 }[this.arch.id] || 3.0) * tighten;
       this.actionTimer = this.actionCd * 0.7 + 1.0;
       this.charging = 0;        // >0 while dashing
       this.chargeDir = null;
@@ -1268,6 +1436,9 @@
       const glow = new BABYLON.PointLight("bossGlow", new BABYLON.Vector3(0, 3, 0), scene);
       glow.parent = root; glow.diffuse = BABYLON.Color3.FromHexString("#ff5a6a");
       glow.intensity = 0.7; glow.range = 14;
+      this.glow = glow;
+      // The body material is kept so attacks can flash the boss as a telegraph.
+      this.bodyMat = main;
       const blob = disc(scene, "bblob", this.radius * 1.3, emat(scene, "bblobM" + root.uniqueId, "#000000", 0));
       blob.material.alpha = 0.3; blob.rotation.x = Math.PI / 2; blob.position.y = 0.03;
       blob.parent = root; blob.isPickable = false;
@@ -1322,10 +1493,11 @@
       }
 
       if (this.windup > 0) {
-        // Telegraph: stand still and pulse before unleashing the attack.
+        // Telegraph: stand still and pulse (body + glow flash) before the attack.
         this.windup -= dt;
-        this.body.scaling.setAll(1 + Math.sin(this.bob * 4) * 0.08);
-        if (this.windup <= 0) this._unleash(playerPos, dir, state);
+        this.body.scaling.setAll(1 + Math.sin(this.bob * 4) * 0.1);
+        if (this.glow) this.glow.intensity = 0.7 + Math.abs(Math.sin(this.bob * 6)) * 1.6;
+        if (this.windup <= 0) { this._unleash(playerPos, dir, state); if (this.glow) this.glow.intensity = 0.7; }
         this.body.rotation.y = lerpAngle(this.body.rotation.y, Math.atan2(dir.x, dir.z), 0.1);
         return dist <= this.radius + 1.2;
       }
@@ -1370,6 +1542,10 @@
         this.windup = 0.35;
       } else if (id === "summoner") {
         this.windup = 0.5;
+      } else if (id === "bomber") {
+        this.windup = 0.45; // wind up before lobbing a volley of bombs
+      } else if (id === "splitter") {
+        if (dist < 16) this.windup = 0.4; else this.actionTimer = 0.5;
       }
     }
 
@@ -1379,6 +1555,7 @@
       if (id === "charger") {
         this.chargeDir = (this._pendingDir || dir).clone();
         this.charging = 0.7 + this.cycle * 0.05;
+        Sfx.play("boss_charge");
       } else if (id === "caster") {
         const n = 1 + Math.min(4, this.cycle);  // more bolts each cycle
         const origin = this.root.position.add(new BABYLON.Vector3(0, 3, 0));
@@ -1391,6 +1568,7 @@
             color: this.arch.color, radius: 0.9,
           }));
         }
+        Sfx.play("boss_cast");
       } else if (id === "summoner") {
         const n = 2 + Math.min(5, this.cycle);
         for (let i = 0; i < n; i++) {
@@ -1400,15 +1578,44 @@
           state.monsters.push(m);
           state.waveTotal++;
         }
+        Sfx.play("boss_summon");
         toast("👹 The Tyrant summons minions!");
       } else if (id === "stomper") {
         this.stompRange = 6 + this.cycle * 0.6;
         this.shockT = 0.5;
         this.ring.setEnabled(true); this.ring.scaling.setAll(0.5); this.ringMat.alpha = 0.45;
+        Sfx.play("boss_stomp");
         const dx = playerPos.x - this.root.position.x, dz = playerPos.z - this.root.position.z;
         if (Math.hypot(dx, dz) <= this.stompRange) {
           damagePlayer(state, (14 + this.cycle * 3));
         }
+      } else if (id === "bomber") {
+        // Lob a volley of slow, high-arcing candy bombs that rain around the
+        // player — they must keep moving to avoid the falling barrage.
+        const n = 3 + Math.min(5, this.cycle);
+        const origin = this.root.position.add(new BABYLON.Vector3(0, 4, 0));
+        for (let i = 0; i < n; i++) {
+          const spread = (i - (n - 1) / 2) * 0.18 + (rng() - 0.5) * 0.1;
+          const ang = Math.atan2(dir.x, dir.z) + spread;
+          const aim = new BABYLON.Vector3(Math.sin(ang), 0.85, Math.cos(ang));
+          state.enemyBolts.push(new Hazard(this.scene, origin.clone(), aim, {
+            speed: 12 + this.cycle, damage: 12 + this.cycle * 2, gravity: 11,
+            color: this.arch.color, radius: 1.2, life: 4,
+          }));
+        }
+        Sfx.play("boss_cast");
+        toast("💣 Incoming bombs!");
+      } else if (id === "splitter") {
+        // Shed a knot of minions, splitting off pieces of itself.
+        const n = 2 + Math.min(4, this.cycle);
+        for (let i = 0; i < n; i++) {
+          const a = rng() * Math.PI * 2, r = this.radius + 1.5 + rng() * 2.5;
+          const pos = new BABYLON.Vector3(this.root.position.x + Math.cos(a) * r, 0, this.root.position.z + Math.sin(a) * r);
+          state.monsters.push(new Monster(this.scene, state.shadow, pos, this.wave));
+          state.waveTotal++;
+        }
+        Sfx.play("boss_summon");
+        toast("🦠 The Hydra splits!");
       }
     }
 
@@ -1588,6 +1795,76 @@
       this.bob += dt;
       this.sign.position.y = 3.5 + Math.sin(this.bob * 2) * 0.12;
       this.coinIcon.rotation.y += dt * 2;
+    }
+  }
+
+  // =========================================================================
+  // Blacksmith — a burly NPC who appears at the plaza (beside the merchant)
+  // between waves. Walk up + press E to open the ANVIL and spend coins to
+  // ENHANCE weapons & equipment. Higher-rarity gear forges further and gains
+  // more per level. Shares the Interactable contract like the merchant.
+  // =========================================================================
+  class Blacksmith {
+    constructor(scene, shadow, interaction, onOpen) {
+      const root = new BABYLON.TransformNode("smith", scene);
+      root.position.set(-7, 0, 3); // off to the side of the plaza
+      this.root = root;
+      this.bob = 0;
+      this._build(scene, shadow);
+
+      this.it = new Interactable(root, { label: "Blacksmith", range: 3.4, onInteract: () => onOpen() });
+      this.it.enabled = false;
+      interaction.register(this.it);
+      root.setEnabled(false);
+      this.visible = false;
+    }
+
+    _build(scene, shadow) {
+      const apron = emat(scene, "sApron", "#5a3a2a", 0.06);
+      const skin = emat(scene, "sSkin", "#e8b890", 0.06);
+      const iron = emat(scene, "sIron", "#6a6f78", 0.1);
+      const dark = emat(scene, "sDark", "#2a2530", 0.05);
+      const gold = emat(scene, "sGold", "#ffcf3a", 0.5);
+      const ember = emat(scene, "sEmber", "#ff7a3a", 0.7);
+      const add = (m) => { m.parent = this.root; shadow.addShadowCaster(m); return m; };
+
+      add(cyl(scene, "sBody", 1.0, 1.2, 1.5, apron)).position.y = 0.75;
+      add(cyl(scene, "sBelt", 1.2, 1.2, 0.2, dark)).position.y = 1.1;
+      const head = add(sphere(scene, "sHead", 0.6, skin)); head.position.y = 1.95;
+      add(sphere(scene, "sBeard", 0.55, emat(scene, "sBeardM", "#3a2a22", 0.04))).position.set(0, 1.78, 0.18);
+      for (const s of [-1, 1]) {
+        const arm = add(capsule(scene, "sArm", 0.9, 0.22, skin)); arm.position.set(0.75 * s, 1.2, 0); arm.rotation.z = 0.4 * s;
+        const eye = add(sphere(scene, "sEye", 0.08, emat(scene, "sEyeM", "#2a2a3a", 0))); eye.position.set(0.16 * s, 2.0, 0.5);
+      }
+
+      // An anvil + glowing forge beside the smith.
+      const anvil = add(box(scene, "sAnvil", 1.2, 0.5, 0.6, iron)); anvil.position.set(1.4, 0.45, 0);
+      add(box(scene, "sAnvilBase", 0.7, 0.4, 0.5, dark)).position.set(1.4, 0.2, 0);
+      const forge = add(sphere(scene, "sForge", 0.5, ember)); forge.position.set(1.4, 0.75, 0); forge.scaling.y = 0.5;
+      this.forge = forge;
+
+      // Floating hammer marker so the smith is easy to spot.
+      const sign = new BABYLON.TransformNode("sSign", scene);
+      sign.parent = this.root; sign.position.y = 3.0; this.sign = sign;
+      const handle = cyl(scene, "sHmH", 0.12, 0.12, 0.7, emat(scene, "sHmHM", "#7a5230", 0.05));
+      handle.parent = sign; handle.rotation.z = 0.5;
+      const headM = box(scene, "sHmHead", 0.5, 0.3, 0.3, iron); headM.parent = sign; headM.position.set(0.18, 0.32, 0);
+
+      const glow = new BABYLON.PointLight("sGlow", new BABYLON.Vector3(1.4, 1, 0), scene);
+      glow.parent = this.root; glow.diffuse = BABYLON.Color3.FromHexString("#ff7a3a");
+      glow.intensity = 0.7; glow.range = 7;
+      this.glow = glow;
+    }
+
+    show() { if (this.visible) return; this.visible = true; this.root.setEnabled(true); this.it.enabled = true; }
+    hide() { if (!this.visible) return; this.visible = false; this.root.setEnabled(false); this.it.enabled = false; }
+    update(dt) {
+      if (!this.visible) return;
+      this.bob += dt;
+      this.sign.position.y = 3.0 + Math.sin(this.bob * 2) * 0.12;
+      this.sign.rotation.y += dt * 1.5;
+      // Flicker the forge glow.
+      if (this.glow) this.glow.intensity = 0.6 + Math.abs(Math.sin(this.bob * 5)) * 0.5;
     }
   }
 
@@ -1941,7 +2218,22 @@
           artifact.root.dispose(); // clean up halo/beam/root (gem is now carried)
           addScore(state, CONFIG.scorePerArtifact);
           state.waveStats.artifacts++;
-          toast(`Artifact! +${CONFIG.scorePerArtifact}`);
+          // Artifacts are restorative: a small heal + a little coin reward on top
+          // of the score, so grabbing them mid-fight is meaningfully helpful.
+          let healed = 0;
+          if (player.health < player.maxHealth) {
+            healed = Math.min(CONFIG.artifactHeal, player.maxHealth - player.health);
+            player.health += healed;
+            updateHealthBar(player.health);
+          }
+          const bonus = CONFIG.artifactCoinMin +
+            ((rng() * (CONFIG.artifactCoinMax - CONFIG.artifactCoinMin + 1)) | 0);
+          state.coins += bonus;
+          state.waveStats.coins += bonus;
+          updateCoins(state);
+          Sfx.play("artifact");
+          const extra = (healed > 0 ? ` · +${Math.round(healed)} ❤` : "") + ` · 🪙 +${bonus}`;
+          toast(`Artifact! +${CONFIG.scorePerArtifact}${extra}`);
         });
       },
     });
@@ -1956,6 +2248,12 @@
   function statSummary(def) {
     const parts = [];
     const s = def.stats || {};
+    if (def.potion) {
+      const p = def.potion;
+      if (p.heal) parts.push(`❤️ +${p.heal} health`);
+      if (p.buff) parts.push(`✨ ${statSummary({ stats: p.buff })} (${p.time}s)`);
+      return parts.join(" · ") || def.desc || "";
+    }
     if (def.weapon) {
       const w = def.weapon;
       parts.push(w.ranged ? (w.shape === "arrow" ? "🏹 ranged" : "🔮 ranged") : "⚔️ melee");
@@ -1974,14 +2272,15 @@
     return parts.join(" · ");
   }
 
-  function itemCard(def, btnLabel, btnClass, disabled, onClick, extraTag) {
+  function itemCard(def, btnLabel, btnClass, disabled, onClick, extraTag, level) {
     const row = document.createElement("div");
     row.className = "shop-item rarity-" + def.rarity;
     const rar = RARITY[def.rarity] || RARITY.normal;
     const tag = extraTag ? `<span class="tag">${extraTag}</span>` : "";
+    const lvl = level ? ` <span class="lvl">+${level}</span>` : "";
     row.innerHTML =
       `<div class="icon">${def.icon}</div>` +
-      `<div class="info"><div class="name" style="color:${rar.color}">${def.name}${tag}</div>` +
+      `<div class="info"><div class="name" style="color:${rar.color}">${def.name}${lvl}${tag}</div>` +
       `<div class="desc">${statSummary(def) || def.desc || ""}</div></div>`;
     const btn = document.createElement("button");
     btn.className = btnClass; btn.textContent = btnLabel; btn.disabled = !!disabled;
@@ -1989,6 +2288,24 @@
     row.appendChild(btn);
     return row;
   }
+
+  // The rotating "Featured" stock: a deterministic subset of rare/epic/legendary
+  // gear that changes every wave (seeded by the wave number, independent of the
+  // live RNG stream so it never disturbs world generation / save reproduction).
+  function featuredForWave(wave) {
+    const pool = FEATURED_POOL.slice();
+    const out = [];
+    let s = ((wave + 1) * 0x9e3779b9) >>> 0;
+    const next = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+    const count = Math.min(3, pool.length);
+    for (let i = 0; i < count; i++) {
+      const idx = (next() * pool.length) | 0;
+      out.push(pool.splice(idx, 1)[0]);
+    }
+    return out;
+  }
+  // Featured (rotating) wares carry a premium over their plain sell value.
+  const featuredCost = (def) => Math.max(40, Math.round(def.value * 2.6));
 
   // =========================================================================
   // Shop — the merchant BUYS your gear and SELLS normal wares. Rare gear can
@@ -2003,6 +2320,7 @@
     openShop() {
       if (this.open) return;
       if (Inventory.open) Inventory.close();
+      if (Anvil.open) Anvil.close();
       this.open = true; uiPaused = true; this.tab = "buy";
       dom.shop.classList.remove("hidden");
       this.render();
@@ -2014,21 +2332,37 @@
     },
     setTab(tab) { this.tab = tab; this.render(); },
 
-    buy(def) {
-      if (this.state.coins < def.cost) { toast("Not enough coins"); return; }
-      if (this.player.inventory.length >= this.player.invCap) { toast("Bag full"); return; }
-      this.state.coins -= def.cost;
+    buy(def, cost) {
+      cost = cost == null ? def.cost : cost;
+      if (this.state.coins < cost) { toast("Not enough coins"); Sfx.play("error"); return; }
+      if (this.player.inventory.length >= this.player.invCap) { toast("Bag full"); Sfx.play("error"); return; }
+      this.state.coins -= cost;
       invAdd(this.player, makeItem(def.id));
       updateCoins(this.state);
+      Sfx.play("buy");
+      toast(`${def.icon} Bought ${def.name}`);
+      this.render();
+    },
+    // Potions go onto the 3-slot belt, not the bag.
+    buyPotion(def) {
+      if (this.state.coins < def.cost) { toast("Not enough coins"); Sfx.play("error"); return; }
+      if (!potionAdd(this.player, def.id)) { toast("Potion belt full (3 kinds)"); Sfx.play("error"); return; }
+      this.state.coins -= def.cost;
+      updateCoins(this.state);
+      updatePotionBar(this.player);
+      Sfx.play("buy");
       toast(`${def.icon} Bought ${def.name}`);
       this.render();
     },
     sell(inst) {
       const def = getDef(inst.id);
+      // Enhancement adds resale value (you recoup part of what you forged in).
+      const worth = def.value + Math.round(def.value * 0.5 * instLevel(inst));
       invRemove(this.player, inst);
-      this.state.coins += def.value;
+      this.state.coins += worth;
       updateCoins(this.state);
-      toast(`Sold ${def.name} for 🪙 ${def.value}`);
+      Sfx.play("coin");
+      toast(`Sold ${enhanceName(def.name, instLevel(inst))} for 🪙 ${worth}`);
       this.render();
     },
 
@@ -2036,16 +2370,36 @@
       if (!this.open) return;
       dom.shopCoins.textContent = this.state.coins;
       if (dom.shopTabBuy) dom.shopTabBuy.classList.toggle("active", this.tab === "buy");
+      if (dom.shopTabRare) dom.shopTabRare.classList.toggle("active", this.tab === "rare");
       if (dom.shopTabSell) dom.shopTabSell.classList.toggle("active", this.tab === "sell");
       dom.shopItems.innerHTML = "";
+      const full = () => this.player.inventory.length >= this.player.invCap;
 
       if (this.tab === "buy") {
+        this._heading("⚔️ Gear");
         for (const id of SHOP_STOCK) {
           const def = getDef(id);
-          const tooPoor = this.state.coins < def.cost;
-          const full = this.player.inventory.length >= this.player.invCap;
-          const card = itemCard(def, `🪙 ${def.cost}`, "buy-btn", tooPoor || full,
+          const card = itemCard(def, `🪙 ${def.cost}`, "buy-btn", this.state.coins < def.cost || full(),
             () => this.buy(def));
+          dom.shopItems.appendChild(card);
+        }
+        this._heading("🧪 Potions");
+        for (const id of POTION_STOCK) {
+          const def = getDef(id);
+          const card = itemCard(def, `🪙 ${def.cost}`, "buy-btn potion-buy-btn", this.state.coins < def.cost,
+            () => this.buyPotion(def));
+          dom.shopItems.appendChild(card);
+        }
+      } else if (this.tab === "rare") {
+        const note = document.createElement("div");
+        note.className = "shop-note";
+        note.textContent = "✨ Rare wares — a fresh rotation every wave.";
+        dom.shopItems.appendChild(note);
+        for (const id of featuredForWave(this.state.wave)) {
+          const def = getDef(id);
+          const cost = featuredCost(def);
+          const card = itemCard(def, `🪙 ${cost}`, "buy-btn featured-btn", this.state.coins < cost || full(),
+            () => this.buy(def, cost), (RARITY[def.rarity] || RARITY.normal).label.toUpperCase());
           dom.shopItems.appendChild(card);
         }
       } else {
@@ -2057,11 +2411,18 @@
         }
         for (const inst of this.player.inventory.slice()) {
           const def = getDef(inst.id);
-          const card = itemCard(def, `Sell 🪙 ${def.value}`, "buy-btn sell-btn", false,
-            () => this.sell(inst), def.rarity === "rare" ? "RARE" : "");
+          const worth = def.value + Math.round(def.value * 0.5 * instLevel(inst));
+          const card = itemCard(def, `Sell 🪙 ${worth}`, "buy-btn sell-btn", false,
+            () => this.sell(inst), def.rarity !== "normal" ? (RARITY[def.rarity] || RARITY.normal).label.toUpperCase() : "", instLevel(inst));
           dom.shopItems.appendChild(card);
         }
       }
+    },
+
+    _heading(text) {
+      const h = document.createElement("div");
+      h.className = "shop-heading"; h.textContent = text;
+      dom.shopItems.appendChild(h);
     },
   };
 
@@ -2079,6 +2440,7 @@
     openInv() {
       if (this.open) return;
       if (Shop.open) Shop.closeShop();
+      if (Anvil.open) Anvil.close();
       this.open = true; uiPaused = true;
       dom.inventory.classList.remove("hidden");
       this.render();
@@ -2111,7 +2473,7 @@
           const rar = RARITY[def.rarity] || RARITY.normal;
           cell.classList.add("filled");
           cell.innerHTML = `<div class="slot-label">${meta.label}</div>` +
-            `<div class="slot-item" style="color:${rar.color}">${def.icon} ${def.name}</div>`;
+            `<div class="slot-item" style="color:${rar.color}">${def.icon} ${enhanceName(def.name, instLevel(occ))}</div>`;
           cell.title = "Unequip " + def.name;
           cell.addEventListener("click", () => this.unequip(slot));
         } else {
@@ -2144,8 +2506,87 @@
       for (const inst of p.inventory.slice()) {
         const def = getDef(inst.id);
         const card = itemCard(def, "Equip", "buy-btn equip-btn", false,
-          () => this.equip(inst), def.rarity === "rare" ? "RARE" : "");
+          () => this.equip(inst),
+          def.rarity !== "normal" ? (RARITY[def.rarity] || RARITY.normal).label.toUpperCase() : "",
+          instLevel(inst));
         dom.invBag.appendChild(card);
+      }
+    },
+  };
+
+  // =========================================================================
+  // Enhancement — raise an item instance's level for coins at the blacksmith.
+  // =========================================================================
+  function enhanceItem(player, inst, state) {
+    const def = getDef(inst.id);
+    const level = instLevel(inst);
+    const max = enhanceRule(def).max;
+    if (level >= max) { toast("Already at max enhancement"); Sfx.play("error"); return false; }
+    const cost = enhanceCost(def, level);
+    if (state.coins < cost) { toast("Not enough coins"); Sfx.play("error"); return false; }
+    state.coins -= cost;
+    inst.level = level + 1;
+    updateCoins(state);
+    recomputeStats(player);          // a held/worn item's boost takes effect now
+    Sfx.play("enhance");
+    toast(`🔨 ${enhanceName(def.name, inst.level)} forged!`);
+    return true;
+  }
+
+  // The blacksmith's ANVIL — lists every enhanceable item (equipped + bag) with
+  // its current level, the next-level cost and an Enhance button.
+  const Anvil = {
+    state: null, player: null, open: false,
+    init(state, player) { this.state = state; this.player = player; },
+
+    openAnvil() {
+      if (this.open) return;
+      if (Shop.open) Shop.closeShop();
+      if (Inventory.open) Inventory.close();
+      this.open = true; uiPaused = true;
+      dom.anvil.classList.remove("hidden");
+      this.render();
+    },
+    close() {
+      if (!this.open) return;
+      this.open = false; uiPaused = false;
+      dom.anvil.classList.add("hidden");
+    },
+
+    // Every weapon / armour / accessory the player owns (equipped or bagged).
+    _items() {
+      const p = this.player, out = [];
+      for (const slot of EQUIP_SLOTS) {
+        const occ = p.equipment[slot];
+        if (occ && occ !== TWO_HANDED && isGear(occ.id)) out.push({ inst: occ, where: SLOT_META[slot].label });
+      }
+      for (const inst of p.inventory) if (isGear(inst.id)) out.push({ inst, where: "Bag" });
+      return out;
+    },
+
+    enhance(inst) { if (enhanceItem(this.player, inst, this.state)) { this.render(); if (Inventory.open) Inventory.render(); } },
+
+    render() {
+      if (!this.open) return;
+      dom.anvilCoins.textContent = this.state.coins;
+      dom.anvilItems.innerHTML = "";
+      const items = this._items();
+      if (items.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "shop-empty"; empty.textContent = "No gear to enhance. Buy or loot some weapons and armour first.";
+        dom.anvilItems.appendChild(empty);
+        return;
+      }
+      for (const { inst, where } of items) {
+        const def = getDef(inst.id);
+        const level = instLevel(inst);
+        const max = enhanceRule(def).max;
+        const atMax = level >= max;
+        const cost = atMax ? 0 : enhanceCost(def, level);
+        const label = atMax ? "MAX" : `🪙 ${cost}`;
+        const card = itemCard(def, label, "buy-btn enhance-anvil-btn", atMax || this.state.coins < cost,
+          () => this.enhance(inst), `${where} · ${level}/${max}`, level);
+        dom.anvilItems.appendChild(card);
       }
     },
   };
@@ -2190,6 +2631,7 @@
         this.timer = CONFIG.waveInterval;
         this.betweenWaves = true;
         if (this.state.merchant) this.state.merchant.show();
+        if (this.state.blacksmith) this.state.blacksmith.show();
         this._enterRest(`Wave ${this.wave} cleared!`, true);
         toast("Wave cleared! 🍬");
       }
@@ -2200,7 +2642,10 @@
     _enterRest(title, showResults) {
       this.minimized = false;
       dom.wavePanelTitle.textContent = title;
-      dom.nextWaveBtn.textContent = `Start Wave ${this.wave + 1}`;
+      // The results-window button is now just "OK" — it closes the window so you
+      // can roam (shop, enhance gear) freely. Starting the next wave early is
+      // done only from the small corner widget (top-right) or Enter/N.
+      dom.nextWaveBtn.textContent = "OK";
       dom.miniWaveNum.textContent = this.wave + 1;
 
       if (showResults) {
@@ -2236,7 +2681,9 @@
       dom.wavePanel.classList.add("hidden");
       dom.waveMini.classList.add("hidden");
       if (this.state.merchant) this.state.merchant.hide();
+      if (this.state.blacksmith) this.state.blacksmith.hide();
       Shop.closeShop();
+      Anvil.close();
 
       // Reset the per-wave stat counters for the wave about to begin.
       this.state.waveStats = { kills: 0, artifacts: 0, coins: 0 };
@@ -2266,6 +2713,7 @@
         this.state.boss = boss;
         this.state.monsters.push(boss);
         showBossBar(boss);
+        Sfx.play("boss_spawn");
       }
 
       // Each wave also drops fresh artifacts to grab.
@@ -2324,7 +2772,7 @@
       enemyBolts: [],   // hostile boss projectiles (Hazard)
       drops: [],        // rare gear dropped on the ground (ItemDrop)
       waveStats: { kills: 0, artifacts: 0, coins: 0 },
-      merchant: null, boss: null,
+      merchant: null, blacksmith: null, boss: null,
     };
 
     // Hand out the starting gear and compute the initial stat block.
@@ -2337,8 +2785,13 @@
     // The merchant who runs the between-waves shop, waiting at the plaza.
     const merchant = new Merchant(scene, world.shadow, interaction, () => Shop.openShop());
     state.merchant = merchant;
+    // The blacksmith who enhances gear, also between waves, beside the merchant.
+    const blacksmith = new Blacksmith(scene, world.shadow, interaction, () => Anvil.openAnvil());
+    state.blacksmith = blacksmith;
     Shop.init(state, player);
     Inventory.init(state, player);
+    Anvil.init(state, player);
+    updatePotionBar(player);
 
     // A few artifacts to find before the first wave even arrives.
     for (let i = 0; i < 3; i++) spawnArtifact(scene, world, interaction, player, state);
@@ -2356,8 +2809,9 @@
       if (paused) return;                             // pause menu freezes the sim
       if (state.over) { cosmetics(state, dt); return; }
 
-      // While the shop menu is open, freeze gameplay but keep the scene live.
-      if (uiPaused) { merchant.update(dt); cosmetics(state, dt); return; }
+      // While a menu (shop / inventory / anvil) is open, freeze gameplay but
+      // keep the scene + NPC idle animations live.
+      if (uiPaused) { merchant.update(dt); blacksmith.update(dt); cosmetics(state, dt); return; }
 
       player.update(dt, camera);
       // Rigid follow: mutate the camera's pivot vector IN PLACE so the pivot
@@ -2369,6 +2823,8 @@
 
       waves.update(dt);
       merchant.update(dt);
+      blacksmith.update(dt);
+      updateBuffs(player, dt);
 
       // Attacking — ranged weapons fire ballistic bolts/arrows (possibly a
       // multishot spread); melee weapons sweep an arc in front of the player.
@@ -2383,8 +2839,14 @@
               gravity: w.gravity, shape: w.shape,
             }));
           }
+          // Distinct audio per ranged weapon family: arrows whoosh, multi-bolt
+          // staves shimmer, a plain wand blips.
+          Sfx.play(w.shape === "arrow" ? "arrow" : (w.multishot > 1 ? "staff" : "bolt"));
         } else if (act && act.type === "melee") {
           meleeSweep(state, act);
+          // Heavy, wide weapons (axe/hammer/greatsword) get a beefier swing.
+          const mw = act.weapon;
+          Sfx.play((mw.melee && mw.melee.arc >= 2.2) ? "heavy" : "melee");
         }
       }
 
@@ -2418,6 +2880,7 @@
           if (Math.hypot(dx, dz) <= b.radius + m.radius) {
             const killed = m.hit(b.damage);
             b.hitSet.add(m);
+            Sfx.play(killed ? "kill" : "hit");
             if (killed) onMonsterDefeated(state, m);
             // Pierce upgrades let a bolt punch through several sweets.
             if (b.pierce > 0) b.pierce--; else b.dead = true;
@@ -2450,6 +2913,7 @@
     const hp = playerRef.takeDamage(dmg);
     updateHealthBar(hp);
     flashHurt();
+    Sfx.play(hp <= 0 ? "boss_death" : "hurt");
     if (hp <= 0) gameOver(state);
   }
 
@@ -2480,6 +2944,7 @@
       let diff = Math.abs(((ang - aim + Math.PI) % (Math.PI * 2)) - Math.PI);
       if (diff <= arc / 2) {
         const killed = m.hit(w.damage);
+        Sfx.play(killed ? "kill" : "hit");
         if (killed) onMonsterDefeated(state, m);
       }
     }
@@ -2509,8 +2974,19 @@
       const rareId = RARE_DROPS[(rng() * RARE_DROPS.length) | 0];
       const dpos = new BABYLON.Vector3(m.position.x, 0, m.position.z + 2);
       state.drops.push(new ItemDrop(state.scene, state.shadow, dpos, rareId));
+      // The Gelatin Hydra bursts into a final knot of sweets on death.
+      if (m.archId === "splitter") {
+        const n = 3 + Math.min(5, m.cycle || 1);
+        for (let i = 0; i < n; i++) {
+          const a = rng() * Math.PI * 2, r = m.radius + 1 + rng() * 3;
+          const pos = new BABYLON.Vector3(m.position.x + Math.cos(a) * r, 0, m.position.z + Math.sin(a) * r);
+          state.monsters.push(new Monster(state.scene, state.shadow, pos, Math.max(1, m.wave || 1)));
+          state.waveTotal++;
+        }
+      }
       hideBossBar();
       if (state.boss === m) state.boss = null;
+      Sfx.play("boss_death");
       toast(`👑 ${m.name} defeated! Dropped ${getDef(rareId).name}!`);
       return;
     }
@@ -2559,6 +3035,7 @@
         state.coins += c.value;
         state.waveStats.coins += c.value;
         updateCoins(state);
+        Sfx.play("coin");
         toast(`🪙 +${c.value}`);
         c.dispose(); state.coinsList.splice(i, 1);
       } else if (c.life <= 0) {
@@ -2607,6 +3084,42 @@
       : pct > 25
       ? "linear-gradient(90deg, #ffd34e, #ff9d5c)"
       : "linear-gradient(90deg, #ff5c7a, #ff3b3b)";
+  }
+
+  // ---- Potion belt (bottom corner): 3 stackable slots + active-buff pills ----
+  function updatePotionBar(player) {
+    if (!dom.potionBar || !player) return;
+    dom.potionBar.innerHTML = "";
+    for (let i = 0; i < POTION_SLOTS; i++) {
+      const slot = player.potions[i];
+      const key = i + 1;
+      const cell = document.createElement("button");
+      cell.className = "potion-slot" + (slot ? " filled" : " empty");
+      if (slot) {
+        const def = getDef(slot.id);
+        cell.innerHTML = `<span class="pk">${key}</span><span class="pi">${def.icon}</span><span class="pc">×${slot.count}</span>`;
+        cell.title = `${def.name} — ${def.desc} (press ${key})`;
+        cell.addEventListener("click", () => { if (gameStarted && !paused && !uiPaused) potionUse(player, i); });
+      } else {
+        cell.innerHTML = `<span class="pk">${key}</span><span class="pe">·</span>`;
+        cell.disabled = true;
+      }
+      dom.potionBar.appendChild(cell);
+    }
+    updateBuffBar(player);
+  }
+
+  // Active timed potion buffs render as small countdown pills above the belt.
+  function updateBuffBar(player) {
+    if (!dom.buffBar || !player) return;
+    dom.buffBar.innerHTML = "";
+    for (const b of player.buffs || []) {
+      const def = getDef(b.id);
+      const pill = document.createElement("div");
+      pill.className = "buff-pill";
+      pill.innerHTML = `${def ? def.icon : "✨"} ${b.label} <b>${Math.ceil(b.time)}s</b>`;
+      dom.buffBar.appendChild(pill);
+    }
   }
 
   // ---- Boss health bar (shown only while a boss is alive) ----
@@ -2660,7 +3173,7 @@
   // monsters, the boss, artifacts and dropped coins, plus the wave clock) is
   // serialized explicitly so the run resumes exactly where it left off.
   // =========================================================================
-  const SAVE_VERSION = 2;
+  const SAVE_VERSION = 3;
   const PENDING_LOAD_KEY = "gg3d_pending_load"; // sessionStorage hand-off across reload
   const AUTOSTART_KEY = "gg3d_autostart";       // restart -> skip the start screen
 
@@ -2701,10 +3214,12 @@
         health: round(player.health),
         facing: round(player.facing),
         pos: xz(player.position),
-        // The gear *is* the build now: save the bag + equipped slots and the
-        // stat block rebuilds itself via recomputeStats() on load.
-        inventory: player.inventory.map((it) => it.id),
+        // The gear *is* the build now: save the bag + equipped slots (with their
+        // enhancement levels) and the stat block rebuilds via recomputeStats().
+        inventory: player.inventory.map((it) => ({ id: it.id, lvl: instLevel(it) })),
         equipment: serializeEquipment(player),
+        // The 3-slot potion belt.
+        potions: player.potions.map((s) => (s ? { id: s.id, count: s.count } : null)),
       },
       monsters: state.monsters
         .filter((m) => m.alive && m.dying <= 0)
@@ -2723,19 +3238,33 @@
     };
   }
 
-  // Equipment → a plain { slot: id | "__2H__" | null } map for the save file.
+  // Equipment → a plain { slot: {id,lvl} | "__2H__" | null } map for the save.
   function serializeEquipment(player) {
     const out = {};
     for (const slot of EQUIP_SLOTS) {
       const occ = player.equipment[slot];
-      out[slot] = occ === TWO_HANDED ? TWO_HANDED : occ ? occ.id : null;
+      out[slot] = occ === TWO_HANDED ? TWO_HANDED : occ ? { id: occ.id, lvl: instLevel(occ) } : null;
     }
     return out;
   }
 
-  // Basic structural validation so a bad/old/foreign file fails cleanly.
+  // Rebuild an item instance from a save entry: a plain id string (legacy v2)
+  // or a { id, lvl } object (v3+). Returns null for unknown items.
+  function itemFromSave(entry) {
+    if (entry == null) return null;
+    const id = typeof entry === "string" ? entry : entry.id;
+    if (!getDef(id)) return null;
+    const inst = makeItem(id);
+    const lvl = typeof entry === "object" ? (entry.lvl | 0) : 0;
+    if (lvl > 0) inst.level = lvl;
+    return inst;
+  }
+
+  // Basic structural validation so a bad/old/foreign file fails cleanly. Accepts
+  // current and one-back save versions so older files still load.
   function validateSave(d) {
-    return !!(d && d.v === SAVE_VERSION && typeof d.seed === "number" &&
+    return !!(d && typeof d.v === "number" && d.v >= 2 && d.v <= SAVE_VERSION &&
+      typeof d.seed === "number" &&
       d.player && Array.isArray(d.player.pos) && d.wave && Array.isArray(d.monsters));
   }
 
@@ -2774,16 +3303,25 @@
     player.health = ps.health != null ? ps.health : player.maxHealth;
     player.facing = ps.facing || 0;
     player.root.position.set(ps.pos[0], 0, ps.pos[1]);
-    player.inventory = (ps.inventory || []).filter((id) => getDef(id)).map((id) => makeItem(id));
+    player.inventory = (ps.inventory || []).map(itemFromSave).filter(Boolean);
     const eq = player.equipment;
     for (const slot of EQUIP_SLOTS) eq[slot] = null;
     const savedEq = ps.equipment || {};
     for (const slot of EQUIP_SLOTS) {
       const v = savedEq[slot];
       if (v === TWO_HANDED) eq[slot] = TWO_HANDED;
-      else if (v && getDef(v)) eq[slot] = makeItem(v);
+      else { const inst = itemFromSave(v); if (inst) eq[slot] = inst; }
     }
+    // Restore the potion belt (defaults to empty for legacy saves).
+    player.potions = [null, null, null];
+    const savedPot = ps.potions || [];
+    for (let i = 0; i < POTION_SLOTS; i++) {
+      const s = savedPot[i];
+      if (s && getDef(s.id) && s.count > 0) player.potions[i] = { id: s.id, count: Math.min(POTION_STACK_MAX, s.count | 0) };
+    }
+    player.buffs = [];
     recomputeStats(player);
+    updatePotionBar(player);
     if (ps.health != null) { player.health = Math.min(player.maxHealth, ps.health); updateHealthBar(player.health); }
 
     // Monsters + boss (the boss restores its exact archetype).
@@ -2820,10 +3358,9 @@
 
     // Wave clock + the merchant (present during a cleared-wave rest).
     waves.restore(d.wave);
-    if (state.merchant) {
-      if (waves.betweenWaves && waves.wave > 0) state.merchant.show();
-      else state.merchant.hide();
-    }
+    const npcsVisible = waves.betweenWaves && waves.wave > 0;
+    if (state.merchant) { if (npcsVisible) state.merchant.show(); else state.merchant.hide(); }
+    if (state.blacksmith) { if (npcsVisible) state.blacksmith.show(); else state.blacksmith.hide(); }
 
     // Refresh every HUD readout.
     addScore(state, 0);
@@ -2883,7 +3420,7 @@
   const Pause = {
     pendingAction: null, // "restart" | "exit" while the confirm dialog is up
 
-    canOpen() { return gameStarted && stateRef && !stateRef.over && !paused && !Shop.open && !Inventory.open; },
+    canOpen() { return gameStarted && stateRef && !stateRef.over && !paused && !Shop.open && !Inventory.open && !Anvil.open; },
 
     open() {
       if (!this.canOpen()) return;
@@ -2956,7 +3493,113 @@
     dom.canvas.focus();
     gameStarted = true;
     Music.start(); // browsers only allow audio after a user gesture (the click)
+    Sfx.unlock();  // same gesture unlocks the sound-effect synth
   }
+
+  // =========================================================================
+  // Sfx — short procedurally-synthesised sound effects via the Web Audio API.
+  // Like the Music system there are NO audio files: every weapon swing, bolt,
+  // pickup, potion, enhancement and boss attack is generated in-browser, so the
+  // game ships on static hosting with zero assets. Headless-safe (no-ops with
+  // no AudioContext, as in the Node test harness). Unlocked on the first user
+  // gesture (the Start click), shared with Music.
+  // =========================================================================
+  const Sfx = {
+    ctx: null, master: null, on: true, _noiseBuf: null,
+
+    _ensure() {
+      if (this.ctx) return true;
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return false;
+        this.ctx = new AC();
+        this.master = this.ctx.createGain();
+        this.master.gain.value = 0.55;
+        this.master.connect(this.ctx.destination);
+        return true;
+      } catch (e) { return false; }
+    },
+    unlock() {
+      if (!this._ensure()) return;
+      try { if (this.ctx.state === "suspended") this.ctx.resume(); } catch (e) {}
+    },
+    setEnabled(on) { this.on = !!on; },
+
+    // A single enveloped oscillator tone (optionally pitch-swept).
+    _tone(t, { freq, freq2, dur = 0.15, type = "sine", peak = 0.3, delay = 0 }) {
+      const ctx = this.ctx, start = t + delay;
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, start);
+      if (freq2) osc.frequency.exponentialRampToValueAtTime(Math.max(1, freq2), start + dur);
+      g.gain.setValueAtTime(0.0001, start);
+      g.gain.exponentialRampToValueAtTime(peak, start + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      osc.connect(g); g.connect(this.master);
+      osc.start(start); osc.stop(start + dur + 0.05);
+    },
+    // A short burst of filtered noise — good for swings, stomps and explosions.
+    _noise(t, { dur = 0.2, peak = 0.3, cutoff = 1200, delay = 0 }) {
+      const ctx = this.ctx, start = t + delay;
+      if (!this._noiseBuf) {
+        const buf = ctx.createBuffer(1, ctx.sampleRate * 0.4, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+        this._noiseBuf = buf;
+      }
+      const src = ctx.createBufferSource(); src.buffer = this._noiseBuf;
+      const filt = ctx.createBiquadFilter(); filt.type = "lowpass"; filt.frequency.value = cutoff;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(peak, start);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      src.connect(filt); filt.connect(g); g.connect(this.master);
+      src.start(start); src.stop(start + dur + 0.02);
+    },
+
+    play(name) {
+      if (!this.on || !this._ensure()) return;
+      try {
+        if (this.ctx.state === "suspended") this.ctx.resume();
+        const t = this.ctx.currentTime + 0.001;
+        switch (name) {
+          case "bolt":   this._tone(t, { freq: 720, freq2: 980, dur: 0.16, type: "triangle", peak: 0.22 }); break;
+          case "arrow":  this._tone(t, { freq: 1000, freq2: 280, dur: 0.18, type: "sawtooth", peak: 0.16 });
+                         this._noise(t, { dur: 0.12, peak: 0.1, cutoff: 2600 }); break;
+          case "staff":  this._tone(t, { freq: 520, freq2: 880, dur: 0.2, type: "sine", peak: 0.22 });
+                         this._tone(t, { freq: 660, freq2: 1100, dur: 0.2, type: "triangle", peak: 0.12, delay: 0.04 }); break;
+          case "melee":  this._noise(t, { dur: 0.16, peak: 0.28, cutoff: 1400 });
+                         this._tone(t, { freq: 240, freq2: 140, dur: 0.16, type: "sawtooth", peak: 0.12 }); break;
+          case "heavy":  this._noise(t, { dur: 0.22, peak: 0.34, cutoff: 900 });
+                         this._tone(t, { freq: 180, freq2: 90, dur: 0.22, type: "square", peak: 0.16 }); break;
+          case "hit":    this._tone(t, { freq: 300, freq2: 180, dur: 0.1, type: "square", peak: 0.16 }); break;
+          case "kill":   this._tone(t, { freq: 520, freq2: 120, dur: 0.22, type: "triangle", peak: 0.2 }); break;
+          case "coin":   this._tone(t, { freq: 880, dur: 0.08, type: "square", peak: 0.16 });
+                         this._tone(t, { freq: 1320, dur: 0.12, type: "square", peak: 0.16, delay: 0.07 }); break;
+          case "artifact": [0, 4, 7, 12].forEach((s, i) => this._tone(t, { freq: 523.25 * Math.pow(2, s / 12), dur: 0.18, type: "triangle", peak: 0.16, delay: i * 0.06 })); break;
+          case "potion": this._tone(t, { freq: 440, freq2: 880, dur: 0.25, type: "sine", peak: 0.22 });
+                         this._tone(t, { freq: 660, freq2: 1320, dur: 0.2, type: "triangle", peak: 0.12, delay: 0.08 }); break;
+          case "enhance": this._tone(t, { freq: 1200, dur: 0.1, type: "square", peak: 0.18 });
+                          this._tone(t, { freq: 1800, dur: 0.16, type: "triangle", peak: 0.16, delay: 0.06 });
+                          this._noise(t, { dur: 0.1, peak: 0.08, cutoff: 5000 }); break;
+          case "buy":    this._tone(t, { freq: 660, dur: 0.1, type: "triangle", peak: 0.18 });
+                         this._tone(t, { freq: 990, dur: 0.12, type: "triangle", peak: 0.16, delay: 0.07 }); break;
+          case "error":  this._tone(t, { freq: 200, freq2: 120, dur: 0.16, type: "sawtooth", peak: 0.16 }); break;
+          case "hurt":   this._tone(t, { freq: 220, freq2: 90, dur: 0.2, type: "sawtooth", peak: 0.22 }); break;
+          case "boss_charge": this._tone(t, { freq: 120, freq2: 320, dur: 0.5, type: "sawtooth", peak: 0.26 }); break;
+          case "boss_cast":   this._tone(t, { freq: 900, freq2: 200, dur: 0.3, type: "square", peak: 0.2 }); break;
+          case "boss_stomp":  this._noise(t, { dur: 0.5, peak: 0.4, cutoff: 600 });
+                              this._tone(t, { freq: 90, freq2: 40, dur: 0.5, type: "sine", peak: 0.3 }); break;
+          case "boss_summon": [0, 5, 9, 14].forEach((s, i) => this._tone(t, { freq: 330 * Math.pow(2, s / 12), dur: 0.3, type: "sawtooth", peak: 0.1, delay: i * 0.05 })); break;
+          case "boss_spawn":  this._tone(t, { freq: 70, freq2: 160, dur: 0.7, type: "sawtooth", peak: 0.3 });
+                              this._noise(t, { dur: 0.5, peak: 0.18, cutoff: 700 }); break;
+          case "boss_death":  this._tone(t, { freq: 400, freq2: 50, dur: 0.9, type: "sawtooth", peak: 0.32 });
+                              this._noise(t, { dur: 0.7, peak: 0.22, cutoff: 800, delay: 0.05 }); break;
+          default: break;
+        }
+      } catch (e) { /* never let a sound break the game */ }
+    },
+  };
 
   // =========================================================================
   // Music — a small procedurally-synthesised soundtrack via the Web Audio API.
@@ -3114,15 +3757,22 @@
       window.addEventListener("resize", () => engine.resize());
       dom.startBtn.addEventListener("click", startGame);
       dom.replayBtn.addEventListener("click", () => window.location.reload());
-      dom.nextWaveBtn.addEventListener("click", () => { Input.nextWaveQueued = true; });
+      // The results-window button is now "OK": it just collapses the window to
+      // the corner widget. Starting the next wave early is the corner widget's job.
+      dom.nextWaveBtn.addEventListener("click", () => { if (waveSystem) waveSystem.minimize(); });
       dom.miniNextBtn.addEventListener("click", () => { Input.nextWaveQueued = true; });
       // The × collapses the results window into the corner widget (frees the view).
       dom.wavePanelClose.addEventListener("click", () => { if (waveSystem) waveSystem.minimize(); });
-      // Shop open/close + Buy/Sell tabs.
+      // Shop open/close + Buy/Featured/Sell tabs.
       dom.shopClose.addEventListener("click", () => Shop.closeShop());
       dom.shopDone.addEventListener("click", () => Shop.closeShop());
       if (dom.shopTabBuy) dom.shopTabBuy.addEventListener("click", () => Shop.setTab("buy"));
+      if (dom.shopTabRare) dom.shopTabRare.addEventListener("click", () => Shop.setTab("rare"));
       if (dom.shopTabSell) dom.shopTabSell.addEventListener("click", () => Shop.setTab("sell"));
+
+      // Blacksmith / anvil overlay close buttons.
+      if (dom.anvilClose) dom.anvilClose.addEventListener("click", () => Anvil.close());
+      if (dom.anvilDone) dom.anvilDone.addEventListener("click", () => Anvil.close());
 
       // Inventory overlay: open via the 🎒 buttons or the "I" key.
       if (dom.invBtn) dom.invBtn.addEventListener("click", () => Inventory.toggle());
@@ -3149,13 +3799,20 @@
       // open, otherwise toggles the pause menu (or backs out of a confirm).
       Pause.init();
       window.addEventListener("keydown", (e) => {
+        // Potion belt hotkeys 1 / 2 / 3 — quaff the matching slot mid-fight.
+        if ((e.code === "Digit1" || e.code === "Digit2" || e.code === "Digit3") &&
+            gameStarted && !paused && !uiPaused && playerRef) {
+          potionUse(playerRef, e.code.charCodeAt(5) - 49); // "1"->0, "2"->1, "3"->2
+          e.preventDefault(); return;
+        }
         // Inventory hotkey (only once playing, and not while another menu is up).
-        if ((e.code === "KeyI" || e.code === "KeyB") && gameStarted && !paused && !Shop.open) {
+        if ((e.code === "KeyI" || e.code === "KeyB") && gameStarted && !paused && !Shop.open && !Anvil.open) {
           Inventory.toggle(); e.preventDefault(); return;
         }
         if (e.code === "KeyM") { Music.toggle(); return; }
         if (e.code !== "Escape") return;
         if (Shop.open) { Shop.closeShop(); return; }
+        if (Anvil.open) { Anvil.close(); return; }
         if (Inventory.open) { Inventory.close(); return; }
         if (paused && Pause.pendingAction) { Pause.hideConfirm(); return; }
         Pause.toggle();
@@ -3198,9 +3855,13 @@
   // Inert in production — window.__GG_TEST__ is never set on the deployed site. ---
   if (typeof window !== "undefined" && window.__GG_TEST__) {
     window.__GG_TEST__ = {
-      CONFIG, Projectile, Hazard, Monster, Boss, Coin, ItemDrop, Shop, Inventory,
-      ITEM_DB, RARE_DROPS, SHOP_STOCK, BOSS_ARCHES, getDef, makeItem,
+      CONFIG, Projectile, Hazard, Monster, Boss, Coin, ItemDrop, Shop, Inventory, Anvil,
+      ITEM_DB, RARE_DROPS, SHOP_STOCK, POTION_STOCK, FEATURED_POOL, BOSS_ARCHES,
+      ENHANCE, RARITY, getDef, makeItem,
       equipItem, unequipSlot, recomputeStats, TWO_HANDED, EQUIP_SLOTS,
+      potionAdd, potionUse, POTION_SLOTS, enhanceItem, enhanceCost, enhanceMult,
+      effectiveStats, featuredForWave, computeWeapon, Sfx, spawnArtifact,
+      get interaction() { return interactionRef; },
       get waves() { return waveSystem; },
       get player() { return playerRef; },
       get state() { return Shop.state; },
