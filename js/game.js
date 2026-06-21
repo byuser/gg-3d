@@ -82,6 +82,10 @@
     artifactsPerWave: 1,     // extra artifacts each subsequent wave
     maxArtifactsPerWave: 14,
 
+    // RPG spawning — resident monsters respawn this many seconds after the
+    // zone's population drops below its cap (replaces the old wave timer).
+    respawnDelay: 7,
+
     // Difficulty scaling — sweets get faster and tougher each wave.
     monsterBaseSpeed: 1.6,
     monsterSpeedPerWave: 0.12,
@@ -2693,6 +2697,17 @@
       for (const id of this.built) if (this.parts[id]) this.parts[id].setEnabled(true);
     }
 
+    // Re-awaken the dragon after a zone rebuild if the castle is already
+    // complete and the dragon hasn't been beaten (no banner — it's already up).
+    resummon() {
+      if (this.built.length < CASTLE_PARTS.length || this.state.won || this.state.dragon) return;
+      const pos = new BABYLON.Vector3(this.root.position.x, 0, this.root.position.z - 16);
+      const dragon = new Dragon(this.scene, this.shadow, pos, this.state);
+      this.state.dragon = dragon;
+      this.state.monsters.push(dragon);
+      showBossBar(dragon);
+    }
+
     _complete() {
       toast("🐉 The castle is complete... the DRAGON awakens!");
       bannerWave(this.state.wave, 0, "The Dragon");
@@ -3657,7 +3672,64 @@
     CastleUI.setSite(state.castle);
   }
 
-  // Fire "reach a location" quest objectives when the player gets close enough.
+  // =========================================================================
+  // setupZoneContent — lay the per-zone CONTENT layer on a freshly built world.
+  // The hub (Meadowgate) gets the merchant, blacksmith, story NPCs, resource
+  // nodes, the castle build site and a few artifacts; the wild zones get a
+  // handful of themed resource nodes so gathering still works out in the world.
+  // Monsters are handled separately by the SpawnDirector.
+  // =========================================================================
+  function setupZoneContent(scene, world, interaction, player, state) {
+    const zone = world.zone;
+    if (zone.home) {
+      const merchant = new Merchant(scene, world.shadow, interaction, () => Shop.openShop());
+      state.merchant = merchant; merchant.show();
+      const blacksmith = new Blacksmith(scene, world.shadow, interaction, () => Anvil.openAnvil());
+      state.blacksmith = blacksmith; blacksmith.show();
+      populateAdventure(scene, world, interaction, player, state);
+      // Re-raise any castle parts already built this run, then re-wake the
+      // dragon if the keep was finished but it hasn't been slain.
+      if (state.castleBuilt && state.castleBuilt.length && state.castle) state.castle.restore(state.castleBuilt);
+      if (state.castle) state.castle.resummon();
+      for (let i = 0; i < 3; i++) spawnArtifact(scene, world, interaction, player, state);
+    } else {
+      state.merchant = null; state.blacksmith = null; state.castle = null;
+      populateWildResources(scene, world, interaction, player, state);
+    }
+  }
+
+  // A few themed resource nodes for the wild zones so gather quests progress
+  // while exploring (forest = wood/herb, peaks = crystal/rock, shore =
+  // water/fiber, caverns = crystal/rock, thicket = herb/fiber).
+  function populateWildResources(scene, world, interaction, player, state) {
+    const zone = world.zone;
+    const FAR = world.radius - 6;
+    const byZone = {
+      forest:  [["tree", 6], ["herb", 6], ["fiber", 4]],
+      shore:   [["water", 6], ["fiber", 5], ["rock", 3]],
+      peaks:   [["crystal", 5], ["rock", 6], ["herb", 2]],
+      caverns: [["crystal", 6], ["rock", 5]],
+      thicket: [["herb", 5], ["fiber", 5], ["tree", 4]],
+    };
+    const spec = byZone[zone.id] || [["herb", 4], ["rock", 4]];
+    const scatter = () => {
+      for (let t = 0; t < 20; t++) {
+        const a = rng() * Math.PI * 2, r = 10 + rng() * (FAR - 12);
+        const x = Math.cos(a) * r, z = Math.sin(a) * r;
+        if (!world.onRoad(x, z)) return { x, z };
+      }
+      return null;
+    };
+    for (const pair of spec) {
+      for (let i = 0; i < pair[1]; i++) {
+        const p = scatter(); if (!p) continue;
+        state.resources.push(new ResourceNode(scene, world.shadow, interaction, new BABYLON.Vector3(p.x, 0, p.z), pair[0], player, state));
+      }
+    }
+  }
+
+  // Fire "reach a location" quest objectives when the player gets close enough
+  // to a hub landmark (zone-entry reaches are fired by the ZoneManager).
   function checkLocations(state, player) {
     for (const loc of LOCATIONS) {
       const dx = player.position.x - loc.x, dz = player.position.z - loc.z;
@@ -4331,151 +4403,128 @@
   // the next wave early; otherwise it auto-starts after `waveInterval` seconds.
   // Each wave brings more, faster, tougher sweets and more artifacts.
   // =========================================================================
-  class WaveSystem {
+  // =========================================================================
+  // SpawnDirector — the RPG replacement for timed waves. Each ZONE has its own
+  // resident monsters that spawn at fixed points, ROAM their patch (see
+  // Monster._wander), and RESPAWN a while after they're felled, up to the
+  // zone's population cap. Boss-lair zones also spawn their guardian in the
+  // depths. There is no global wave clock: the world simply stays populated as
+  // you hunt and explore, and a fresh director is created for each zone you
+  // travel into.
+  // =========================================================================
+  class SpawnDirector {
     constructor(scene, world, interaction, player, state) {
       this.scene = scene; this.world = world; this.interaction = interaction;
       this.player = player; this.state = state;
-      this.wave = 0;
-      this.betweenWaves = true;            // resting before the next wave
-      this.minimized = false;              // results window collapsed to corner?
-      this.timer = CONFIG.firstWaveDelay;  // seconds until the next wave auto-starts
-      this._enterRest("Get ready!", false);
+      this.zone = world.zone;
+      this.spec = this.zone.spawn || { count: 6, kinds: SWEETS, abilities: ["chaser"] };
+      this.target = this.spec.count || 6;
+      this.points = this._makePoints();
+      this.respawnDelay = CONFIG.respawnDelay;
+      this.respawnTimer = this.respawnDelay;
+      this.bossDefeated = false;
+      this._spawnedBoss = false;
+      // Legacy shims so the save/pause/HUD code keeps working under the RPG
+      // model (the old wave clock/window are retired).
+      this.wave = this.zone.level; this.betweenWaves = false; this.timer = 0; this.minimized = false;
     }
 
-    monstersForWave(w) {
-      return Math.min(CONFIG.maxMonstersPerWave, CONFIG.baseMonsters + (w - 1) * CONFIG.monstersPerWave);
+    // Fixed spawn points scattered in a mid-radius band around the zone.
+    _makePoints() {
+      const pts = []; const R = this.world.radius || CONFIG.worldRadius;
+      const n = Math.max(5, this.target);
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + rng() * 0.6;
+        const r = R * (0.42 + rng() * 0.42);
+        let x = Math.cos(a) * r, z = Math.sin(a) * r;
+        // Nudge spawns off the hub's river/roads so they aren't stuck.
+        if (this.world.onRoad && this.world.onRoad(x, z)) { x += 7; z += 7; }
+        pts.push({ x, z });
+      }
+      return pts;
     }
-    artifactsForWave(w) {
-      return Math.min(CONFIG.maxArtifactsPerWave, CONFIG.baseArtifacts + (w - 1) * CONFIG.artifactsPerWave);
+
+    // Seed the zone's starting population + its lair boss. Called once when a
+    // zone loads (createScene for the hub, ZoneManager on travel).
+    populate() {
+      this.state.waveTotal = this.target;
+      for (let i = 0; i < this.target; i++) this._spawn(this.points[i % this.points.length]);
+      if (this.zone.boss && !this.bossDefeated) this._spawnBoss();
+      updateMonsterCounter(this.state);
+      this._banner();
+    }
+
+    _spawn(pt) {
+      const pos = new BABYLON.Vector3(pt.x + (rng() - 0.5) * 6, 0, pt.z + (rng() - 0.5) * 6);
+      const m = new Monster(this.scene, this.world.shadow, pos, this.zone.level, null,
+        { kinds: this.spec.kinds, abilities: this.spec.abilities });
+      m.home = { x: pt.x, z: pt.z }; m.homeRange = 11; m.aggroRange = 15;
+      m.zoneAmbient = true;             // counts toward this zone's population cap
+      this.state.monsters.push(m);
+      return m;
+    }
+
+    _spawnBoss() {
+      const b = this.zone.boss;
+      // Map the zone's level to a boss "cycle" so deeper lairs hold tougher kings.
+      const cycle = Math.max(1, this.zone.level - 1);
+      const boss = new Boss(this.scene, this.world.shadow, new BABYLON.Vector3(0, 0, 0),
+        cycle * CONFIG.bossEveryWaves, b.archId);
+      if (b.name) boss.name = b.name;
+      boss.isLairBoss = true;
+      this.state.boss = boss;
+      this.state.monsters.push(boss);
+      this._spawnedBoss = true;
+      showBossBar(boss);
+      Sfx.play("boss_spawn");
+      if (b.intro) toast("⚔️ " + b.intro);
+    }
+
+    _ambient() {
+      let n = 0;
+      for (const m of this.state.monsters) if (m.zoneAmbient && m.alive && m.dying <= 0) n++;
+      return n;
+    }
+
+    // The spawn point furthest from the player, so respawns don't pop in your face.
+    _farPoint() {
+      let best = this.points[0], bd = -1; const p = this.player.position;
+      for (const pt of this.points) {
+        const d = (pt.x - p.x) * (pt.x - p.x) + (pt.z - p.z) * (pt.z - p.z);
+        if (d > bd) { bd = d; best = pt; }
+      }
+      return best;
     }
 
     update(dt) {
-      const wantNext = Input.consumeNextWave();
-      if (this.betweenWaves) {
-        this.timer = Math.max(0, this.timer - dt);
-        const label = Math.ceil(this.timer) + "s";
-        dom.nextWave.textContent = label;
-        dom.miniCountdown.textContent = label;
-        if (wantNext || this.timer <= 0) this.spawnWave();
-      } else if (this.state.monsters.length === 0) {
-        // Wave cleared — start the rest period, show the results window and the
-        // merchant, and offer the Next Wave button (also collapsible to a widget).
-        this.timer = CONFIG.waveInterval;
-        this.betweenWaves = true;
-        if (this.state.merchant) this.state.merchant.show();
-        if (this.state.blacksmith) this.state.blacksmith.show();
-        this._enterRest(`Wave ${this.wave} cleared!`, true);
-        toast("Wave cleared! 🍬");
-      }
-    }
+      // Lair boss felled (onMonsterDefeated nulls state.boss) → remember it so it
+      // doesn't return during this visit.
+      if (this._spawnedBoss && !this.bossDefeated && !this.state.boss) this.bossDefeated = true;
 
-    // Show the between-waves window. `showResults` adds the per-wave stat
-    // breakdown + merchant hint (skipped for the initial "Get ready" screen).
-    _enterRest(title, showResults) {
-      this.minimized = false;
-      dom.wavePanelTitle.textContent = title;
-      // The results-window button is now just "OK" — it closes the window so you
-      // can roam (shop, enhance gear) freely. Starting the next wave early is
-      // done only from the small corner widget (top-right) or Enter/N.
-      dom.nextWaveBtn.textContent = "OK";
-      dom.miniWaveNum.textContent = this.wave + 1;
-
-      if (showResults) {
-        const s = this.state.waveStats;
-        dom.resKills.textContent = s.kills;
-        dom.resArtifacts.textContent = s.artifacts;
-        dom.resCoins.textContent = s.coins;
-        dom.waveResults.classList.remove("hidden");
-        dom.waveShopHint.classList.remove("hidden");
+      if (this._ambient() < this.target) {
+        this.respawnTimer -= dt;
+        if (this.respawnTimer <= 0) {
+          this._spawn(this._farPoint());
+          this.respawnTimer = this.respawnDelay;
+        }
       } else {
-        dom.waveResults.classList.add("hidden");
-        dom.waveShopHint.classList.add("hidden");
+        this.respawnTimer = this.respawnDelay;
       }
-
-      dom.wavePanel.classList.remove("hidden");
-      dom.waveMini.classList.add("hidden");
-    }
-
-    // Collapse the results window into the small, non-blocking corner widget.
-    minimize() {
-      if (!this.betweenWaves || this.minimized) return;
-      this.minimized = true;
-      dom.wavePanel.classList.add("hidden");
-      dom.waveMini.classList.remove("hidden");
-    }
-
-    spawnWave() {
-      this.wave++;
-      this.betweenWaves = false;
-      this.minimized = false;
-      this.state.wave = this.wave;
-      dom.wave.textContent = this.wave;
-      dom.wavePanel.classList.add("hidden");
-      dom.waveMini.classList.add("hidden");
-      if (this.state.merchant) this.state.merchant.hide();
-      if (this.state.blacksmith) this.state.blacksmith.hide();
-      Shop.closeShop();
-      Anvil.close();
-
-      // Reset the per-wave stat counters for the wave about to begin.
-      this.state.waveStats = { kills: 0, artifacts: 0, coins: 0 };
-
-      const isBossWave = this.wave % CONFIG.bossEveryWaves === 0;
-      // On boss waves the king brings a smaller honour guard.
-      let monsterCount = this.monstersForWave(this.wave);
-      if (isBossWave) monsterCount = Math.round(monsterCount * 0.6);
-      const artifactCount = this.artifactsForWave(this.wave);
-      this.state.waveTotal = monsterCount + (isBossWave ? 1 : 0);
-
-      // Monsters spawn around the ring, away from the player so they march in.
-      const ringMin = Math.min(34, CONFIG.worldRadius - 18);
-      for (let i = 0; i < monsterCount; i++) {
-        const ang = rng() * Math.PI * 2;
-        const r = ringMin + rng() * 14;
-        const pos = new BABYLON.Vector3(Math.cos(ang) * r, 0, Math.sin(ang) * r);
-        this.state.monsters.push(new Monster(this.scene, this.world.shadow, pos, this.wave));
-      }
-
-      // Every few waves, a colossal Sweet King storms in with a health bar.
-      if (isBossWave) {
-        const ang = rng() * Math.PI * 2;
-        const r = ringMin + 8;
-        const pos = new BABYLON.Vector3(Math.cos(ang) * r, 0, Math.sin(ang) * r);
-        const boss = new Boss(this.scene, this.world.shadow, pos, this.wave);
-        this.state.boss = boss;
-        this.state.monsters.push(boss);
-        showBossBar(boss);
-        Sfx.play("boss_spawn");
-      }
-
-      // Each wave also drops fresh artifacts to grab.
-      for (let i = 0; i < artifactCount; i++) {
-        spawnArtifact(this.scene, this.world, this.interaction, this.player, this.state);
-      }
-
       updateMonsterCounter(this.state);
-      bannerWave(this.wave, monsterCount, isBossWave ? this.state.boss.name : null);
     }
 
-    // Restore the wave clock + UI from a saved game (see applySave). The live
-    // monsters/artifacts themselves are recreated by applySave; here we only
-    // resync the counter, timer and the between-waves panels.
-    restore(data) {
-      this.wave = data.number;
-      this.betweenWaves = data.betweenWaves;
-      this.timer = data.timer;
-      this.state.wave = this.wave;
-      this.state.waveTotal = data.waveTotal;
-      dom.wave.textContent = this.wave;
-      if (this.betweenWaves) {
-        const title = this.wave > 0 ? `Wave ${this.wave} cleared!` : "Get ready!";
-        this._enterRest(title, this.wave > 0);
-        if (data.minimized) this.minimize();
-      } else {
-        dom.wavePanel.classList.add("hidden");
-        dom.waveMini.classList.add("hidden");
-      }
+    // A brief "you have entered <zone>" banner (reuses the old wave banner).
+    _banner() {
+      if (!dom.waveBanner) return;
+      dom.waveBanner.textContent = `${this.zone.icon} ${this.zone.name}`;
+      dom.waveBanner.classList.remove("show");
+      void dom.waveBanner.offsetWidth;       // restart the CSS animation
+      dom.waveBanner.classList.add("show");
     }
+
+    // Legacy no-ops — the wave window/widget are retired under the RPG model.
+    minimize() {}
+    restore() {}
   }
 
   // =========================================================================
@@ -4500,6 +4549,9 @@
     const state = {
       scene, shadow: world.shadow, world,
       score: 0, coins: 0, wave: 0, waveTotal: 0, over: false, won: false,
+      zoneId: world.zone.id,        // the currently loaded zone
+      bossesCleared: {},            // lair bosses defeated this run, by zone id
+      castleBuilt: [],              // castle parts raised (survives zone reloads)
       artifacts: [], monsters: [], bolts: [], coinsList: [],
       enemyBolts: [],   // hostile boss projectiles (Hazard)
       drops: [],        // rare gear dropped on the ground (ItemDrop)
@@ -4520,16 +4572,10 @@
     updateMonsterCounter(state);
     updateCoins(state);
 
-    // The merchant who runs the between-waves shop, waiting at the plaza.
-    const merchant = new Merchant(scene, world.shadow, interaction, () => Shop.openShop());
-    state.merchant = merchant;
-    // The blacksmith who enhances gear, also between waves, beside the merchant.
-    const blacksmith = new Blacksmith(scene, world.shadow, interaction, () => Anvil.openAnvil());
-    state.blacksmith = blacksmith;
+    // One-time UI system inits (independent of the active zone).
     Shop.init(state, player);
     Inventory.init(state, player);
     Anvil.init(state, player);
-    // Story / adventure systems.
     Quests.init(state, player);
     Dialogue.init(state, player);
     Crafting.init(state, player);
@@ -4539,18 +4585,17 @@
     updateRelicHud(player);
     updateQuestTracker(Quests);
 
-    // Scatter the story layer: resource nodes, story NPCs, the castle site.
-    populateAdventure(scene, world, interaction, player, state);
-
     // Day/night + weather systems drive the sky, sun, fog and rain.
     DayNight.init(world, CONFIG.startTimeOfDay);
     Weather.init(world, scene);
 
-    // A few artifacts to find before the first wave even arrives.
-    for (let i = 0; i < 3; i++) spawnArtifact(scene, world, interaction, player, state);
+    // Lay the home zone's content (merchant, blacksmith, NPCs, resources, the
+    // castle and a few artifacts), then seed its resident monsters.
+    setupZoneContent(scene, world, interaction, player, state);
 
-    const waves = new WaveSystem(scene, world, interaction, player, state);
+    const waves = new SpawnDirector(scene, world, interaction, player, state);
     waveSystem = waves;
+    waves.populate();
 
     // Publish live handles for the save/load + pause systems.
     sceneRef = scene; worldRef = world; interactionRef = interaction;
@@ -4570,7 +4615,8 @@
       // While a menu (shop / inventory / anvil / dialogue / craft) is open,
       // freeze gameplay but keep the scene + NPC idle animations live.
       if (uiPaused) {
-        merchant.update(dt); blacksmith.update(dt);
+        if (state.merchant) state.merchant.update(dt);
+        if (state.blacksmith) state.blacksmith.update(dt);
         for (const n of state.npcs) n.update(dt);
         if (state.castle) state.castle.update(dt);
         cosmetics(state, dt);
@@ -4586,8 +4632,8 @@
       camera.target.copyFromFloats(player.position.x, player.position.y + 1.4, player.position.z);
 
       waves.update(dt);
-      merchant.update(dt);
-      blacksmith.update(dt);
+      if (state.merchant) state.merchant.update(dt);
+      if (state.blacksmith) state.blacksmith.update(dt);
       updateBuffs(player, dt);
 
       // Attacking — ranged weapons fire ballistic bolts/arrows (possibly a
