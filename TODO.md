@@ -337,38 +337,49 @@ it exists) and the shared Definition of Done.
 Paste this to start a run. Replace `<N>` with the task number, or write `next`.
 
 ```text
-You are continuing work on "Good Game 3D", a Babylon.js browser action-RPG in this repo.
+Act as a senior gameplay engineer on "Good Game 3D" — a Babylon.js browser
+action-RPG in this repo, shipped as static files to GitHub Pages.
 
-FIRST, read CLAUDE.md and TODO.md in full. Then implement EXACTLY ONE task: Task <N>
-(if I wrote "next", take the first task whose status is [ ] in TODO.md’s Recommended order).
-Do not start or touch any other task.
+FIRST, read CLAUDE.md and TODO.md in full.
 
-Obey the Golden Rules in CLAUDE.md and satisfy "§2 Definition of Done" in TODO.md
-for that task. In particular:
-- Keep the engine Babylon.js (no framework rewrite). The game must stay a static
-  site deployable to GitHub Pages (no build step) and run on desktop AND mobile,
-  without freezing the main thread.
-- Keep the headless tests green: run `node -c js/game.js` and `node test/harness.js`
-  and keep ALL checks passing. Feature-detect every browser-only API (Babylon, DOM,
-  Web Audio, localStorage, particles, PBR/env) so the harness still runs. ADD new
-  tests for the feature you build, including save/load round-trip for any new state.
-- Ship it release-ready and fully functional: no stubs, placeholders, TODOs, or
-  console errors, and no regressions to combat, gear, quests, zones, or save/load.
+DO EXACTLY ONE TASK: Task <N>. (If I wrote "next", take the first task whose
+status is [ ] in TODO.md's "Recommended order".) Don't touch any other task or
+scope-creep.
+
+Ship it RELEASE-READY and fully functional: a player can use it on desktop AND
+mobile with no errors, no console exceptions, no freezes, and saved progress
+survives reload. No stubs, placeholders, dead code, or leftover TODOs.
+
+Non-negotiables (full list in CLAUDE.md → Golden Rules; satisfy TODO.md §2
+Definition of Done):
+- Engine stays Babylon.js — no framework rewrite, no build step/bundler; stays a
+  static GitHub-Pages site.
+- Works on desktop + mobile; never freeze the main thread (chunk heavy work; hide
+  unavoidable hitches behind the existing zone-transition fade veil).
+- Keep the headless tests green AND add new tests for what you build:
+  `node -c js/game.js` and `node test/harness.js` must pass. Feature-detect every
+  browser-only API (Babylon / DOM / Web Audio / localStorage / PBR / particles)
+  so the Node harness still runs.
+- All randomness via the seeded rng(); any new persistent state must serialize +
+  restore in serializeGame/applySave and round-trip in a test.
+- No regressions to combat, gear, quests, zones/travel, day-night/weather, pause,
+  or save/load.
 
 Workflow:
-1. Plan briefly, then implement on branch `claude/lucid-mayer-wtmqgq` (create if missing).
-2. Commit in logical chunks (use this repo’s commit-trailer convention).
-3. Verify: `node -c js/game.js`, `node test/harness.js` (all green), plus a
-   feature-specific headless smoke check.
-4. Update index.html/css (bump the `?v=` cache-busters) and README.md as needed.
-5. Merge to `master` (fast-forward) and push; then confirm BOTH the CI "Tests"
-   run AND the GitHub Pages deploy run for YOUR commit finished conclusion=success
-   — check them and fix any errors until green.
-6. Tick the task’s checkbox in TODO.md (add the date + a one-line note), commit, push.
-7. Report: what shipped, test results, deploy status, and any follow-ups.
+1. Plan briefly, then implement on branch `claude/lucid-mayer-wtmqgq` (create if
+   missing); commit in logical chunks using this repo's commit-trailer convention.
+2. Verify locally: `node -c js/game.js`, `node test/harness.js` (all green), plus
+   a tiny feature-specific headless smoke check.
+3. Update index.html/css (bump the `?v=` cache-busters) and README.md as needed.
+4. Merge to `master` (fast-forward) and push. Then confirm BOTH the CI "Tests"
+   run AND the Pages deploy run for your commit finished conclusion=success — fix
+   anything until both are green. Do not open a pull request.
+5. Tick the task's checkbox in TODO.md (add the date + a one-line note) and add a
+   Changelog entry; commit + push.
+6. Report: what shipped, the test results, and the CI + deploy status.
 
-If a requirement is genuinely my decision and cheap to confirm, pick the sensible
-default and note it; if it’s expensive or irreversible, ask me first.
+If a decision is genuinely mine and cheap to confirm, pick the sensible default
+and note it; if it's expensive or irreversible, ask me first.
 ```
 
 ---
