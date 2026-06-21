@@ -127,7 +127,19 @@ const window = {
   location: { reload() {} },
 };
 
-const sandbox = { BABYLON, document, window, console, performance: { now: () => Date.now() }, setTimeout: () => 0, clearTimeout: () => {}, requestAnimationFrame: () => 0 };
+// A minimal in-memory localStorage so the i18n locale-persistence path runs
+// (real browsers have this; the headless harness must too, to test the round-trip).
+const localStorage = (() => {
+  const m = new Map();
+  return {
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => { m.set(k, String(v)); },
+    removeItem: (k) => { m.delete(k); },
+    clear: () => m.clear(),
+  };
+})();
+
+const sandbox = { BABYLON, document, window, localStorage, console, performance: { now: () => Date.now() }, setTimeout: () => 0, clearTimeout: () => {}, requestAnimationFrame: () => 0 };
 sandbox.global = sandbox;
 
 const code = fs.readFileSync(path.join(__dirname, "..", "js", "game.js"), "utf8");
@@ -901,6 +913,68 @@ T.applySave(sSave);
 ok(Story.introSeen === true && Story.beats.ch2 && Story.sideTurnIns.sq_pests === 2, "story flags restored");
 ok(T.Quests.reached.ruins && T.Quests.talked.mayor, "reach/talk objective sets restored");
 ok(Story.currentChapterId() === chBefore, "current chapter round-trips (derived from restored missions)");
+
+console.log("\n[28] i18n — locales, interpolation, plural, key-parity, data + persistence");
+const I18N = T.I18N, LOC = T.LOCALES;
+ok(I18N.locale === "en", "defaults to English (no persisted locale in the harness)");
+ok(!!(LOC && LOC.en && LOC.ru), "LOCALES exposes en + ru dictionaries");
+
+// Key parity: every UI key in en exists in ru and vice-versa (the lint gate).
+const enKeys = Object.keys(LOC.en), ruKeys = Object.keys(LOC.ru);
+const missingRu = enKeys.filter((k) => !(k in LOC.ru));
+const missingEn = ruKeys.filter((k) => !(k in LOC.en));
+ok(missingRu.length === 0, "every en key exists in ru" + (missingRu.length ? " — missing: " + missingRu.join(", ") : ""));
+ok(missingEn.length === 0, "every ru key exists in en" + (missingEn.length ? " — extra: " + missingEn.join(", ") : ""));
+ok(enKeys.length > 100, `${enKeys.length} UI strings localized`);
+
+// t() interpolation + fallback.
+ok(T.t("toast.coinPickup", { n: 7 }) === "🪙 +7", "t() interpolates {placeholders}");
+ok(T.t("totally.missing.key") === "totally.missing.key", "t() falls back to the key when missing");
+
+// Pluralization: English one/other, Russian one/few/many.
+ok(T.plural(1, { one: "part", other: "parts" }) === "part" && T.plural(4, { one: "part", other: "parts" }) === "parts", "en plural picks one/other");
+T.applyLocale("ru");
+const ruForms = { one: "часть", few: "части", many: "частей" };
+ok(T.plural(1, ruForms) === "часть", "ru plural: 1 → one");
+ok(T.plural(3, ruForms) === "части", "ru plural: 3 → few");
+ok(T.plural(5, ruForms) === "частей" && T.plural(11, ruForms) === "частей", "ru plural: 5 & 11 → many");
+
+// Data-table names resolve in Russian (and differ from the English source).
+ok(T.tItemName(T.getDef("magic_wand")) === "Волшебная палочка", "item name resolves to Russian");
+ok(T.tNpcName("mayor") === "Мэр Слива", "NPC name resolves to Russian");
+ok(T.tDragonName() === "Древний Дракон", "dragon name resolves to Russian");
+ok(T.tZoneName(T.ZONE_BY_ID.meadow).length > 0 && T.tQuestTitle(T.QUEST_BY_ID["m_cull"]).length > 0, "zone + quest titles resolve in Russian");
+ok(/Победите сладости/.test(T.Quests.objectiveText(T.QUEST_BY_ID["m_cull"])), "objective text is built from the active locale");
+T.applyLocale("en");
+ok(T.tItemName(T.getDef("magic_wand")) === "Magic Wand" && T.tNpcName("mayor") === "Mayor Plum", "English names come straight from the data tables");
+
+// Data completeness: every translatable data field has a Russian entry.
+const gaps = [];
+for (const id in T.ITEM_DB) {
+  if (!(T.RU.item[id] && T.RU.item[id].name)) gaps.push("item." + id + ".name");
+  if (T.ITEM_DB[id].desc && !(T.RU.item[id] && T.RU.item[id].desc)) gaps.push("item." + id + ".desc");
+}
+for (const z of T.ZONES) if (!T.RU.zone[z.id]) gaps.push("zone." + z.id);
+for (const q of T.MISSIONS.concat(T.SIDE_QUESTS)) {
+  if (!(T.RU.quest[q.id] && T.RU.quest[q.id].title)) gaps.push("quest." + q.id + ".title");
+  if (!(T.RU.quest[q.id] && T.RU.quest[q.id].story)) gaps.push("quest." + q.id + ".story");
+  if (q.where && !(T.RU.quest[q.id] && T.RU.quest[q.id].where)) gaps.push("quest." + q.id + ".where");
+}
+for (const n of T.NPC_DATA) {
+  if (!(T.RU.npc[n.id] && T.RU.npc[n.id].name)) gaps.push("npc." + n.id + ".name");
+  if (!(T.RU.npc[n.id] && T.RU.npc[n.id].intro)) gaps.push("npc." + n.id + ".intro");
+}
+for (const id in T.RELICS) if (!(T.RU.relic[id] && T.RU.relic[id].name)) gaps.push("relic." + id);
+for (const p of T.CASTLE_PARTS) if (!(T.RU.castlePart[p.id] && T.RU.castlePart[p.id].name)) gaps.push("castlePart." + p.id);
+for (const id in T.MATERIALS) if (!T.RU.material[id]) gaps.push("material." + id);
+for (const a of T.BOSS_ARCHES) if (!T.RU.boss[a.id]) gaps.push("boss." + a.id);
+ok(gaps.length === 0, "every data string has a Russian translation" + (gaps.length ? " — missing: " + gaps.slice(0, 8).join(", ") : ""));
+
+// Locale persistence round-trip via the (stubbed) localStorage.
+T.applyLocale("ru");
+ok(T.localGet(T.LOCALE_KEY) === "ru", "selecting a locale persists it to localStorage");
+T.applyLocale("en");
+ok(T.localGet(T.LOCALE_KEY) === "en" && I18N.locale === "en", "switching back persists English (and resets the run)");
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED ✅" : failures + " CHECK(S) FAILED ❌"}`);
 process.exit(failures === 0 ? 0 : 1);
