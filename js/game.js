@@ -30,7 +30,7 @@
     const hint = document.getElementById("loadHint");
     const overlay = document.getElementById("overlay");
     if (overlay) overlay.classList.remove("hidden");
-    if (hint) { hint.style.color = "#ff8a8a"; hint.textContent = "Error: " + msg; }
+    if (hint) { hint.style.color = "#ff8a8a"; hint.textContent = t("hint.errorPrefix") + msg; }
     console.error(msg);
   }
   window.addEventListener("error", (e) => showFatal(e.message || "unknown error"));
@@ -211,7 +211,7 @@
 
   // The fallback "weapon" when the player holds nothing — bare-handed melee.
   const FISTS = {
-    name: "Fists", ranged: false, damage: 1, cooldown: 0.5, multishot: 1,
+    id: "fists", name: "Fists", ranged: false, damage: 1, cooldown: 0.5, multishot: 1,
     melee: { range: 2.2, arc: 1.5 }, color: "#ffe0c0",
   };
 
@@ -710,6 +710,793 @@
   for (const z of ZONES) ZONE_BY_ID[z.id] = z;
   const HUB_ZONE = "meadow";
 
+  // =========================================================================
+  // INTERNATIONALIZATION (i18n) — English + Russian, switchable live from the
+  // start screen and the pause settings and persisted in localStorage.
+  //
+  // Two layers keep this maintainable and fully testable:
+  //   1. LOCALES = { en, ru } — flat dictionaries of every UI / dynamic string,
+  //      resolved through t(key, params) (with {placeholder} interpolation and
+  //      en fallback). A key-parity test guarantees en and ru stay in lock-step.
+  //   2. The DATA tables (items, zones, quests, NPCs, …) keep their English text
+  //      as the source of truth; Russian lives in the parallel `RU` object and
+  //      is read by the tData / resolver helpers, falling back to the English
+  //      field. A completeness test walks the tables so no data string can ship
+  //      untranslated.
+  // Everything is headless-safe: localStorage is feature-detected, so the Node
+  // harness simply stays in English.
+  // =========================================================================
+  const I18N = { locale: "en" };
+  const LOCALE_KEY = "gg3d_locale";
+
+  // localStorage isn't present in the headless harness / some privacy modes —
+  // fail soft everywhere it's touched (mirrors sessionGet/Set used for saves).
+  function localGet(k) {
+    try { return typeof localStorage !== "undefined" ? localStorage.getItem(k) : null; }
+    catch (e) { return null; }
+  }
+  function localSet(k, v) {
+    try { if (typeof localStorage !== "undefined") localStorage.setItem(k, v); } catch (e) {}
+  }
+
+  const LOCALES = {
+    en: {
+      // ---- boot / start screen ----
+      "hint.loading": "Loading engine…",
+      "hint.ready": "Ready!",
+      "hint.errorPrefix": "Error: ",
+      "start.tagline": "Run with Lily across a living island of <b>separate lands</b> — meadow vale, " +
+        "whispering wood, salt shore, frostpeak trail and the boss lairs. <b>Roaming monsters</b> " +
+        "guard each place and <b>respawn</b> over time; <b>travel</b> between lands through paths, " +
+        "bridges and cave mouths. Follow the <b>chaptered main quest</b> (with optional <b>side quests</b>), " +
+        "<b>gather &amp; craft</b>, raise a <b>castle</b> from five relics, then slay the <b>dragon</b> to win!",
+      "start.startBtn": "Start Adventure",
+      "start.loadBtn": "Load Progress",
+      "settings.language": "Language",
+      "ctrl.move": "Move", "ctrl.moveKeys": "WASD / Arrows · or the on-screen stick",
+      "ctrl.attack": "Attack", "ctrl.attackKeys": "Space / F · or the ✨ button",
+      "ctrl.interact": "Interact / talk / gather", "ctrl.interactKeys": "E · or the action button",
+      "ctrl.inventory": "Inventory", "ctrl.inventoryKeys": "I · or the 🎒 button",
+      "ctrl.craft": "Craft · Quests", "ctrl.craftKeys": "C · J · or the 🛠️ 📜 buttons",
+      "ctrl.travel": "Travel", "ctrl.travelKeys": "walk into a path / bridge / cave portal",
+      // ---- HUD button titles / aria ----
+      "btnTitle.fullscreen": "Fullscreen", "btnAria.fullscreen": "Toggle fullscreen",
+      "btnTitle.exitFullscreen": "Exit fullscreen",
+      "btnTitle.menu": "Menu (Esc)", "btnAria.menu": "Open menu",
+      "btnTitle.inventory": "Inventory (I)", "btnAria.inventory": "Open inventory",
+      "btnTitle.crafting": "Crafting (C)", "btnAria.crafting": "Open crafting",
+      "btnTitle.questLog": "Quest log (J)", "btnAria.questLog": "Open quest log",
+      "btnTitle.muteMusic": "Mute music (M)", "btnTitle.playMusic": "Play music", "btnAria.music": "Toggle music",
+      "prompt.pressE": "Press <b>E</b>",
+      "prompt.withKey": "{label} · <b>E</b>",
+      // ---- game over / victory ----
+      "over.title": "Game Over 🍭",
+      "over.tagline": "The wild monsters got you! You scored <b>{score}</b> and fell in <b>{where}</b>.",
+      "over.replay": "Play Again",
+      "win.title": "Victory! 🐉🏰",
+      "win.tagline": "The castle stands and the <b>Ancient Dragon</b> is slain! Meadowgate is " +
+        "saved. You finished with <b>{score}</b> points after felling <b>{kills}</b> monsters.",
+      "win.replay": "Play Again",
+      "win.ending": "<b>{title}</b><br>{text}",
+      // ---- pause menu ----
+      "pause.title": "Paused",
+      "pause.stats": "Wave <b>{wave}</b> · Score <b>{score}</b>",
+      "pause.resume": "Resume",
+      "pause.save": "Save Progress",
+      "pause.savedBtn": "Saved! 💾",
+      "pause.restart": "Restart",
+      "pause.exit": "Exit to Menu",
+      "pause.confirmYes": "Yes",
+      "pause.confirmNo": "Cancel",
+      "pause.confirmRestart": "Restart the game? Your current progress will be lost unless you've saved it.",
+      "pause.confirmExit": "Exit to the main menu? Your current progress will be lost unless you've saved it.",
+      // ---- shop / inventory / anvil / crafting / castle / quest-log (static) ----
+      "shop.title": "🧙 Travelling Merchant",
+      "shop.tagline": "Buy weapons, armour &amp; accessories — or sell your spare gear.",
+      "shop.coins": "coins",
+      "shop.tabBuy": "Buy", "shop.tabRare": "✨ Rare", "shop.tabSell": "Sell",
+      "shop.done": "Done",
+      "shop.gear": "⚔️ Gear", "shop.potions": "🧪 Potions",
+      "shop.rareNote": "✨ Rare wares — a fresh rotation every wave.",
+      "shop.sellEmpty": "Your bag is empty. Unequip gear in your inventory (🎒) to sell it.",
+      "inv.title": "🎒 Inventory &amp; Equipment",
+      "inv.tagline": "Click a bag item to equip it; click an equipped slot to remove it.",
+      "inv.done": "Done",
+      "inv.twoHanded": "⟵ two-handed",
+      "inv.unequipTitle": "Unequip {name}",
+      "inv.empty": "{icon} empty",
+      "inv.maxHealth": "❤ Max health",
+      "inv.resist": "🛡️ Resist",
+      "inv.speed": "👟 Speed",
+      "inv.lifesteal": "🩸 Lifesteal",
+      "inv.weapon": "⚔️ Weapon",
+      "inv.damage": "💥 Damage",
+      "inv.bag": "🎒 Bag ({n}/{cap})",
+      "inv.bagEmpty": "Empty — buy gear from the merchant or beat a boss for rare loot.",
+      "anvil.title": "🔨 Blacksmith",
+      "anvil.tagline": "Enhance your weapons &amp; equipment. Rarer gear forges further and gains more per level.",
+      "anvil.done": "Done",
+      "anvil.empty": "No gear to enhance. Buy or loot some weapons and armour first.",
+      "anvil.bag": "Bag",
+      "anvil.max": "MAX",
+      "craft.title": "🛠️ Crafting Bench",
+      "craft.tagline": "Turn gathered materials into potions &amp; gear. Cut trees, mine rock, gather herbs and collect water across the land.",
+      "craft.done": "Done",
+      "castleui.title": "🏰 Build the Castle",
+      "castleui.tagline": "Raise the castle from five relics. Find the relics through quests and exploration, then build each part in order.",
+      "castleui.coins": "coins ·",
+      "castleui.done": "Done",
+      "questlog.title": "📜 Quest Log",
+      "questlog.tagline": "Your <b>main story</b> runs in chapters across the lands — follow the tracker from one ❗ giver to the next. <b>Side quests</b> are optional bounties &amp; errands, listed separately.",
+      "questlog.done": "Done",
+      // ---- shared buttons ----
+      "btn.buyCost": "🪙 {cost}",
+      "btn.sellWorth": "Sell 🪙 {worth}",
+      "btn.equip": "Equip",
+      "btn.craft": "Craft 🛠️",
+      "btn.needMats": "Need mats",
+      "btn.build": "Build 🏰",
+      "btn.built": "Built",
+      "btn.locked": "Locked",
+      "btn.close": "Close",
+      "btn.farewell": "Farewell",
+      "btn.continue": "Continue ▶",
+      "btn.beginAdventure": "Begin the adventure ▶",
+      "btn.turnInQuest": "Turn in: {title} ✅",
+      "btn.acceptMain": "Accept: {title} 📜",
+      "btn.acceptSide": "Accept: {title} 🔸",
+      // ---- stat summary ----
+      "stat.healthRestore": "❤️ +{n} health",
+      "stat.buffWrap": "✨ {inner} ({t}s)",
+      "stat.rangedArrow": "🏹 ranged",
+      "stat.rangedBolt": "🔮 ranged",
+      "stat.melee": "⚔️ melee",
+      "stat.dmg": "{n} dmg",
+      "stat.multishot": "×{n}",
+      "stat.pierce": "pierce {n}",
+      "stat.twoHanded": "2-handed",
+      "stat.oneHanded": "1-handed",
+      "stat.hp": "+{n} HP",
+      "stat.resist": "+{n}% resist",
+      "stat.speed": "+{n} speed",
+      "stat.damageBonus": "+{n} dmg",
+      "stat.haste": "+{n}% haste",
+      "stat.lifestealBonus": "+{n} lifesteal",
+      "stat.coinMagnet": "coin magnet",
+      // ---- interactable labels ----
+      "label.shop": "Shop",
+      "label.blacksmith": "Blacksmith",
+      "label.collectArtifact": "Collect artifact",
+      "label.talkTo": "Talk to {name}",
+      "label.turnIn": "✓ {name}: turn in",
+      "label.newQuest": "❗ {name}: new quest",
+      "label.buildCastle": "🏰 Build castle",
+      "label.buildPart": "🏰 Build {part}",
+      "label.castleNeed": "🏰 Castle (need {icon} {part})",
+      "label.castleComplete": "🏰 Castle complete",
+      // ---- objectives ----
+      "obj.hunt": "Defeat sweets — {have}/{need}",
+      "obj.gather": "Gather {icon} {label} — {have}/{need}",
+      "obj.reach": "Reach {name}",
+      "obj.talk": "Speak with {icon} {name}",
+      "obj.defeatBoss": "Defeat 👑 {boss} in {zone}",
+      "obj.build": "Raise the {part} at 🏰 Castle Hill",
+      "obj.defeatDragon": "Slay the 🐉 Ancient Dragon",
+      "obj.lairBoss": "the lair boss",
+      "obj.doneMark": " ✓",
+      // ---- guidance / story flow ----
+      "guide.turnin": "Return to {giver} to turn in",
+      "guide.accept": "Speak with {giver} at {place}",
+      "guide.whereSuffix": " · {where}",
+      "place.meadowgate": "Meadowgate",
+      "quest.kindMission": "Mission",
+      "quest.kindSide": "Side quest",
+      // ---- dialogue ----
+      "dlg.tagMission": "📜 Mission",
+      "dlg.tagSide": "🔸 Side quest",
+      "dlg.greetSettle": "Back already? Let's settle up.",
+      "dlg.greetWorking": "Still on the job? Luck go with you.",
+      "dlg.greetDone": "Thank you, hero — the vale owes you much.",
+      "dlg.questLine": "{tag}: <b>{title}</b>",
+      "dlg.readyTurnIn": " — ready to turn in!",
+      "dlg.newMission": "📜 New mission: <b>{title}</b>",
+      "dlg.sideQuest": "🔸 Side quest: <b>{title}</b>{rep}{done}",
+      "dlg.repeatable": " (repeatable)",
+      "dlg.doneTimes": " · done ×{n}",
+      "dlg.story": "\"{story}\"",
+      "dlg.reward": "Reward: {reward}",
+      // ---- HUD trackers / bars / banners ----
+      "qt.chapter": "Chapter {n} · {title}",
+      "qt.missionTitle": "📜 {title}",
+      "qt.sideTitle": "🔸 {title}",
+      "qt.sideReturn": "✓ return to turn in",
+      "buff.pill": "{icon} {label} <b>{n}s</b>",
+      "potion.slotTitle": "{name} — {desc} (press {key})",
+      "boss.barName": "👑 {name}",
+      "banner.bossWave": "Wave {n} — 👑 {boss}!",
+      "banner.sweepWave": "Wave {n} — {count} sweets!",
+      "banner.theDragon": "The Dragon",
+      "label.zone": "{icon} {name}",
+      // ---- toasts ----
+      "toast.fullHealth": "Already at full health",
+      "toast.potionHeal": "{icon} +{heal} health",
+      "toast.potionBuff": "{icon} {label}!",
+      "toast.noMaterials": "Not enough materials",
+      "toast.beltFull": "Potion belt full (3 kinds)",
+      "toast.bagFull": "Bag full",
+      "toast.crafted": "🛠️ Crafted {icon} {name}",
+      "toast.gathered": "{icon} +{n} {label}",
+      "toast.summonMinions": "👹 The Tyrant summons minions!",
+      "toast.incomingBombs": "💣 Incoming bombs!",
+      "toast.hydraSplits": "🦠 The Hydra splits!",
+      "toast.partRaised": "🏰 {part} raised!",
+      "toast.castleComplete": "🐉 The castle is complete... the DRAGON awakens!",
+      "toast.dragonDives": "🐉 The dragon dives!",
+      "toast.dragonBreath": "🔥 Dragon's breath!",
+      "toast.artifact": "Artifact! +{score}{extra}",
+      "toast.artifactHeal": " · +{n} ❤",
+      "toast.artifactCoin": " · 🪙 +{n}",
+      "toast.noCoins": "Not enough coins",
+      "toast.bought": "{icon} Bought {name}",
+      "toast.sold": "Sold {name} for 🪙 {worth}",
+      "toast.maxEnhance": "Already at max enhancement",
+      "toast.forged": "🔨 {name} forged!",
+      "toast.questAccepted": "📜 {kind}: {title}",
+      "toast.questComplete": "✅ {title} complete! {bits}",
+      "toast.reached": "📍 Reached {name}",
+      "toast.chapterBegin": "📖 Chapter {n}: {title}",
+      "toast.lairIntro": "⚔️ {intro}",
+      "toast.bossDefeated": "👑 {boss} defeated! Dropped {item}!",
+      "toast.pickedUp": "✨ Picked up {item}!",
+      "toast.bagFullDrop": "Bag full — drop something!",
+      "toast.coinPickup": "🪙 +{n}",
+      "toast.nothingToSave": "Nothing to save yet",
+      "toast.saved": "Progress saved! 💾",
+      "toast.saveFailed": "Save failed",
+      "toast.invalidSave": "That file isn't a valid Good Game 3D save.",
+      "toast.readError": "Couldn't read that file.",
+      "toast.loaded": "Progress loaded! 🎮",
+      // ---- castle build panel ----
+      "castle.built": "✅ Built",
+      "castle.lockedPrev": "🔒 Build the previous part first",
+      "castle.needs": "Needs {relic} · {coins}",
+      "castle.relicHave": "{icon} ✓",
+      "castle.relicNeed": "{icon} {name} ✗",
+      "castle.coinsHave": "🪙 {cost} ✓",
+      "castle.coinsNeed": "🪙 {cost} ✗",
+      "castle.complete": "The castle stands! The dragon stirs…",
+      "castle.progress": "{built}/{total} {word} raised",
+      "castle.partWord": { one: "part", other: "parts" },
+      // ---- quest log ----
+      "log.mainStory": "📜 Main Story",
+      "log.sideQuests": "🔸 Side Quests",
+      "log.now": "<b>Chapter {n}: {title}</b><br>{text}",
+      "log.allDone": "The castle stands and the Ancient Dragon is slain — the vale is saved! 🏰🐉",
+      "log.chapterRow": "{icon} Chapter {n}: {title}",
+      "log.returnTo": " — return to {giver}",
+      "log.speakAt": "Speak with {giver} at {place}",
+      "log.sideNone": "None yet — visit the ❗ folk for optional bounties &amp; errands.",
+      "log.sideFrom": "from {icon} {name}{ret} · reward {reward}",
+      "log.sideReturn": " · return to turn in",
+      "log.sideCompleted": "Completed side quests",
+    },
+    ru: {
+      // ---- boot / start screen ----
+      "hint.loading": "Загрузка движка…",
+      "hint.ready": "Готово!",
+      "hint.errorPrefix": "Ошибка: ",
+      "start.tagline": "Бегите за Лили по живому острову из <b>отдельных земель</b> — луговая долина, " +
+        "шепчущий лес, солёный берег, морозный перевал и логова боссов. <b>Бродячие монстры</b> " +
+        "охраняют каждое место и со временем <b>возрождаются</b>; <b>путешествуйте</b> между землями по тропам, " +
+        "мостам и пещерам. Следуйте за <b>главным сюжетом по главам</b> (и необязательными <b>побочными заданиями</b>), " +
+        "<b>собирайте и мастерите</b>, возведите <b>замок</b> из пяти реликвий, а затем сразите <b>дракона</b> ради победы!",
+      "start.startBtn": "Начать приключение",
+      "start.loadBtn": "Загрузить прогресс",
+      "settings.language": "Язык",
+      "ctrl.move": "Движение", "ctrl.moveKeys": "WASD / стрелки · или экранный джойстик",
+      "ctrl.attack": "Атака", "ctrl.attackKeys": "Пробел / F · или кнопка ✨",
+      "ctrl.interact": "Действие / разговор / сбор", "ctrl.interactKeys": "E · или кнопка действия",
+      "ctrl.inventory": "Инвентарь", "ctrl.inventoryKeys": "I · или кнопка 🎒",
+      "ctrl.craft": "Ремесло · Задания", "ctrl.craftKeys": "C · J · или кнопки 🛠️ 📜",
+      "ctrl.travel": "Путешествие", "ctrl.travelKeys": "войдите в тропу / мост / пещеру",
+      // ---- HUD button titles / aria ----
+      "btnTitle.fullscreen": "Во весь экран", "btnAria.fullscreen": "Переключить полноэкранный режим",
+      "btnTitle.exitFullscreen": "Выйти из полноэкранного режима",
+      "btnTitle.menu": "Меню (Esc)", "btnAria.menu": "Открыть меню",
+      "btnTitle.inventory": "Инвентарь (I)", "btnAria.inventory": "Открыть инвентарь",
+      "btnTitle.crafting": "Ремесло (C)", "btnAria.crafting": "Открыть ремесло",
+      "btnTitle.questLog": "Журнал заданий (J)", "btnAria.questLog": "Открыть журнал заданий",
+      "btnTitle.muteMusic": "Выключить музыку (M)", "btnTitle.playMusic": "Включить музыку", "btnAria.music": "Переключить музыку",
+      "prompt.pressE": "Нажмите <b>E</b>",
+      "prompt.withKey": "{label} · <b>E</b>",
+      // ---- game over / victory ----
+      "over.title": "Игра окончена 🍭",
+      "over.tagline": "Дикие монстры одолели вас! Вы набрали <b>{score}</b> и пали в <b>{where}</b>.",
+      "over.replay": "Играть снова",
+      "win.title": "Победа! 🐉🏰",
+      "win.tagline": "Замок стоит, а <b>Древний Дракон</b> повержен! Лугоград спасён. " +
+        "Вы завершили с <b>{score}</b> очками, сразив <b>{kills}</b> монстров.",
+      "win.replay": "Играть снова",
+      "win.ending": "<b>{title}</b><br>{text}",
+      // ---- pause menu ----
+      "pause.title": "Пауза",
+      "pause.stats": "Волна <b>{wave}</b> · Очки <b>{score}</b>",
+      "pause.resume": "Продолжить",
+      "pause.save": "Сохранить прогресс",
+      "pause.savedBtn": "Сохранено! 💾",
+      "pause.restart": "Заново",
+      "pause.exit": "Выйти в меню",
+      "pause.confirmYes": "Да",
+      "pause.confirmNo": "Отмена",
+      "pause.confirmRestart": "Начать игру заново? Текущий прогресс будет потерян, если вы его не сохранили.",
+      "pause.confirmExit": "Выйти в главное меню? Текущий прогресс будет потерян, если вы его не сохранили.",
+      // ---- shop / inventory / anvil / crafting / castle / quest-log (static) ----
+      "shop.title": "🧙 Странствующий торговец",
+      "shop.tagline": "Покупайте оружие, броню и аксессуары — или продавайте лишнее снаряжение.",
+      "shop.coins": "монет",
+      "shop.tabBuy": "Купить", "shop.tabRare": "✨ Редкое", "shop.tabSell": "Продать",
+      "shop.done": "Готово",
+      "shop.gear": "⚔️ Снаряжение", "shop.potions": "🧪 Зелья",
+      "shop.rareNote": "✨ Редкие товары — обновляются каждую волну.",
+      "shop.sellEmpty": "Ваша сумка пуста. Снимите снаряжение в инвентаре (🎒), чтобы продать его.",
+      "inv.title": "🎒 Инвентарь и снаряжение",
+      "inv.tagline": "Нажмите на предмет в сумке, чтобы надеть его; нажмите на занятый слот, чтобы снять.",
+      "inv.done": "Готово",
+      "inv.twoHanded": "⟵ двуручное",
+      "inv.unequipTitle": "Снять: {name}",
+      "inv.empty": "{icon} пусто",
+      "inv.maxHealth": "❤ Макс. здоровье",
+      "inv.resist": "🛡️ Защита",
+      "inv.speed": "👟 Скорость",
+      "inv.lifesteal": "🩸 Вампиризм",
+      "inv.weapon": "⚔️ Оружие",
+      "inv.damage": "💥 Урон",
+      "inv.bag": "🎒 Сумка ({n}/{cap})",
+      "inv.bagEmpty": "Пусто — купите снаряжение у торговца или одолейте босса ради редкой добычи.",
+      "anvil.title": "🔨 Кузнец",
+      "anvil.tagline": "Улучшайте оружие и снаряжение. Чем реже предмет, тем дальше его можно усилить и тем больше прирост за уровень.",
+      "anvil.done": "Готово",
+      "anvil.empty": "Нечего улучшать. Сначала купите или добудьте оружие и броню.",
+      "anvil.bag": "Сумка",
+      "anvil.max": "МАКС",
+      "craft.title": "🛠️ Верстак",
+      "craft.tagline": "Превращайте собранные материалы в зелья и снаряжение. Рубите деревья, добывайте камень, собирайте травы и воду по всей земле.",
+      "craft.done": "Готово",
+      "castleui.title": "🏰 Построить замок",
+      "castleui.tagline": "Возведите замок из пяти реликвий. Добудьте реликвии заданиями и исследованием, затем стройте части по порядку.",
+      "castleui.coins": "монет ·",
+      "castleui.done": "Готово",
+      "questlog.title": "📜 Журнал заданий",
+      "questlog.tagline": "Ваш <b>главный сюжет</b> идёт по главам через земли — следуйте за трекером от одного ❗ дарителя к другому. <b>Побочные задания</b> — необязательные награды и поручения, перечислены отдельно.",
+      "questlog.done": "Готово",
+      // ---- shared buttons ----
+      "btn.buyCost": "🪙 {cost}",
+      "btn.sellWorth": "Продать 🪙 {worth}",
+      "btn.equip": "Надеть",
+      "btn.craft": "Создать 🛠️",
+      "btn.needMats": "Нужны материалы",
+      "btn.build": "Строить 🏰",
+      "btn.built": "Готово",
+      "btn.locked": "Закрыто",
+      "btn.close": "Закрыть",
+      "btn.farewell": "Прощайте",
+      "btn.continue": "Продолжить ▶",
+      "btn.beginAdventure": "Начать приключение ▶",
+      "btn.turnInQuest": "Сдать: {title} ✅",
+      "btn.acceptMain": "Принять: {title} 📜",
+      "btn.acceptSide": "Принять: {title} 🔸",
+      // ---- stat summary ----
+      "stat.healthRestore": "❤️ +{n} здоровья",
+      "stat.buffWrap": "✨ {inner} ({t}с)",
+      "stat.rangedArrow": "🏹 дальний бой",
+      "stat.rangedBolt": "🔮 дальний бой",
+      "stat.melee": "⚔️ ближний бой",
+      "stat.dmg": "{n} ур.",
+      "stat.multishot": "×{n}",
+      "stat.pierce": "пробой {n}",
+      "stat.twoHanded": "двуручное",
+      "stat.oneHanded": "одноручное",
+      "stat.hp": "+{n} ОЗ",
+      "stat.resist": "+{n}% защиты",
+      "stat.speed": "+{n} скорости",
+      "stat.damageBonus": "+{n} ур.",
+      "stat.haste": "+{n}% скорости атаки",
+      "stat.lifestealBonus": "+{n} вампиризма",
+      "stat.coinMagnet": "магнит для монет",
+      // ---- interactable labels ----
+      "label.shop": "Торговец",
+      "label.blacksmith": "Кузнец",
+      "label.collectArtifact": "Подобрать артефакт",
+      "label.talkTo": "Поговорить: {name}",
+      "label.turnIn": "✓ {name}: сдать",
+      "label.newQuest": "❗ {name}: новое задание",
+      "label.buildCastle": "🏰 Строить замок",
+      "label.buildPart": "🏰 Строить: {part}",
+      "label.castleNeed": "🏰 Замок (нужно {icon} {part})",
+      "label.castleComplete": "🏰 Замок достроен",
+      // ---- objectives ----
+      "obj.hunt": "Победите сладости — {have}/{need}",
+      "obj.gather": "Соберите {icon} {label} — {have}/{need}",
+      "obj.reach": "Дойдите до {name}",
+      "obj.talk": "Поговорите с {icon} {name}",
+      "obj.defeatBoss": "Одолейте 👑 {boss} в {zone}",
+      "obj.build": "Возведите {part} на 🏰 Замковом холме",
+      "obj.defeatDragon": "Сразите 🐉 Древнего Дракона",
+      "obj.lairBoss": "босса логова",
+      "obj.doneMark": " ✓",
+      // ---- guidance / story flow ----
+      "guide.turnin": "Вернитесь к {giver}, чтобы сдать",
+      "guide.accept": "Поговорите с {giver} в {place}",
+      "guide.whereSuffix": " · {where}",
+      "place.meadowgate": "Лугоград",
+      "quest.kindMission": "Задание",
+      "quest.kindSide": "Побочное задание",
+      // ---- dialogue ----
+      "dlg.tagMission": "📜 Задание",
+      "dlg.tagSide": "🔸 Побочное задание",
+      "dlg.greetSettle": "Уже вернулись? Давайте рассчитаемся.",
+      "dlg.greetWorking": "Всё ещё за делом? Удачи вам.",
+      "dlg.greetDone": "Спасибо, герой — долина в долгу перед вами.",
+      "dlg.questLine": "{tag}: <b>{title}</b>",
+      "dlg.readyTurnIn": " — можно сдавать!",
+      "dlg.newMission": "📜 Новое задание: <b>{title}</b>",
+      "dlg.sideQuest": "🔸 Побочное задание: <b>{title}</b>{rep}{done}",
+      "dlg.repeatable": " (повторяемое)",
+      "dlg.doneTimes": " · сдано ×{n}",
+      "dlg.story": "«{story}»",
+      "dlg.reward": "Награда: {reward}",
+      // ---- HUD trackers / bars / banners ----
+      "qt.chapter": "Глава {n} · {title}",
+      "qt.missionTitle": "📜 {title}",
+      "qt.sideTitle": "🔸 {title}",
+      "qt.sideReturn": "✓ вернитесь, чтобы сдать",
+      "buff.pill": "{icon} {label} <b>{n}с</b>",
+      "potion.slotTitle": "{name} — {desc} (нажмите {key})",
+      "boss.barName": "👑 {name}",
+      "banner.bossWave": "Волна {n} — 👑 {boss}!",
+      "banner.sweepWave": "Волна {n} — сладостей: {count}!",
+      "banner.theDragon": "Дракон",
+      "label.zone": "{icon} {name}",
+      // ---- toasts ----
+      "toast.fullHealth": "Здоровье уже полное",
+      "toast.potionHeal": "{icon} +{heal} здоровья",
+      "toast.potionBuff": "{icon} {label}!",
+      "toast.noMaterials": "Недостаточно материалов",
+      "toast.beltFull": "Пояс зелий полон (3 вида)",
+      "toast.bagFull": "Сумка полна",
+      "toast.crafted": "🛠️ Создано: {icon} {name}",
+      "toast.gathered": "{icon} +{n} {label}",
+      "toast.summonMinions": "👹 Тиран призывает прислужников!",
+      "toast.incomingBombs": "💣 Летят бомбы!",
+      "toast.hydraSplits": "🦠 Гидра делится!",
+      "toast.partRaised": "🏰 {part} возведена!",
+      "toast.castleComplete": "🐉 Замок достроен... ДРАКОН пробуждается!",
+      "toast.dragonDives": "🐉 Дракон пикирует!",
+      "toast.dragonBreath": "🔥 Дыхание дракона!",
+      "toast.artifact": "Артефакт! +{score}{extra}",
+      "toast.artifactHeal": " · +{n} ❤",
+      "toast.artifactCoin": " · 🪙 +{n}",
+      "toast.noCoins": "Недостаточно монет",
+      "toast.bought": "{icon} Куплено: {name}",
+      "toast.sold": "Продано: {name} за 🪙 {worth}",
+      "toast.maxEnhance": "Уже максимальное улучшение",
+      "toast.forged": "🔨 {name} выковано!",
+      "toast.questAccepted": "📜 {kind}: {title}",
+      "toast.questComplete": "✅ {title} — выполнено! {bits}",
+      "toast.reached": "📍 Достигнуто: {name}",
+      "toast.chapterBegin": "📖 Глава {n}: {title}",
+      "toast.lairIntro": "⚔️ {intro}",
+      "toast.bossDefeated": "👑 {boss} повержен! Выпало: {item}!",
+      "toast.pickedUp": "✨ Подобрано: {item}!",
+      "toast.bagFullDrop": "Сумка полна — что-нибудь выбросьте!",
+      "toast.coinPickup": "🪙 +{n}",
+      "toast.nothingToSave": "Пока нечего сохранять",
+      "toast.saved": "Прогресс сохранён! 💾",
+      "toast.saveFailed": "Не удалось сохранить",
+      "toast.invalidSave": "Этот файл не является сохранением Good Game 3D.",
+      "toast.readError": "Не удалось прочитать файл.",
+      "toast.loaded": "Прогресс загружен! 🎮",
+      // ---- castle build panel ----
+      "castle.built": "✅ Построено",
+      "castle.lockedPrev": "🔒 Сначала постройте предыдущую часть",
+      "castle.needs": "Нужно {relic} · {coins}",
+      "castle.relicHave": "{icon} ✓",
+      "castle.relicNeed": "{icon} {name} ✗",
+      "castle.coinsHave": "🪙 {cost} ✓",
+      "castle.coinsNeed": "🪙 {cost} ✗",
+      "castle.complete": "Замок стоит! Дракон пробуждается…",
+      "castle.progress": "{word}: {built}/{total}",
+      "castle.partWord": { one: "Возведена часть", few: "Возведено частей", many: "Возведено частей" },
+      // ---- quest log ----
+      "log.mainStory": "📜 Главный сюжет",
+      "log.sideQuests": "🔸 Побочные задания",
+      "log.now": "<b>Глава {n}: {title}</b><br>{text}",
+      "log.allDone": "Замок стоит, а Древний Дракон повержен — долина спасена! 🏰🐉",
+      "log.chapterRow": "{icon} Глава {n}: {title}",
+      "log.returnTo": " — вернитесь к {giver}",
+      "log.speakAt": "Поговорите с {giver} в {place}",
+      "log.sideNone": "Пока ничего — навестите ❗ людей ради необязательных наград и поручений.",
+      "log.sideFrom": "от {icon} {name}{ret} · награда {reward}",
+      "log.sideReturn": " · вернитесь, чтобы сдать",
+      "log.sideCompleted": "Выполненные побочные задания",
+    },
+  };
+
+  // Russian translations for the DATA tables (English stays in the tables as the
+  // source + fallback). Keyed by the same ids the tables use. A completeness
+  // test walks the tables and fails if any of these is missing.
+  const RU = {
+    item: {
+      magic_wand: { name: "Волшебная палочка", desc: "Надёжный метатель зарядов." },
+      short_bow: { name: "Короткий лук", desc: "Двуручный. Быстрые пробивающие стрелы, летящие по дуге." },
+      apprentice_staff: { name: "Посох ученика", desc: "Двуручный. Бьёт веером из 3 зарядов." },
+      iron_dagger: { name: "Железный кинжал", desc: "Одноручный. Быстрые короткие удары — хорош в паре." },
+      iron_sword: { name: "Железный меч", desc: "Одноручный. Сбалансированный удар ближнего боя." },
+      war_axe: { name: "Боевой топор", desc: "Одноручный. Медленный, но тяжёлый, с широким взмахом." },
+      leather_cap: { name: "Кожаный шлем", desc: "+15 к макс. здоровью." },
+      iron_helm: { name: "Железный шлем", desc: "+25 здоровья, +4% защиты." },
+      leather_vest: { name: "Кожаный жилет", desc: "+20 здоровья, +4% защиты." },
+      iron_plate: { name: "Железные латы", desc: "+35 здоровья, +10% защиты." },
+      leather_boots: { name: "Кожаные сапоги", desc: "+0,8 к скорости." },
+      iron_greaves: { name: "Железные поножи", desc: "+0,4 скорости, +5% защиты." },
+      amulet_vigor: { name: "Амулет бодрости", desc: "+25 к макс. здоровью." },
+      coin_amulet: { name: "Подвеска-магнит", desc: "Притягивает монеты издалека." },
+      ring_power: { name: "Кольцо мощи", desc: "+1 к урону оружия." },
+      ring_swift: { name: "Кольцо проворства", desc: "Атака на 12% быстрее." },
+      ring_guard: { name: "Кольцо защиты", desc: "+6% к сопротивлению урону." },
+      excalibur: { name: "Экскалибур", desc: "Двуручный меч. Разрушительный широкий взмах." },
+      storm_bow: { name: "Грозовой лук", desc: "Двуручный. Выпускает 3 пробивающие стрелы." },
+      archmage_wand: { name: "Жезл архимага", desc: "Одноручный. Буря из 3 пробивающих зарядов." },
+      twin_fang: { name: "Клинок-клык", desc: "Одноручный. Стремительные удары, крадущие жизнь." },
+      thunder_hammer: { name: "Громовой молот", desc: "Двуручный. Сокрушительный, с огромным взмахом." },
+      dragon_helm: { name: "Драконий шлем", desc: "+40 здоровья, +10% защиты." },
+      aegis_plate: { name: "Латы Эгиды", desc: "+55 здоровья, +16% защиты." },
+      winged_boots: { name: "Крылатые сапоги", desc: "+1,4 скорости, +5% защиты." },
+      vampiric_ring: { name: "Вампирское кольцо", desc: "+3 к здоровью за убийство." },
+      titan_pendant: { name: "Подвеска титана", desc: "+45 здоровья, +8% защиты, +2 урона." },
+      void_scythe: { name: "Коса пустоты", desc: "Двуручная. Жатва по дуге, крадущая жизнь." },
+      sunfire_staff: { name: "Посох солнечного огня", desc: "Двуручный. Палящий веер из 5 зарядов." },
+      phoenix_plate: { name: "Латы феникса", desc: "+75 здоровья, +20% защиты." },
+      seraph_ring: { name: "Кольцо серафима", desc: "+3 урона, +5 вампиризма." },
+      world_ender: { name: "Крушитель миров", desc: "Двуручный. Катастрофическое, всё сметающее разрушение." },
+      astral_bow: { name: "Астральный лук", desc: "Двуручный. Буря из 5 пробивающих стрел." },
+      crown_eternal: { name: "Вечная корона", desc: "+90 здоровья, +18% защиты, +3 урона." },
+      minor_potion: { name: "Малое зелье здоровья", desc: "Восстанавливает 30 здоровья." },
+      health_potion: { name: "Зелье здоровья", desc: "Восстанавливает 65 здоровья." },
+      greater_potion: { name: "Большое зелье здоровья", desc: "Восстанавливает 140 здоровья." },
+      elixir_might: { name: "Эликсир мощи", desc: "+4 урона на 18 с.", label: "Мощь" },
+      elixir_swift: { name: "Эликсир проворства", desc: "+2,5 скорости на 18 с.", label: "Проворство" },
+      fists: { name: "Кулаки" },
+    },
+    rarity: { normal: "Обычное", rare: "Редкое", epic: "Эпическое", legendary: "Легендарное" },
+    slot: { helmet: "Шлем", breastplate: "Нагрудник", boots: "Сапоги", necklace: "Ожерелье",
+            ring: "Кольцо", hand1: "Основная рука", hand2: "Вторая рука" },
+    material: { wood: "Дерево", stone: "Камень", water: "Вода", herb: "Трава", fiber: "Волокно", crystal: "Кристалл" },
+    resource: { tree: "Срубить дерево", rock: "Добыть камень", herb: "Собрать травы",
+                water: "Набрать воды", fiber: "Срезать волокна", crystal: "Добыть кристалл" },
+    relic: {
+      relic_foundation: { name: "Камень основания", desc: "Огромный краеугольный камень, испещрённый рунами." },
+      relic_walls: { name: "Руны стен", desc: "Камни, помнящие, как стоять стенами." },
+      relic_towers: { name: "Кристалл башен", desc: "Кристалл, что поёт шпили в бытие." },
+      relic_gate: { name: "Ключ от золотых врат", desc: "Великий ключ, что творит несокрушимые врата." },
+      relic_keep: { name: "Печать дракона", desc: "Печать старой цитадели — и внимание дракона." },
+    },
+    castlePart: {
+      foundation: { name: "Основание", desc: "Заложите великий краеугольный камень." },
+      walls: { name: "Стены", desc: "Возведите крепостные стены." },
+      towers: { name: "Башни", desc: "Сотворите угловые шпили." },
+      gate: { name: "Надвратная башня", desc: "Навесьте золотые врата." },
+      keep: { name: "Цитадель", desc: "Увенчайте цитадель — и разбудите дракона." },
+    },
+    boss: {
+      charger: "Желейный король", caster: "Шоколадный властелин", summoner: "Леденцовый тиран",
+      stomper: "Кексовый колосс", bomber: "Военачальник-карамель", splitter: "Желатиновая гидра",
+    },
+    lairBoss: { caverns: "Подземельный Гамлорд", thicket: "Колючая Гидра" },
+    lairIntro: {
+      caverns: "Колоссальный конфетный голем правит Хрустальными пещерами. Сразите его!",
+      thicket: "Колючая Гидра свернулась в глубокой чаще, делясь, когда падает. Покончите с ней!",
+    },
+    zone: {
+      meadow: "Долина Лугоград", forest: "Глубь Шепчущего леса", shore: "Соляное побережье",
+      peaks: "Морозная тропа", caverns: "Хрустальные пещеры", thicket: "Колючая чаща",
+    },
+    location: {
+      village: "Деревня Лугоград", grove: "Роща Шепчущего леса", seaside: "Соляной берег",
+      mountain: "Морозный перевал", ruins: "Затонувшие руины", castle: "Замковый холм",
+    },
+    npc: {
+      mayor: { name: "Мэр Слива", intro: "Лугоград осаждают живые сладости! Говорят, когда-то долину защищал замок. Помогите нам возвести его вновь, герой." },
+      herbalist: { name: "Мудрая Ива", intro: "Шепчущий лес щедр к тем, кто умеет слушать. Собирайте со мной, и я поделюсь старыми тайнами." },
+      fisher: { name: "Старый Брин", intro: "Ха! Сухопутный гость на моём берегу. Море хранит Кристалл башен — заслужите его, и он ваш." },
+      smith2: { name: "Праматерь-кузнец Това", intro: "Морозное железо — лучшее из всех. Докажите силу руки, и я выкую вам Ключ от врат." },
+      hermit: { name: "Отшельник", intro: "Ищете Печать дракона? Немногие готовы. Сначала поговорите с мэром, затем возвращайтесь ко мне." },
+    },
+    quest: {
+      m_cull: { title: "Привкус битвы", story: "Истребите сладости, рыщущие по нашим полям, и покажите долине, что есть надежда.", where: "Долина Лугоград" },
+      m_cornerstone: { title: "Краеугольный камень", story: "Камень основания лежит в Затонувших руинах на востоке. Отыщите его." },
+      m_foundation: { title: "Заложить краеугольный камень", story: "Отнесите Камень основания на Замковый холм и заложите наш краеугольный камень." },
+      m_poultice: { title: "Зелёные руки", story: "Соберите травы в роще, чтобы я мог варить припарки для ополчения.", where: "Роща Шепчущего леса" },
+      m_stone: { title: "Камни для стен", story: "Стенам нужен добрый камень. Добудьте его в холмах и высоких скалах.", where: "Морозный перевал и холмы" },
+      m_walls: { title: "Возвести валы", story: "С Рунами стен в руках возведите наши крепостные стены." },
+      m_water: { title: "Свежая вода", story: "Принесите чистой воды из реки для моих сетей, и я расскажу вам о глубоких пещерах.", where: "Река и Соляное побережье" },
+      m_caverns: { title: "Глубины внизу", story: "Конфетный голем хранит Кристалл башен в Хрустальных пещерах, через морскую пещеру за моим берегом. Покончите с ним!", where: "Хрустальные пещеры (через Соляное побережье)" },
+      m_towers: { title: "Сотворить шпили", story: "Впойте Кристалл башен в угловые шпили замка." },
+      m_ore: { title: "Руда для горна", story: "Принесите мне кристалл из высоких скал, чтобы разжечь горн.", where: "Морозная тропа" },
+      m_gatekey: { title: "Золотые врата", story: "Перебейте сладости, бродящие по морозному перевалу, и заберите выкованный Ключ от врат.", where: "Морозная тропа" },
+      m_gate: { title: "Навесить золотые врата", story: "Навесьте золотые врата и запечатайте наши стены." },
+      m_word: { title: "Слово из долины", story: "Поговорите с мэром Сливой, чтобы он поручился за вас, затем возвращайтесь ко мне." },
+      m_thicket: { title: "Сердце чащи", story: "Колючая Гидра свернулась в глубокой чаще за Шепчущим лесом. Вырвите её сердце — и Печать дракона ваша.", where: "Колючая чаща (через Шепчущий лес)" },
+      m_keep: { title: "Увенчать цитадель", story: "Установите Печать дракона и увенчайте цитадель — хотя это наверняка разбудит зверя внизу." },
+      m_dragon: { title: "Сразить Древнего Дракона", story: "Древний Дракон пробудился. Встретьте его перед новым замком и положите конец долгой осаде.", where: "Замковый холм" },
+      sq_pests: { title: "Борьба с вредителями", story: "Сладости всё забредают на площадь. Проредите их — за это есть монеты, и так часто, как пожелаете." },
+      sq_supplies: { title: "Запасы целителя", story: "Пополните мои полки травами, и я выделю вам тоник." },
+      sq_nets: { title: "Починить сети", story: "Мои сети в лохмотьях. Принесите волокно, и я с вами поделюсь." },
+      sq_forgefuel: { title: "Топливо для горна", story: "Горн жаждет кристалла. Накормите его и заберите этот клинок." },
+      sq_relics: { title: "Испытания павших", story: "Докажите свою сталь против дикой стаи и заслужите мой старый оберег." },
+      sq_wilds: { title: "Проредить дикарей", story: "За дикие сладости назначена постоянная награда — приносите подсчёт в любое время." },
+    },
+    chapter: {
+      ch1: { title: "Долина в осаде", blurb: "Ответьте на зов Лугограда и заложите первый камень замка." },
+      ch2: { title: "Камень и сталь", blurb: "Закалите ополчение и возведите крепостные стены." },
+      ch3: { title: "Хрустальный прилив", blurb: "Дерзните в морские пещеры за Кристаллом башен." },
+      ch4: { title: "Золотые врата", blurb: "Выкуйте Ключ от врат в огне Морозного перевала." },
+      ch5: { title: "Печать дракона", blurb: "Завладейте Печатью дракона, увенчайте цитадель и покончите со зверем." },
+    },
+    story: {
+      title: "Замок Лугограда",
+      introTitle: "📜 Сказание о Лугограде",
+      introText: "Давным-давно великий замок защищал эту долину — пока он не рухнул, и земли не наполнились живыми сладостями. " +
+        "Вы — Лили, герой, о котором молился Лугоград. Соберите пять утраченных реликвий, возведите замок заново и " +
+        "встретьте Древнего Дракона, что спит под цитаделью. " +
+        "Следуйте за светящимися ❗ людьми и трекером заданий — каждое дело ведёт к следующему. Долина в ваших руках.",
+      endingTitle: "🏰 Рассвет над долиной",
+      endingText: "Древний Дракон повержен, и замок стоит увенчанный навстречу рассвету. Сладости разбегаются по диким землям, " +
+        "жители Лугограда распахивают двери, и ваше имя воспевают от рощи до берега. Долина спасена — отлично, герой.",
+    },
+    weather: { clear: "Ясно", cloudy: "Облачно", fog: "Туман", rain: "Дождь", storm: "Гроза" },
+    dragon: { name: "Древний Дракон" },
+  };
+
+  // {placeholder} interpolation; missing params are left intact so a bad key is
+  // visible rather than silently blanked.
+  function interp(s, p) {
+    return s.replace(/\{(\w+)\}/g, (m, k) => (p && p[k] != null) ? String(p[k]) : m);
+  }
+  // The core lookup: current locale → English fallback → the key itself.
+  function t(key, params) {
+    const L = LOCALES[I18N.locale] || LOCALES.en;
+    let s = (L && L[key] != null) ? L[key] : LOCALES.en[key];
+    if (s == null) s = key;
+    return (params && typeof s === "string") ? interp(s, params) : s;
+  }
+  // Pick a plural form. English: one/other; Russian: one/few/many by the usual
+  // Slavic rule. `forms` is e.g. { one, few, many } (or { one, other } for en).
+  function plural(n, forms) {
+    if (I18N.locale === "ru") {
+      const a = n % 10, b = n % 100;
+      if (a === 1 && b !== 11) return forms.one;
+      if (a >= 2 && a <= 4 && (b < 12 || b > 14)) return forms.few != null ? forms.few : forms.many;
+      return forms.many != null ? forms.many : forms.one;
+    }
+    return n === 1 ? forms.one : (forms.other != null ? forms.other : forms.many);
+  }
+
+  // ---- Data-table resolvers (RU override → English table field) -------------
+  const _ruGroup = (g) => (I18N.locale === "ru" && RU[g]) ? RU[g] : null;
+  function tField(group, id, field, fallback) {
+    const g = _ruGroup(group); const e = g && g[id];
+    return (e && e[field] != null) ? e[field] : fallback;
+  }
+  function tFlat(group, id, fallback) {
+    const g = _ruGroup(group);
+    return (g && g[id] != null) ? g[id] : fallback;
+  }
+  const tItemName = (d) => d ? tField("item", d.id, "name", d.name) : "";
+  const tItemDesc = (d) => d ? tField("item", d.id, "desc", d.desc || "") : "";
+  const tPotionLabel = (id) => {
+    const d = getDef(id); const base = (d && d.potion && d.potion.label) || (d && d.name) || id;
+    return tField("item", id, "label", base);
+  };
+  const tRarityLabel = (r) => tFlat("rarity", r, (RARITY[r] || RARITY.normal).label);
+  const tSlotLabel = (slot) => tFlat("slot", (slot === "ring1" || slot === "ring2") ? "ring" : slot, (SLOT_META[slot] || {}).label || slot);
+  const tMaterialLabel = (id) => tFlat("material", id, (MATERIALS[id] || {}).label || id);
+  const tResourceLabel = (k) => tFlat("resource", k, (RESOURCE_KINDS[k] || {}).label || k);
+  const tRelicName = (id) => tField("relic", id, "name", (RELICS[id] || {}).name || id);
+  const tCastlePartName = (id) => tField("castlePart", id, "name", (CASTLE_PART_BY_ID[id] || {}).name || id);
+  const tCastlePartDesc = (id) => tField("castlePart", id, "desc", (CASTLE_PART_BY_ID[id] || {}).desc || "");
+  const tZoneName = (z) => z ? tFlat("zone", z.id, z.name) : "";
+  const tLocationName = (id) => tFlat("location", id, (LOCATION_BY_ID[id] || {}).name || id);
+  const tNpcName = (id) => tField("npc", id, "name", (NPC_BY_ID[id] || {}).name || id);
+  const tNpcIntro = (id) => tField("npc", id, "intro", (NPC_BY_ID[id] || {}).intro || "");
+  const tQuestTitle = (q) => tField("quest", q.id, "title", q.title);
+  const tQuestStory = (q) => tField("quest", q.id, "story", q.story);
+  const tQuestWhere = (q) => q.where ? tField("quest", q.id, "where", q.where) : "";
+  const tChapterTitle = (id) => tField("chapter", id, "title", (CHAPTER_BY_ID[id] || {}).title || id);
+  const tChapterBlurb = (id) => tField("chapter", id, "blurb", (CHAPTER_BY_ID[id] || {}).blurb || "");
+  const tWeatherLabel = (s) => tFlat("weather", s, (Weather.STATES[s] || {}).label || s);
+  const tDragonName = () => (I18N.locale === "ru" && RU.dragon) ? RU.dragon.name : "Ancient Dragon";
+  const _ruStory = (field) => (I18N.locale === "ru" && RU.story && RU.story[field] != null) ? RU.story[field] : null;
+  const tStoryTitle = () => _ruStory("title") || STORY.title;
+  const tStoryIntroTitle = () => _ruStory("introTitle") || STORY.intro.title;
+  const tStoryIntroText = () => _ruStory("introText") || STORY.intro.text;
+  const tStoryEndingTitle = () => _ruStory("endingTitle") || STORY.ending.title;
+  const tStoryEndingText = () => _ruStory("endingText") || STORY.ending.text;
+  // The lair-boss name comes from the zone table (English) with an RU override.
+  const tLairBossName = (zoneId) => {
+    const z = ZONE_BY_ID[zoneId]; const base = (z && z.boss) ? z.boss.name : t("obj.lairBoss");
+    return tFlat("lairBoss", zoneId, base);
+  };
+  const tLairBossIntro = (zoneId) => {
+    const z = ZONE_BY_ID[zoneId]; const base = (z && z.boss) ? z.boss.intro : "";
+    return tFlat("lairIntro", zoneId, base);
+  };
+  // A boss's display name in the current locale (dragon / lair override / archetype).
+  function bossDisplayName(boss) {
+    if (!boss) return "";
+    if (boss.isDragon) return tDragonName();
+    if (boss.lairZoneId) return tLairBossName(boss.lairZoneId);
+    if (boss.archId) return tFlat("boss", boss.archId, (BOSS_ARCH_BY_ID[boss.archId] || {}).name || boss.name);
+    return boss.name;
+  }
+
+  // ---- Live locale apply + persistence ----------------------------------
+  // Walk the static [data-i18n*] markup and refresh it. Feature-detected so the
+  // headless harness (no querySelectorAll) simply skips it.
+  function applyStaticI18n() {
+    if (typeof document === "undefined" || !document.querySelectorAll) return;
+    try {
+      document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.getAttribute("data-i18n")); });
+      document.querySelectorAll("[data-i18n-html]").forEach((el) => { el.innerHTML = t(el.getAttribute("data-i18n-html")); });
+      document.querySelectorAll("[data-i18n-title]").forEach((el) => { el.title = t(el.getAttribute("data-i18n-title")); });
+      document.querySelectorAll("[data-i18n-aria]").forEach((el) => { el.setAttribute("aria-label", t(el.getAttribute("data-i18n-aria"))); });
+    } catch (e) {}
+  }
+
+  // Re-render everything currently on screen in the active locale, then persist.
+  function applyLocale(loc, persist) {
+    if (loc && LOCALES[loc]) I18N.locale = loc;
+    if (persist !== false) localSet(LOCALE_KEY, I18N.locale);
+    try { if (typeof document !== "undefined" && document.documentElement) document.documentElement.lang = I18N.locale; } catch (e) {}
+    applyStaticI18n();
+    _syncLangButtons();
+    // Once the engine is ready the start hint reads "Ready!" — keep that on switch.
+    if (dom.loadHint && dom.startBtn && dom.startBtn.disabled === false) dom.loadHint.textContent = t("hint.ready");
+    // Dynamic HUD + any open overlay (all guarded — null before the scene boots).
+    if (typeof playerRef !== "undefined" && playerRef) {
+      recomputeStats(playerRef);            // rebuilds the weapon's display name
+      updateMaterialsHud(playerRef);
+      updateRelicHud(playerRef);
+      updatePotionBar(playerRef);
+    }
+    if (typeof stateRef !== "undefined" && stateRef) {
+      updateLocationHud(ZONE_BY_ID[stateRef.zoneId]);
+      updateCoins(stateRef);
+      const liveBoss = stateRef.dragon || stateRef.boss;
+      if (liveBoss && liveBoss.alive) showBossBar(liveBoss);
+    }
+    updateQuestTracker();
+    if (typeof Weather !== "undefined" && Weather.STATES[Weather.state]) updateWeatherHud(tWeatherLabel(Weather.state), Weather.STATES[Weather.state].icon);
+    if (typeof DayNight !== "undefined") updateClock(DayNight.t, DayNight.phase);
+    if (typeof Shop !== "undefined" && Shop.open) Shop.render();
+    if (typeof Inventory !== "undefined" && Inventory.open) Inventory.render();
+    if (typeof Anvil !== "undefined" && Anvil.open) Anvil.render();
+    if (typeof Crafting !== "undefined" && Crafting.open) Crafting.render();
+    if (typeof CastleUI !== "undefined" && CastleUI.open) CastleUI.render();
+    if (typeof QuestLog !== "undefined" && QuestLog.open) QuestLog.render();
+    if (typeof Dialogue !== "undefined" && Dialogue.open && Dialogue.npc) Dialogue.render();
+    if (typeof Pause !== "undefined" && typeof paused !== "undefined" && paused) Pause.refreshTexts();
+    if (typeof Music !== "undefined" && dom.musicBtn) dom.musicBtn.title = t(Music.on ? "btnTitle.muteMusic" : "btnTitle.playMusic");
+    if (typeof Fullscreen !== "undefined" && Fullscreen.sync) Fullscreen.sync();
+  }
+
+  // Highlight the active language in both selectors (start screen + pause).
+  function _syncLangButtons() {
+    const set = (el, on) => { if (el && el.classList) el.classList.toggle("active", on); };
+    set(dom.langEn, I18N.locale === "en"); set(dom.langRu, I18N.locale === "ru");
+    set(dom.langEnPause, I18N.locale === "en"); set(dom.langRuPause, I18N.locale === "ru");
+  }
+
   // A monotonically increasing id so inventory/equipment entries are distinct
   // even when two of the same item are owned.
   let _instSeq = 1;
@@ -732,9 +1519,9 @@
     const m1 = i1 ? enhanceMult(w1, instLevel(i1)) : 1;
     const m2 = i2 ? enhanceMult(w2, instLevel(i2)) : 1;
     let prof = null, name = null;
-    if (w1 && w1.weapon) { prof = cloneWeapon(w1.weapon); prof.damage *= m1; name = enhanceName(w1.name, instLevel(i1)); }
-    else if (w2 && w2.weapon) { prof = cloneWeapon(w2.weapon); prof.damage *= m2; name = enhanceName(w2.name, instLevel(i2)); }
-    if (!prof) { prof = cloneWeapon(FISTS); name = "Fists"; }
+    if (w1 && w1.weapon) { prof = cloneWeapon(w1.weapon); prof.damage *= m1; name = enhanceName(tItemName(w1), instLevel(i1)); }
+    else if (w2 && w2.weapon) { prof = cloneWeapon(w2.weapon); prof.damage *= m2; name = enhanceName(tItemName(w2), instLevel(i2)); }
+    if (!prof) { prof = cloneWeapon(FISTS); name = tItemName(FISTS); }
 
     // Dual-wielding two one-handed weapons: faster, with bonus power/shots.
     const dual = w1 && w2 && w1.weapon && w2.weapon;
@@ -742,7 +1529,7 @@
       prof.cooldown *= 0.8;
       prof.damage += (w2.weapon.damage || 0) * 0.5 * m2;
       if (prof.ranged && w2.weapon.ranged) prof.multishot = (prof.multishot || 1) + (w2.weapon.multishot || 1);
-      name = `${enhanceName(w1.name, instLevel(i1))} + ${enhanceName(w2.name, instLevel(i2))}`;
+      name = `${enhanceName(tItemName(w1), instLevel(i1))} + ${enhanceName(tItemName(w2), instLevel(i2))}`;
     }
 
     prof.damage += bonus.damage;
@@ -858,13 +1645,13 @@
     const def = getDef(s.id);
     const p = def.potion || {};
     if (p.heal) {
-      if (player.health >= player.maxHealth) { toast("Already at full health"); return false; }
+      if (player.health >= player.maxHealth) { toast(t("toast.fullHealth")); return false; }
       player.health = Math.min(player.maxHealth, player.health + p.heal);
       updateHealthBar(player.health);
-      toast(`${def.icon} +${p.heal} health`);
+      toast(t("toast.potionHeal", { icon: def.icon, heal: p.heal }));
     } else if (p.buff) {
       applyBuff(player, { id: s.id, label: p.label || def.name, stats: p.buff, time: p.time || 12 });
-      toast(`${def.icon} ${p.label || def.name}!`);
+      toast(t("toast.potionBuff", { icon: def.icon, label: tPotionLabel(s.id) }));
     }
     if (typeof Sfx !== "undefined") Sfx.play("potion");
     s.count--;
@@ -929,17 +1716,17 @@
   function craftRecipe(player, recipe) {
     const def = getDef(recipe.out);
     if (!def) return false;
-    if (!hasMaterials(player, recipe.mats)) { toast("Not enough materials"); Sfx.play("error"); return false; }
+    if (!hasMaterials(player, recipe.mats)) { toast(t("toast.noMaterials")); Sfx.play("error"); return false; }
     if (def.type === "potion") {
-      if (!potionAdd(player, recipe.out)) { toast("Potion belt full (3 kinds)"); Sfx.play("error"); return false; }
+      if (!potionAdd(player, recipe.out)) { toast(t("toast.beltFull")); Sfx.play("error"); return false; }
     } else {
-      if (player.inventory.length >= player.invCap) { toast("Bag full"); Sfx.play("error"); return false; }
+      if (player.inventory.length >= player.invCap) { toast(t("toast.bagFull")); Sfx.play("error"); return false; }
       invAdd(player, makeItem(recipe.out));
     }
     spendMaterials(player, recipe.mats);
     updatePotionBar(player);
     Sfx.play("enhance");
-    toast(`🛠️ Crafted ${def.icon} ${def.name}`);
+    toast(t("toast.crafted", { icon: def.icon, name: tItemName(def) }));
     Quests.onCraft(player, recipe.out);
     return true;
   }
@@ -1006,8 +1793,7 @@
     prompt: document.getElementById("prompt"),
     toast: document.getElementById("toast"),
     over: document.getElementById("over"),
-    finalScore: document.getElementById("finalScore"),
-    finalWave: document.getElementById("finalWave"),
+    overText: document.getElementById("overText"),
     replayBtn: document.getElementById("replayBtn"),
     touch: document.getElementById("touch"),
     joystick: document.getElementById("joystick"),
@@ -1025,8 +1811,12 @@
     saveBtn: document.getElementById("saveBtn"),
     restartBtn: document.getElementById("restartBtn"),
     exitBtn: document.getElementById("exitBtn"),
-    pauseWave: document.getElementById("pauseWave"),
-    pauseScore: document.getElementById("pauseScore"),
+    pauseStats: document.getElementById("pauseStats"),
+    // ---- Language selectors (start screen + pause settings) ----
+    langEn: document.getElementById("langEn"),
+    langRu: document.getElementById("langRu"),
+    langEnPause: document.getElementById("langEnPause"),
+    langRuPause: document.getElementById("langRuPause"),
     confirmDialog: document.getElementById("confirmDialog"),
     confirmText: document.getElementById("confirmText"),
     confirmYes: document.getElementById("confirmYes"),
@@ -1041,8 +1831,7 @@
     questBtn: document.getElementById("questBtn"),
     // ---- Victory screen ----
     win: document.getElementById("win"),
-    winScore: document.getElementById("winScore"),
-    winWave: document.getElementById("winWave"),
+    winText: document.getElementById("winText"),
     winStory: document.getElementById("winStory"),
     winReplayBtn: document.getElementById("winReplayBtn"),
     // ---- NPC dialogue overlay ----
@@ -1191,7 +1980,7 @@
       this.current = best;
       if (best) {
         dom.prompt.classList.remove("hidden");
-        dom.prompt.innerHTML = isTouch ? best.label : `${best.label} · <b>E</b>`;
+        dom.prompt.innerHTML = isTouch ? best.label : t("prompt.withKey", { label: best.label });
       } else dom.prompt.classList.add("hidden");
     }
     trigger() { if (this.current && this.current.onInteract) this.current.onInteract(this.current); }
@@ -2219,7 +3008,7 @@
           state.waveTotal++;
         }
         Sfx.play("boss_summon");
-        toast("👹 The Tyrant summons minions!");
+        toast(t("toast.summonMinions"));
       } else if (id === "stomper") {
         this.stompRange = 6 + this.cycle * 0.6;
         this.shockT = 0.5;
@@ -2244,7 +3033,7 @@
           }));
         }
         Sfx.play("boss_cast");
-        toast("💣 Incoming bombs!");
+        toast(t("toast.incomingBombs"));
       } else if (id === "splitter") {
         // Shed a knot of minions, splitting off pieces of itself.
         const n = 2 + Math.min(4, this.cycle);
@@ -2255,7 +3044,7 @@
           state.waveTotal++;
         }
         Sfx.play("boss_summon");
-        toast("🦠 The Hydra splits!");
+        toast(t("toast.hydraSplits"));
       }
     }
 
@@ -2418,7 +3207,7 @@
       this._build(scene, shadow);
 
       this.it = new Interactable(root, {
-        label: "Shop",
+        label: t("label.shop"),
         range: 3.4,
         onInteract: () => onOpen(),
       });
@@ -2503,7 +3292,7 @@
       this.bob = 0;
       this._build(scene, shadow);
 
-      this.it = new Interactable(root, { label: "Blacksmith", range: 3.4, onInteract: () => onOpen() });
+      this.it = new Interactable(root, { label: t("label.blacksmith"), range: 3.4, onInteract: () => onOpen() });
       this.it.enabled = false;
       interaction.register(this.it);
       root.setEnabled(false);
@@ -2574,7 +3363,7 @@
       root.position.copyFrom(pos); this.root = root;
       this._build(scene, shadow);
       this.it = new Interactable(root, {
-        label: this.def.label, range: CONFIG.gatherRange,
+        label: tResourceLabel(this.kind), range: CONFIG.gatherRange,
         onInteract: () => this.harvest(),
       });
       interaction.register(this.it);
@@ -2618,7 +3407,7 @@
       addMaterial(this.player, this.def.mat, n);
       spawnImpact(this.state, this.root.position, "#cfe0b0", { y: 0.8, count: 7, spread: 3 });
       Sfx.play("hit");
-      toast(`${MATERIALS[this.def.mat].icon} +${n} ${MATERIALS[this.def.mat].label}`);
+      toast(t("toast.gathered", { icon: MATERIALS[this.def.mat].icon, n, label: tMaterialLabel(this.def.mat) }));
       this.respawn = this.def.respawn;
       this.body.setEnabled(false);
       this.it.enabled = false;
@@ -2649,7 +3438,7 @@
       // Offset a little so the NPC stands beside its landmark, not on it.
       root.position.set(loc.x + 3, 0, loc.z + 3); this.root = root;
       this._build(scene, shadow, loc.color);
-      this.it = new Interactable(root, { label: "Talk to " + npcData.name, range: 3.6, onInteract: () => onTalk(this) });
+      this.it = new Interactable(root, { label: t("label.talkTo", { name: tNpcName(npcData.id) }), range: 3.6, onInteract: () => onTalk(this) });
       interaction.register(this.it);
     }
 
@@ -2686,7 +3475,8 @@
       const col = st === "turnin" ? "#5be0a0" : st === "new" ? "#ffd34e" : st === "active" ? "#6cc6ff" : "#555a66";
       try { this.markMat.emissiveColor = BABYLON.Color3.FromHexString(col).scale(0.9); this.markMat.diffuseColor = BABYLON.Color3.FromHexString(col); } catch (e) {}
       this.mark.setEnabled(st !== "done");
-      this.it.label = st === "turnin" ? `✓ ${this.data.name}: turn in` : st === "new" ? `❗ ${this.data.name}: new quest` : `Talk to ${this.data.name}`;
+      const nm = tNpcName(this.data.id);
+      this.it.label = st === "turnin" ? t("label.turnIn", { name: nm }) : st === "new" ? t("label.newQuest", { name: nm }) : t("label.talkTo", { name: nm });
     }
   }
 
@@ -2706,7 +3496,7 @@
       root.position.set(loc.x, 0, loc.z + 8); this.root = root;
       this.parts = {};
       this._build(scene, shadow);
-      this.it = new Interactable(root, { label: "🏰 Build castle", range: 6, onInteract: () => CastleUI.openPanel() });
+      this.it = new Interactable(root, { label: t("label.buildCastle"), range: 6, onInteract: () => CastleUI.openPanel() });
       interaction.register(this.it);
     }
 
@@ -2779,7 +3569,7 @@
       if (n) { n.setEnabled(true); n.scaling.setAll(0.01); n._pop = 1; }
       spawnImpact(this.state, this.root.position, "#ffd34e", { y: 4, count: 16, spread: 6, up: 4 });
       Sfx.play("enhance");
-      toast(`🏰 ${part.name} raised!`);
+      toast(t("toast.partRaised", { part: tCastlePartName(part.id) }));
       Quests.onBuild(part.id); // advance any "build this part" mission
       if (this.built.length >= CASTLE_PARTS.length) this._complete();
       return true;
@@ -2807,8 +3597,8 @@
     }
 
     _complete() {
-      toast("🐉 The castle is complete... the DRAGON awakens!");
-      bannerWave(this.state.wave, 0, "The Dragon");
+      toast(t("toast.castleComplete"));
+      bannerWave(this.state.wave, 0, t("banner.theDragon"));
       // Summon the dragon a little in front of the castle.
       const pos = new BABYLON.Vector3(this.root.position.x, 0, this.root.position.z - 16);
       const dragon = new Dragon(this.scene, this.shadow, pos, this.state);
@@ -2827,7 +3617,10 @@
         if (n._pop) { const s = lerp(n.scaling.x, 1, 0.15); n.scaling.setAll(s); if (s > 0.99) { n.scaling.setAll(1); n._pop = 0; } }
       }
       const next = this.nextPart();
-      this.it.label = next ? (this.canBuild(next) ? `🏰 Build ${next.name}` : `🏰 Castle (need ${next.icon} ${next.name})`) : "🏰 Castle complete";
+      this.it.label = next
+        ? (this.canBuild(next) ? t("label.buildPart", { part: tCastlePartName(next.id) })
+                               : t("label.castleNeed", { icon: next.icon, part: tCastlePartName(next.id) }))
+        : t("label.castleComplete");
     }
   }
 
@@ -2923,7 +3716,7 @@
 
       if (this.actionTimer <= 0) {
         if (rng() < 0.6) this._breatheFire(playerPos, dir, state);
-        else { this.swoop = 1.1; Sfx.play("boss_charge"); toast("🐉 The dragon dives!"); }
+        else { this.swoop = 1.1; Sfx.play("boss_charge"); toast(t("toast.dragonDives")); }
         this.actionTimer = 3.2;
       }
       if (this.glow) this.glow.intensity = 0.9 + Math.abs(Math.sin(this.bob * 3)) * 0.6;
@@ -2932,7 +3725,7 @@
 
     _breatheFire(playerPos, dir, state) {
       Sfx.play("boss_cast");
-      toast("🔥 Dragon's breath!");
+      toast(t("toast.dragonBreath"));
       const origin = this.fireTip.getAbsolutePosition ? this.fireTip.getAbsolutePosition() : this.root.position;
       const base = Math.atan2(dir.x, dir.z);
       for (let i = 0; i < 7; i++) {
@@ -3614,7 +4407,7 @@
       if (!this.STATES[s]) s = "clear";
       this.state = s;
       const st = this.STATES[s];
-      updateWeatherHud(st.label, st.icon);
+      updateWeatherHud(tWeatherLabel(s), st.icon);
       if (this.rain) {
         const on = st.rain > 0;
         try {
@@ -3723,7 +4516,7 @@
     const artifact = buildArtifact(scene, world.shadow, pos, color);
     artifact._color = color;
     const it = new Interactable(artifact.root, {
-      label: "Collect artifact",
+      label: t("label.collectArtifact"),
       onInteract: (self) => {
         if (player.busy) return;
         self.enabled = false;
@@ -3749,8 +4542,8 @@
           state.waveStats.coins += bonus;
           updateCoins(state);
           Sfx.play("artifact");
-          const extra = (healed > 0 ? ` · +${Math.round(healed)} ❤` : "") + ` · 🪙 +${bonus}`;
-          toast(`Artifact! +${CONFIG.scorePerArtifact}${extra}`);
+          const extra = (healed > 0 ? t("toast.artifactHeal", { n: Math.round(healed) }) : "") + t("toast.artifactCoin", { n: bonus });
+          toast(t("toast.artifact", { score: CONFIG.scorePerArtifact, extra }));
         });
       },
     });
@@ -3872,25 +4665,25 @@
     const s = def.stats || {};
     if (def.potion) {
       const p = def.potion;
-      if (p.heal) parts.push(`❤️ +${p.heal} health`);
-      if (p.buff) parts.push(`✨ ${statSummary({ stats: p.buff })} (${p.time}s)`);
-      return parts.join(" · ") || def.desc || "";
+      if (p.heal) parts.push(t("stat.healthRestore", { n: p.heal }));
+      if (p.buff) parts.push(t("stat.buffWrap", { inner: statSummary({ stats: p.buff }), t: p.time }));
+      return parts.join(" · ") || (def.id ? tItemDesc(def) : "");
     }
     if (def.weapon) {
       const w = def.weapon;
-      parts.push(w.ranged ? (w.shape === "arrow" ? "🏹 ranged" : "🔮 ranged") : "⚔️ melee");
-      parts.push(`${w.damage} dmg`);
-      if (w.multishot > 1) parts.push(`×${w.multishot}`);
-      if (w.pierce) parts.push(`pierce ${w.pierce}`);
-      parts.push(def.hands === 2 ? "2-handed" : "1-handed");
+      parts.push(w.ranged ? (w.shape === "arrow" ? t("stat.rangedArrow") : t("stat.rangedBolt")) : t("stat.melee"));
+      parts.push(t("stat.dmg", { n: w.damage }));
+      if (w.multishot > 1) parts.push(t("stat.multishot", { n: w.multishot }));
+      if (w.pierce) parts.push(t("stat.pierce", { n: w.pierce }));
+      parts.push(def.hands === 2 ? t("stat.twoHanded") : t("stat.oneHanded"));
     }
-    if (s.maxHealth) parts.push(`+${s.maxHealth} HP`);
-    if (s.damageReduction) parts.push(`+${Math.round(s.damageReduction * 100)}% resist`);
-    if (s.moveSpeed) parts.push(`+${s.moveSpeed} speed`);
-    if (s.damage) parts.push(`+${s.damage} dmg`);
-    if (s.haste) parts.push(`+${Math.round((1 - s.haste) * 100)}% haste`);
-    if (s.lifesteal) parts.push(`+${s.lifesteal} lifesteal`);
-    if (s.coinRange) parts.push("coin magnet");
+    if (s.maxHealth) parts.push(t("stat.hp", { n: s.maxHealth }));
+    if (s.damageReduction) parts.push(t("stat.resist", { n: Math.round(s.damageReduction * 100) }));
+    if (s.moveSpeed) parts.push(t("stat.speed", { n: s.moveSpeed }));
+    if (s.damage) parts.push(t("stat.damageBonus", { n: s.damage }));
+    if (s.haste) parts.push(t("stat.haste", { n: Math.round((1 - s.haste) * 100) }));
+    if (s.lifesteal) parts.push(t("stat.lifestealBonus", { n: s.lifesteal }));
+    if (s.coinRange) parts.push(t("stat.coinMagnet"));
     return parts.join(" · ");
   }
 
@@ -3902,8 +4695,8 @@
     const lvl = level ? ` <span class="lvl">+${level}</span>` : "";
     row.innerHTML =
       `<div class="icon">${def.icon}</div>` +
-      `<div class="info"><div class="name" style="color:${rar.color}">${def.name}${lvl}${tag}</div>` +
-      `<div class="desc">${statSummary(def) || def.desc || ""}</div></div>`;
+      `<div class="info"><div class="name" style="color:${rar.color}">${tItemName(def)}${lvl}${tag}</div>` +
+      `<div class="desc">${statSummary(def) || tItemDesc(def)}</div></div>`;
     const btn = document.createElement("button");
     btn.className = btnClass; btn.textContent = btnLabel; btn.disabled = !!disabled;
     if (!disabled && onClick) btn.addEventListener("click", onClick);
@@ -3956,24 +4749,24 @@
 
     buy(def, cost) {
       cost = cost == null ? def.cost : cost;
-      if (this.state.coins < cost) { toast("Not enough coins"); Sfx.play("error"); return; }
-      if (this.player.inventory.length >= this.player.invCap) { toast("Bag full"); Sfx.play("error"); return; }
+      if (this.state.coins < cost) { toast(t("toast.noCoins")); Sfx.play("error"); return; }
+      if (this.player.inventory.length >= this.player.invCap) { toast(t("toast.bagFull")); Sfx.play("error"); return; }
       this.state.coins -= cost;
       invAdd(this.player, makeItem(def.id));
       updateCoins(this.state);
       Sfx.play("buy");
-      toast(`${def.icon} Bought ${def.name}`);
+      toast(t("toast.bought", { icon: def.icon, name: tItemName(def) }));
       this.render();
     },
     // Potions go onto the 3-slot belt, not the bag.
     buyPotion(def) {
-      if (this.state.coins < def.cost) { toast("Not enough coins"); Sfx.play("error"); return; }
-      if (!potionAdd(this.player, def.id)) { toast("Potion belt full (3 kinds)"); Sfx.play("error"); return; }
+      if (this.state.coins < def.cost) { toast(t("toast.noCoins")); Sfx.play("error"); return; }
+      if (!potionAdd(this.player, def.id)) { toast(t("toast.beltFull")); Sfx.play("error"); return; }
       this.state.coins -= def.cost;
       updateCoins(this.state);
       updatePotionBar(this.player);
       Sfx.play("buy");
-      toast(`${def.icon} Bought ${def.name}`);
+      toast(t("toast.bought", { icon: def.icon, name: tItemName(def) }));
       this.render();
     },
     sell(inst) {
@@ -3984,7 +4777,7 @@
       this.state.coins += worth;
       updateCoins(this.state);
       Sfx.play("coin");
-      toast(`Sold ${enhanceName(def.name, instLevel(inst))} for 🪙 ${worth}`);
+      toast(t("toast.sold", { name: enhanceName(tItemName(def), instLevel(inst)), worth }));
       this.render();
     },
 
@@ -3998,44 +4791,44 @@
       const full = () => this.player.inventory.length >= this.player.invCap;
 
       if (this.tab === "buy") {
-        this._heading("⚔️ Gear");
+        this._heading(t("shop.gear"));
         for (const id of SHOP_STOCK) {
           const def = getDef(id);
-          const card = itemCard(def, `🪙 ${def.cost}`, "buy-btn", this.state.coins < def.cost || full(),
+          const card = itemCard(def, t("btn.buyCost", { cost: def.cost }), "buy-btn", this.state.coins < def.cost || full(),
             () => this.buy(def));
           dom.shopItems.appendChild(card);
         }
-        this._heading("🧪 Potions");
+        this._heading(t("shop.potions"));
         for (const id of POTION_STOCK) {
           const def = getDef(id);
-          const card = itemCard(def, `🪙 ${def.cost}`, "buy-btn potion-buy-btn", this.state.coins < def.cost,
+          const card = itemCard(def, t("btn.buyCost", { cost: def.cost }), "buy-btn potion-buy-btn", this.state.coins < def.cost,
             () => this.buyPotion(def));
           dom.shopItems.appendChild(card);
         }
       } else if (this.tab === "rare") {
         const note = document.createElement("div");
         note.className = "shop-note";
-        note.textContent = "✨ Rare wares — a fresh rotation every wave.";
+        note.textContent = t("shop.rareNote");
         dom.shopItems.appendChild(note);
         for (const id of featuredForWave(this.state.wave)) {
           const def = getDef(id);
           const cost = featuredCost(def);
-          const card = itemCard(def, `🪙 ${cost}`, "buy-btn featured-btn", this.state.coins < cost || full(),
-            () => this.buy(def, cost), (RARITY[def.rarity] || RARITY.normal).label.toUpperCase());
+          const card = itemCard(def, t("btn.buyCost", { cost }), "buy-btn featured-btn", this.state.coins < cost || full(),
+            () => this.buy(def, cost), tRarityLabel(def.rarity).toUpperCase());
           dom.shopItems.appendChild(card);
         }
       } else {
         if (this.player.inventory.length === 0) {
           const empty = document.createElement("div");
           empty.className = "shop-empty";
-          empty.textContent = "Your bag is empty. Unequip gear in your inventory (🎒) to sell it.";
+          empty.textContent = t("shop.sellEmpty");
           dom.shopItems.appendChild(empty);
         }
         for (const inst of this.player.inventory.slice()) {
           const def = getDef(inst.id);
           const worth = def.value + Math.round(def.value * 0.5 * instLevel(inst));
-          const card = itemCard(def, `Sell 🪙 ${worth}`, "buy-btn sell-btn", false,
-            () => this.sell(inst), def.rarity !== "normal" ? (RARITY[def.rarity] || RARITY.normal).label.toUpperCase() : "", instLevel(inst));
+          const card = itemCard(def, t("btn.sellWorth", { worth }), "buy-btn sell-btn", false,
+            () => this.sell(inst), def.rarity !== "normal" ? tRarityLabel(def.rarity).toUpperCase() : "", instLevel(inst));
           dom.shopItems.appendChild(card);
         }
       }
@@ -4087,19 +4880,20 @@
         const occ = p.equipment[slot];
         const cell = document.createElement("div");
         cell.className = "equip-slot";
+        const slotLabel = tSlotLabel(slot);
         if (occ === TWO_HANDED) {
           cell.classList.add("filled", "two-handed");
-          cell.innerHTML = `<div class="slot-label">${meta.label}</div><div class="slot-item">⟵ two-handed</div>`;
+          cell.innerHTML = `<div class="slot-label">${slotLabel}</div><div class="slot-item">${t("inv.twoHanded")}</div>`;
         } else if (occ) {
           const def = getDef(occ.id);
           const rar = RARITY[def.rarity] || RARITY.normal;
           cell.classList.add("filled");
-          cell.innerHTML = `<div class="slot-label">${meta.label}</div>` +
-            `<div class="slot-item" style="color:${rar.color}">${def.icon} ${enhanceName(def.name, instLevel(occ))}</div>`;
-          cell.title = "Unequip " + def.name;
+          cell.innerHTML = `<div class="slot-label">${slotLabel}</div>` +
+            `<div class="slot-item" style="color:${rar.color}">${def.icon} ${enhanceName(tItemName(def), instLevel(occ))}</div>`;
+          cell.title = t("inv.unequipTitle", { name: tItemName(def) });
           cell.addEventListener("click", () => this.unequip(slot));
         } else {
-          cell.innerHTML = `<div class="slot-label">${meta.label}</div><div class="slot-empty">${meta.icon} empty</div>`;
+          cell.innerHTML = `<div class="slot-label">${slotLabel}</div><div class="slot-empty">${t("inv.empty", { icon: meta.icon })}</div>`;
         }
         dom.invEquip.appendChild(cell);
       }
@@ -4107,29 +4901,29 @@
       // ---- Live stat block ----
       const w = p.weapon;
       dom.invStats.innerHTML =
-        `<div class="stat-row"><span>❤ Max health</span><b>${Math.round(p.maxHealth)}</b></div>` +
-        `<div class="stat-row"><span>🛡️ Resist</span><b>${Math.round(p.damageReduction * 100)}%</b></div>` +
-        `<div class="stat-row"><span>👟 Speed</span><b>${p.speed.toFixed(1)}</b></div>` +
-        `<div class="stat-row"><span>🩸 Lifesteal</span><b>${p.lifesteal}</b></div>` +
-        `<div class="stat-row"><span>⚔️ Weapon</span><b>${w.name}</b></div>` +
-        `<div class="stat-row"><span>💥 Damage</span><b>${(+w.damage.toFixed(1))}${w.multishot > 1 ? " ×" + w.multishot : ""}</b></div>`;
+        `<div class="stat-row"><span>${t("inv.maxHealth")}</span><b>${Math.round(p.maxHealth)}</b></div>` +
+        `<div class="stat-row"><span>${t("inv.resist")}</span><b>${Math.round(p.damageReduction * 100)}%</b></div>` +
+        `<div class="stat-row"><span>${t("inv.speed")}</span><b>${p.speed.toFixed(1)}</b></div>` +
+        `<div class="stat-row"><span>${t("inv.lifesteal")}</span><b>${p.lifesteal}</b></div>` +
+        `<div class="stat-row"><span>${t("inv.weapon")}</span><b>${w.name}</b></div>` +
+        `<div class="stat-row"><span>${t("inv.damage")}</span><b>${(+w.damage.toFixed(1))}${w.multishot > 1 ? " ×" + w.multishot : ""}</b></div>`;
 
       // ---- Bag ----
       dom.invBag.innerHTML = "";
       const bagTitle = document.createElement("div");
       bagTitle.className = "bag-title";
-      bagTitle.textContent = `🎒 Bag (${p.inventory.length}/${p.invCap})`;
+      bagTitle.textContent = t("inv.bag", { n: p.inventory.length, cap: p.invCap });
       dom.invBag.appendChild(bagTitle);
       if (p.inventory.length === 0) {
         const empty = document.createElement("div");
-        empty.className = "shop-empty"; empty.textContent = "Empty — buy gear from the merchant or beat a boss for rare loot.";
+        empty.className = "shop-empty"; empty.textContent = t("inv.bagEmpty");
         dom.invBag.appendChild(empty);
       }
       for (const inst of p.inventory.slice()) {
         const def = getDef(inst.id);
-        const card = itemCard(def, "Equip", "buy-btn equip-btn", false,
+        const card = itemCard(def, t("btn.equip"), "buy-btn equip-btn", false,
           () => this.equip(inst),
-          def.rarity !== "normal" ? (RARITY[def.rarity] || RARITY.normal).label.toUpperCase() : "",
+          def.rarity !== "normal" ? tRarityLabel(def.rarity).toUpperCase() : "",
           instLevel(inst));
         dom.invBag.appendChild(card);
       }
@@ -4143,15 +4937,15 @@
     const def = getDef(inst.id);
     const level = instLevel(inst);
     const max = enhanceRule(def).max;
-    if (level >= max) { toast("Already at max enhancement"); Sfx.play("error"); return false; }
+    if (level >= max) { toast(t("toast.maxEnhance")); Sfx.play("error"); return false; }
     const cost = enhanceCost(def, level);
-    if (state.coins < cost) { toast("Not enough coins"); Sfx.play("error"); return false; }
+    if (state.coins < cost) { toast(t("toast.noCoins")); Sfx.play("error"); return false; }
     state.coins -= cost;
     inst.level = level + 1;
     updateCoins(state);
     recomputeStats(player);          // a held/worn item's boost takes effect now
     Sfx.play("enhance");
-    toast(`🔨 ${enhanceName(def.name, inst.level)} forged!`);
+    toast(t("toast.forged", { name: enhanceName(tItemName(def), inst.level) }));
     return true;
   }
 
@@ -4180,9 +4974,9 @@
       const p = this.player, out = [];
       for (const slot of EQUIP_SLOTS) {
         const occ = p.equipment[slot];
-        if (occ && occ !== TWO_HANDED && isGear(occ.id)) out.push({ inst: occ, where: SLOT_META[slot].label });
+        if (occ && occ !== TWO_HANDED && isGear(occ.id)) out.push({ inst: occ, where: tSlotLabel(slot) });
       }
-      for (const inst of p.inventory) if (isGear(inst.id)) out.push({ inst, where: "Bag" });
+      for (const inst of p.inventory) if (isGear(inst.id)) out.push({ inst, where: t("anvil.bag") });
       return out;
     },
 
@@ -4195,7 +4989,7 @@
       const items = this._items();
       if (items.length === 0) {
         const empty = document.createElement("div");
-        empty.className = "shop-empty"; empty.textContent = "No gear to enhance. Buy or loot some weapons and armour first.";
+        empty.className = "shop-empty"; empty.textContent = t("anvil.empty");
         dom.anvilItems.appendChild(empty);
         return;
       }
@@ -4205,7 +4999,7 @@
         const max = enhanceRule(def).max;
         const atMax = level >= max;
         const cost = atMax ? 0 : enhanceCost(def, level);
-        const label = atMax ? "MAX" : `🪙 ${cost}`;
+        const label = atMax ? t("anvil.max") : t("btn.buyCost", { cost });
         const card = itemCard(def, label, "buy-btn enhance-anvil-btn", atMax || this.state.coins < cost,
           () => this.enhance(inst), `${where} · ${level}/${max}`, level);
         dom.anvilItems.appendChild(card);
@@ -4251,7 +5045,7 @@
       this.active.push(id);
       this.acceptKills[id] = this.state.totalKills;
       Sfx.play("buy");
-      toast(`📜 ${q.line === "main" ? "Mission" : "Side quest"}: ${q.title}`);
+      toast(t("toast.questAccepted", { kind: q.line === "main" ? t("quest.kindMission") : t("quest.kindSide"), title: tQuestTitle(q) }));
       updateQuestTracker(this);
       return true;
     },
@@ -4282,13 +5076,15 @@
     // A one-line objective description for the dialogue, log + HUD tracker.
     objectiveText(q) {
       const o = q.obj, p = this.progress(q), done = p.have >= p.need;
-      if (o.type === "hunt") return `Defeat sweets — ${p.have}/${p.need}`;
-      if (o.type === "gather") { const m = MATERIALS[o.target] || {}; return `Gather ${m.icon || ""} ${m.label || o.target} — ${p.have}/${p.need}`; }
-      if (o.type === "reach") { const l = LOCATION_BY_ID[o.target] || ZONE_BY_ID[o.target] || {}; return `Reach ${l.name || o.target}` + (done ? " ✓" : ""); }
-      if (o.type === "talk") { const n = NPC_BY_ID[o.target] || {}; return `Speak with ${n.icon || ""} ${n.name || o.target}` + (done ? " ✓" : ""); }
-      if (o.type === "defeat_boss") { const z = ZONE_BY_ID[o.target] || {}; const bn = z.boss ? z.boss.name : "the lair boss"; return `Defeat 👑 ${bn} in ${z.name || o.target}` + (done ? " ✓" : ""); }
-      if (o.type === "build") { const part = CASTLE_PART_BY_ID[o.target]; return `Raise the ${part ? part.name : o.target} at 🏰 Castle Hill` + (done ? " ✓" : ""); }
-      if (o.type === "defeat_dragon") return `Slay the 🐉 Ancient Dragon` + (done ? " ✓" : "");
+      const dm = done ? t("obj.doneMark") : "";
+      const placeName = (id) => LOCATION_BY_ID[id] ? tLocationName(id) : (ZONE_BY_ID[id] ? tZoneName(ZONE_BY_ID[id]) : id);
+      if (o.type === "hunt") return t("obj.hunt", { have: p.have, need: p.need });
+      if (o.type === "gather") { const m = MATERIALS[o.target] || {}; return t("obj.gather", { icon: m.icon || "", label: tMaterialLabel(o.target), have: p.have, need: p.need }); }
+      if (o.type === "reach") return t("obj.reach", { name: placeName(o.target) }) + dm;
+      if (o.type === "talk") { const n = NPC_BY_ID[o.target] || {}; return t("obj.talk", { icon: n.icon || "", name: tNpcName(o.target) }) + dm; }
+      if (o.type === "defeat_boss") { const z = ZONE_BY_ID[o.target] || {}; return t("obj.defeatBoss", { boss: tLairBossName(o.target), zone: tZoneName(z) }) + dm; }
+      if (o.type === "build") return t("obj.build", { part: tCastlePartName(o.target) }) + dm;
+      if (o.type === "defeat_dragon") return t("obj.defeatDragon") + dm;
       return "";
     },
 
@@ -4306,9 +5102,9 @@
       const r = q.reward || {};
       const bits = [];
       if (r.coins) bits.push(`🪙 ${r.coins}`);
-      if (r.item && getDef(r.item)) bits.push(`${getDef(r.item).icon} ${getDef(r.item).name}`);
-      if (r.relic && RELICS[r.relic]) bits.push(`${RELICS[r.relic].icon} ${RELICS[r.relic].name}`);
-      toast(`✅ ${q.title} complete! ${bits.join(" · ")}`);
+      if (r.item && getDef(r.item)) bits.push(`${getDef(r.item).icon} ${tItemName(getDef(r.item))}`);
+      if (r.relic && RELICS[r.relic]) bits.push(`${RELICS[r.relic].icon} ${tRelicName(r.relic)}`);
+      toast(t("toast.questComplete", { title: tQuestTitle(q), bits: bits.join(" · ") }));
       updateQuestTracker(this);
       if (Inventory.open) Inventory.render();
       Story.afterTurnIn(q);
@@ -4324,7 +5120,8 @@
         this.reached[locId] = true;
         // Announce only when an active reach mission was just satisfied.
         if (this.active.some((id) => { const q = QUEST_BY_ID[id]; return q && q.obj.type === "reach" && q.obj.target === locId; })) {
-          toast(`📍 Reached ${(LOCATION_BY_ID[locId] || ZONE_BY_ID[locId] || {}).name || locId}`);
+          const nm = LOCATION_BY_ID[locId] ? tLocationName(locId) : (ZONE_BY_ID[locId] ? tZoneName(ZONE_BY_ID[locId]) : locId);
+          toast(t("toast.reached", { name: nm }));
         }
       }
       updateQuestTracker(this);
@@ -4411,29 +5208,28 @@
     },
 
     // ---- Presentation helpers ----
-    giverLabel(npcId) { const n = NPC_BY_ID[npcId] || {}; return `${n.icon || ""} ${n.name || npcId}`; },
-    npcPlace(npcId) { const n = NPC_BY_ID[npcId]; const l = n && LOCATION_BY_ID[n.loc]; return l ? l.name : "Meadowgate"; },
-    _whereSuffix(m) { return m.where ? ` · ${m.where}` : ""; },
+    giverLabel(npcId) { const n = NPC_BY_ID[npcId] || {}; return `${n.icon || ""} ${tNpcName(npcId)}`; },
+    npcPlace(npcId) { const n = NPC_BY_ID[npcId]; const l = n && LOCATION_BY_ID[n.loc]; return l ? tLocationName(n.loc) : t("place.meadowgate"); },
+    _whereSuffix(m) { return m.where ? t("guide.whereSuffix", { where: tQuestWhere(m) }) : ""; },
 
     // The one guided step shown in the HUD tracker — always the live main line.
     guidance() {
       const m = this.currentMission();
       if (!m) return null; // campaign complete
-      const ch = CHAPTER_BY_ID[m.chapter] || {};
-      const base = { chapterTitle: ch.title || "", chapterIndex: this.chapterIndex(m.chapter), mission: m };
+      const base = { chapterTitle: tChapterTitle(m.chapter), chapterIndex: this.chapterIndex(m.chapter), mission: m };
       if (!m.npc) // the finale: no giver, just face the dragon
         return Object.assign(base, { state: "do", text: Quests.objectiveText(m) + this._whereSuffix(m) });
       if (Quests.isActive(m.id)) {
         if (Quests.isComplete(m))
-          return Object.assign(base, { state: "turnin", text: `Return to ${this.giverLabel(m.npc)} to turn in` });
+          return Object.assign(base, { state: "turnin", text: t("guide.turnin", { giver: this.giverLabel(m.npc) }) });
         return Object.assign(base, { state: "do", text: Quests.objectiveText(m) + this._whereSuffix(m) });
       }
-      return Object.assign(base, { state: "accept", text: `Speak with ${this.giverLabel(m.npc)} at ${this.npcPlace(m.npc)}` });
+      return Object.assign(base, { state: "accept", text: t("guide.accept", { giver: this.giverLabel(m.npc), place: this.npcPlace(m.npc) }) });
     },
 
     // ---- Beats ----
     showIntro() {
-      Dialogue.showBeat({ name: STORY.intro.title, html: `<p>${STORY.intro.text}</p>`, button: "Begin the adventure ▶" });
+      Dialogue.showBeat({ name: tStoryIntroTitle(), html: `<p>${tStoryIntroText()}</p>`, button: t("btn.beginAdventure") });
     },
     maybeShowIntro() { if (this.introSeen) return; this.introSeen = true; this.showIntro(); },
 
@@ -4444,7 +5240,7 @@
       if (cur && cur.chapter !== q.chapter && !this.beats[cur.chapter]) {
         this.beats[cur.chapter] = true;
         const ch = CHAPTER_BY_ID[cur.chapter];
-        if (ch) toast(`📖 Chapter ${this.chapterIndex(ch.id)}: ${ch.title}`);
+        if (ch) toast(t("toast.chapterBegin", { n: this.chapterIndex(ch.id), title: tChapterTitle(ch.id) }));
       }
     },
     onWin() { this.beats.__ending = true; },
@@ -4467,8 +5263,8 @@
     if (!r) return "";
     const bits = [];
     if (r.coins) bits.push(`🪙 ${r.coins}`);
-    if (r.item && getDef(r.item)) bits.push(`${getDef(r.item).icon} ${getDef(r.item).name}`);
-    if (r.relic && RELICS[r.relic]) bits.push(`${RELICS[r.relic].icon} ${RELICS[r.relic].name}`);
+    if (r.item && getDef(r.item)) bits.push(`${getDef(r.item).icon} ${tItemName(getDef(r.item))}`);
+    if (r.relic && RELICS[r.relic]) bits.push(`${RELICS[r.relic].icon} ${tRelicName(r.relic)}`);
     if (r.mats) bits.push(matSummary(r.mats));
     return bits.join(" · ");
   }
@@ -4518,7 +5314,7 @@
       dom.dlgText.innerHTML = html || "";
       dom.dlgActions.innerHTML = "";
       const b = document.createElement("button");
-      b.className = "start-btn"; b.textContent = button || "Continue ▶";
+      b.className = "start-btn"; b.textContent = button || t("btn.continue");
       b.addEventListener("click", () => this.close());
       dom.dlgActions.appendChild(b);
     },
@@ -4526,7 +5322,7 @@
     render() {
       if (!this.open || !this.npc) return;
       const npc = this.npc.data, id = npc.id;
-      dom.dlgName.textContent = `${npc.icon} ${npc.name}`;
+      dom.dlgName.textContent = `${npc.icon} ${tNpcName(id)}`;
       dom.dlgActions.innerHTML = "";
       const addBtn = (label, cls, fn) => {
         const b = document.createElement("button"); b.className = "start-btn " + cls; b.textContent = label;
@@ -4541,39 +5337,41 @@
 
       // Greeting line — context-aware.
       let greet;
-      if (anyComplete) greet = "Back already? Let's settle up.";
-      else if (activeIds.length) greet = "Still on the job? Luck go with you.";
-      else if (mainOffer || sideOffer) greet = npc.intro;
-      else greet = "Thank you, hero — the vale owes you much.";
+      if (anyComplete) greet = t("dlg.greetSettle");
+      else if (activeIds.length) greet = t("dlg.greetWorking");
+      else if (mainOffer || sideOffer) greet = tNpcIntro(id);
+      else greet = t("dlg.greetDone");
       const lines = [`<p>${greet}</p>`];
 
-      const tag = (q) => (q.line === "main" ? "📜 Mission" : "🔸 Side quest");
+      const tag = (q) => (q.line === "main" ? t("dlg.tagMission") : t("dlg.tagSide"));
       for (const qid of activeIds) {
         const q = QUEST_BY_ID[qid], done = Quests.isComplete(q);
-        lines.push(`<p class="dlg-quest">${tag(q)}: <b>${q.title}</b></p>` +
-          `<p class="dlg-obj">${Quests.objectiveText(q)}${done ? " — ready to turn in!" : ""}</p>`);
+        lines.push(`<p class="dlg-quest">${t("dlg.questLine", { tag: tag(q), title: tQuestTitle(q) })}</p>` +
+          `<p class="dlg-obj">${Quests.objectiveText(q)}${done ? t("dlg.readyTurnIn") : ""}</p>`);
       }
       if (mainOffer) {
-        lines.push(`<p class="dlg-quest">📜 New mission: <b>${mainOffer.title}</b></p>` +
-          `<p>"${mainOffer.story}"</p><p class="dlg-obj">${Quests.objectiveText(mainOffer)}</p>` +
-          `<p class="dlg-reward">Reward: ${rewardText(mainOffer.reward)}</p>`);
+        lines.push(`<p class="dlg-quest">${t("dlg.newMission", { title: tQuestTitle(mainOffer) })}</p>` +
+          `<p>${t("dlg.story", { story: tQuestStory(mainOffer) })}</p><p class="dlg-obj">${Quests.objectiveText(mainOffer)}</p>` +
+          `<p class="dlg-reward">${t("dlg.reward", { reward: rewardText(mainOffer.reward) })}</p>`);
       }
       if (sideOffer) {
         const reps = Story.sideTurnIns[sideOffer.id] || 0;
-        lines.push(`<p class="dlg-quest">🔸 Side quest: <b>${sideOffer.title}</b>${sideOffer.repeatable ? " (repeatable)" : ""}${reps ? ` · done ×${reps}` : ""}</p>` +
-          `<p>"${sideOffer.story}"</p><p class="dlg-obj">${Quests.objectiveText(sideOffer)}</p>` +
-          `<p class="dlg-reward">Reward: ${rewardText(sideOffer.reward)}</p>`);
+        const rep = sideOffer.repeatable ? t("dlg.repeatable") : "";
+        const doneStr = reps ? t("dlg.doneTimes", { n: reps }) : "";
+        lines.push(`<p class="dlg-quest">${t("dlg.sideQuest", { title: tQuestTitle(sideOffer), rep, done: doneStr })}</p>` +
+          `<p>${t("dlg.story", { story: tQuestStory(sideOffer) })}</p><p class="dlg-obj">${Quests.objectiveText(sideOffer)}</p>` +
+          `<p class="dlg-reward">${t("dlg.reward", { reward: rewardText(sideOffer.reward) })}</p>`);
       }
       dom.dlgText.innerHTML = lines.join("");
 
       // Buttons: turn-ins first (most useful), then accepts, then close.
       for (const qid of activeIds) {
         if (Quests.isComplete(QUEST_BY_ID[qid]))
-          addBtn(`Turn in: ${QUEST_BY_ID[qid].title} ✅`, "", () => { Quests.turnIn(qid); this.render(); });
+          addBtn(t("btn.turnInQuest", { title: tQuestTitle(QUEST_BY_ID[qid]) }), "", () => { Quests.turnIn(qid); this.render(); });
       }
-      if (mainOffer) addBtn(`Accept: ${mainOffer.title} 📜`, "", () => { Quests.accept(mainOffer.id); this.render(); });
-      if (sideOffer) addBtn(`Accept: ${sideOffer.title} 🔸`, "secondary-btn", () => { Quests.accept(sideOffer.id); this.render(); });
-      addBtn(activeIds.length || mainOffer || sideOffer ? "Close" : "Farewell", "secondary-btn", () => this.close());
+      if (mainOffer) addBtn(t("btn.acceptMain", { title: tQuestTitle(mainOffer) }), "", () => { Quests.accept(mainOffer.id); this.render(); });
+      if (sideOffer) addBtn(t("btn.acceptSide", { title: tQuestTitle(sideOffer) }), "secondary-btn", () => { Quests.accept(sideOffer.id); this.render(); });
+      addBtn(activeIds.length || mainOffer || sideOffer ? t("btn.close") : t("btn.farewell"), "secondary-btn", () => this.close());
     },
   };
 
@@ -4605,7 +5403,7 @@
       for (const recipe of CRAFT_RECIPES) {
         const def = getDef(recipe.out);
         const can = hasMaterials(p, recipe.mats);
-        const card = itemCard(def, can ? "Craft 🛠️" : "Need mats", "buy-btn craft-btn", !can,
+        const card = itemCard(def, can ? t("btn.craft") : t("btn.needMats"), "buy-btn craft-btn", !can,
           () => this.craft(recipe), matSummary(recipe.mats));
         dom.craftItems.appendChild(card);
       }
@@ -4644,17 +5442,17 @@
         const row = document.createElement("div");
         row.className = "shop-item castle-row" + (built ? " built" : "");
         let status, btnLabel, disabled;
-        if (built) { status = "✅ Built"; btnLabel = "Built"; disabled = true; }
-        else if (!prevBuilt) { status = "🔒 Build the previous part first"; btnLabel = "Locked"; disabled = true; }
+        if (built) { status = t("castle.built"); btnLabel = t("btn.built"); disabled = true; }
+        else if (!prevBuilt) { status = t("castle.lockedPrev"); btnLabel = t("btn.locked"); disabled = true; }
         else {
-          const needRelic = haveRelic ? `${relic.icon} ✓` : `${relic.icon} ${relic.name} ✗`;
-          const needCoins = this.state.coins >= part.cost ? `🪙 ${part.cost} ✓` : `🪙 ${part.cost} ✗`;
-          status = `Needs ${needRelic} · ${needCoins}`;
+          const needRelic = haveRelic ? t("castle.relicHave", { icon: relic.icon }) : t("castle.relicNeed", { icon: relic.icon, name: tRelicName(part.relic) });
+          const needCoins = this.state.coins >= part.cost ? t("castle.coinsHave", { cost: part.cost }) : t("castle.coinsNeed", { cost: part.cost });
+          status = t("castle.needs", { relic: needRelic, coins: needCoins });
           disabled = !this.site.canBuild(part);
-          btnLabel = "Build 🏰";
+          btnLabel = t("btn.build");
         }
-        row.innerHTML = `<div class="icon">${part.icon}</div><div class="info"><div class="name">${part.name}</div>` +
-          `<div class="desc">${part.desc}<br>${status}</div></div>`;
+        row.innerHTML = `<div class="icon">${part.icon}</div><div class="info"><div class="name">${tCastlePartName(part.id)}</div>` +
+          `<div class="desc">${tCastlePartDesc(part.id)}<br>${status}</div></div>`;
         const btn = document.createElement("button");
         btn.className = "buy-btn castle-build-btn"; btn.textContent = btnLabel; btn.disabled = disabled;
         if (!disabled) btn.addEventListener("click", () => this.build(part));
@@ -4662,7 +5460,8 @@
         dom.castleItems.appendChild(row);
       }
       const left = CASTLE_PARTS.filter((p) => !this.site.isBuilt(p.id)).length;
-      dom.castleProgress.textContent = left === 0 ? "The castle stands! The dragon stirs…" : `${CASTLE_PARTS.length - left}/${CASTLE_PARTS.length} parts raised`;
+      dom.castleProgress.textContent = left === 0 ? t("castle.complete")
+        : t("castle.progress", { built: CASTLE_PARTS.length - left, total: CASTLE_PARTS.length, word: plural(CASTLE_PARTS.length, t("castle.partWord")) });
     },
   };
 
@@ -4688,12 +5487,12 @@
       if (resolved) { icon = "✅"; cls = "mdone"; }
       else if (active) {
         icon = complete ? "✓" : "📜"; cls = complete ? "mcurrent" : "";
-        body = `<div class="qm-obj">${Quests.objectiveText(m)}${complete && m.npc ? ` — return to ${Story.giverLabel(m.npc)}` : ""}</div>`;
+        body = `<div class="qm-obj">${Quests.objectiveText(m)}${complete && m.npc ? t("log.returnTo", { giver: Story.giverLabel(m.npc) }) : ""}</div>`;
       } else if (isCurrent) {
         icon = "❗"; cls = "mcurrent";
-        body = `<div class="qm-obj">${m.npc ? `Speak with ${Story.giverLabel(m.npc)} at ${Story.npcPlace(m.npc)}` : Quests.objectiveText(m)}</div>`;
+        body = `<div class="qm-obj">${m.npc ? t("log.speakAt", { giver: Story.giverLabel(m.npc), place: Story.npcPlace(m.npc) }) : Quests.objectiveText(m)}</div>`;
       } else { icon = "🔒"; cls = "mlocked"; }
-      return `<div class="quest-mission ${cls}"><span class="qm-title">${icon} ${m.title}</span>${body}</div>`;
+      return `<div class="quest-mission ${cls}"><span class="qm-title">${icon} ${tQuestTitle(m)}</span>${body}</div>`;
     },
 
     render() {
@@ -4703,19 +5502,19 @@
       const curChId = Story.currentChapterId();
 
       // ---- Main story ----
-      rows.push(`<div class="quest-sec">📜 Main Story</div>`);
+      rows.push(`<div class="quest-sec">${t("log.mainStory")}</div>`);
       rows.push(g
-        ? `<div class="quest-now"><b>Chapter ${g.chapterIndex}: ${g.chapterTitle}</b><br>${g.text}</div>`
-        : `<div class="quest-now cdone">The castle stands and the Ancient Dragon is slain — the vale is saved! 🏰🐉</div>`);
+        ? `<div class="quest-now">${t("log.now", { n: g.chapterIndex, title: g.chapterTitle, text: g.text })}</div>`
+        : `<div class="quest-now cdone">${t("log.allDone")}</div>`);
       for (const ch of STORY.chapters) {
         const prog = Story.chapterProgress(ch.id);
         const allDone = prog.done >= prog.total;
         const isCurrent = ch.id === curChId && !Story.isComplete();
         const icon = allDone ? "✅" : isCurrent ? "▶" : "🔒";
         const state = allDone ? "cdone" : isCurrent ? "current" : "clocked";
-        rows.push(`<div class="quest-chap ${state}">${icon} Chapter ${Story.chapterIndex(ch.id)}: ${ch.title} <span class="cprog">${prog.done}/${prog.total}</span></div>`);
+        rows.push(`<div class="quest-chap ${state}">${t("log.chapterRow", { icon, n: Story.chapterIndex(ch.id), title: tChapterTitle(ch.id) })} <span class="cprog">${prog.done}/${prog.total}</span></div>`);
         if (isCurrent) {
-          rows.push(`<div class="chap-blurb">${ch.blurb}</div>`);
+          rows.push(`<div class="chap-blurb">${tChapterBlurb(ch.id)}</div>`);
           for (const m of missionsOfChapter(ch.id)) rows.push(this._missionRow(m));
         }
       }
@@ -4723,20 +5522,20 @@
       // ---- Side quests (clearly separated) ----
       const sideActive = Quests.active.filter((id) => QUEST_BY_ID[id] && QUEST_BY_ID[id].line === "side");
       const sideDone = SIDE_IDS.filter((id) => Quests.isDone(id) || Story.sideTurnIns[id]);
-      rows.push(`<div class="quest-sec">🔸 Side Quests</div>`);
+      rows.push(`<div class="quest-sec">${t("log.sideQuests")}</div>`);
       if (!sideActive.length && !sideDone.length)
-        rows.push(`<div class="shop-empty">None yet — visit the ❗ folk for optional bounties &amp; errands.</div>`);
+        rows.push(`<div class="shop-empty">${t("log.sideNone")}</div>`);
       for (const id of sideActive) {
         const q = QUEST_BY_ID[id], done = Quests.isComplete(q), npc = NPC_BY_ID[q.npc] || {};
-        rows.push(`<div class="quest-row ${done ? "qdone" : ""}"><div class="qr-title">🔸 ${q.title} ${done ? "✓" : ""}</div>` +
+        rows.push(`<div class="quest-row ${done ? "qdone" : ""}"><div class="qr-title">🔸 ${tQuestTitle(q)} ${done ? "✓" : ""}</div>` +
           `<div class="qr-obj">${Quests.objectiveText(q)}</div>` +
-          `<div class="qr-from">from ${npc.icon} ${npc.name}${done ? " · return to turn in" : ""} · reward ${rewardText(q.reward)}</div></div>`);
+          `<div class="qr-from">${t("log.sideFrom", { icon: npc.icon, name: tNpcName(q.npc), ret: done ? t("log.sideReturn") : "", reward: rewardText(q.reward) })}</div></div>`);
       }
       if (sideDone.length) {
-        rows.push(`<div class="quest-sep">Completed side quests</div>`);
+        rows.push(`<div class="quest-sep">${t("log.sideCompleted")}</div>`);
         for (const id of sideDone) {
           const q = QUEST_BY_ID[id], reps = Story.sideTurnIns[id] || 0;
-          rows.push(`<div class="quest-row qcomplete">✅ ${q.title}${reps > 1 ? ` ×${reps}` : ""}</div>`);
+          rows.push(`<div class="quest-row qcomplete">✅ ${tQuestTitle(q)}${reps > 1 ? ` ×${reps}` : ""}</div>`);
         }
       }
       dom.questLogItems.innerHTML = rows.join("");
@@ -4812,12 +5611,13 @@
         cycle * CONFIG.bossEveryWaves, b.archId);
       if (b.name) boss.name = b.name;
       boss.isLairBoss = true;
+      boss.lairZoneId = this.zone.id;   // drives the localized boss-bar name
       this.state.boss = boss;
       this.state.monsters.push(boss);
       this._spawnedBoss = true;
       showBossBar(boss);
       Sfx.play("boss_spawn");
-      if (b.intro) toast("⚔️ " + b.intro);
+      if (b.intro) toast(t("toast.lairIntro", { intro: tLairBossIntro(this.zone.id) }));
     }
 
     _ambient() {
@@ -4860,7 +5660,7 @@
     // A brief "you have entered <zone>" banner (reuses the old wave banner).
     _banner() {
       if (!dom.waveBanner) return;
-      dom.waveBanner.textContent = `${this.zone.icon} ${this.zone.name}`;
+      dom.waveBanner.textContent = t("label.zone", { icon: this.zone.icon, name: tZoneName(this.zone) });
       dom.waveBanner.classList.remove("show");
       void dom.waveBanner.offsetWidth;       // restart the CSS animation
       dom.waveBanner.classList.add("show");
@@ -4902,7 +5702,7 @@
       if (!target || this.transitioning) return;
       this.transitioning = true;
       const fromId = this.state.world.zone.id;
-      fadeVeil(true, `${target.icon} ${target.name}`);
+      fadeVeil(true, t("label.zone", { icon: target.icon, name: tZoneName(target) }));
       // Swap after the veil has painted (next macrotask) so the black screen is
       // already up and the teardown/build hitch is never visible.
       setTimeout(() => {
@@ -5306,7 +6106,7 @@
       hideBossBar();
       if (state.boss === m) state.boss = null;
       Sfx.play("boss_death");
-      toast(`👑 ${m.name} defeated! Dropped ${getDef(rareId).name}!`);
+      toast(t("toast.bossDefeated", { boss: bossDisplayName(m), item: tItemName(getDef(rareId)) }));
       return;
     }
     addScore(state, CONFIG.scorePerMonster);
@@ -5343,10 +6143,10 @@
       if (got) {
         const def = getDef(d.id);
         if (invAdd(player, makeItem(d.id))) {
-          toast(`✨ Picked up ${def.name}!`);
+          toast(t("toast.pickedUp", { item: tItemName(def) }));
           if (Inventory.open) Inventory.render();
         } else {
-          toast("Bag full — drop something!");
+          toast(t("toast.bagFullDrop"));
           continue; // leave it on the ground to grab later
         }
         d.dispose(); state.drops.splice(i, 1);
@@ -5374,7 +6174,7 @@
         state.waveStats.coins += c.value;
         updateCoins(state);
         Sfx.play("coin");
-        toast(`🪙 +${c.value}`);
+        toast(t("toast.coinPickup", { n: c.value }));
         c.dispose(); state.coinsList.splice(i, 1);
       } else if (c.life <= 0) {
         c.dispose(); state.coinsList.splice(i, 1);
@@ -5419,7 +6219,7 @@
 
   // The HUD "current location" chip (set on load + every zone transition).
   function updateLocationHud(zone) {
-    if (dom.location && zone) dom.location.textContent = `${zone.icon} ${zone.name}`;
+    if (dom.location && zone) dom.location.textContent = `${zone.icon} ${tZoneName(zone)}`;
   }
 
   // The full-screen fade veil that masks a zone transition (a black screen with
@@ -5456,7 +6256,7 @@
   function updateRelicHud(player) {
     if (!dom.relicBar || !player) return;
     if (!player.relics.length) { dom.relicBar.innerHTML = ""; return; }
-    dom.relicBar.innerHTML = "🏰 " + player.relics.map((id) => `<span class="relic-chip" title="${RELICS[id].name}">${RELICS[id].icon}</span>`).join("");
+    dom.relicBar.innerHTML = "🏰 " + player.relics.map((id) => `<span class="relic-chip" title="${tRelicName(id)}">${RELICS[id].icon}</span>`).join("");
   }
 
   // ---- The small "current quest" tracker (top-left, under the HUD chips) ----
@@ -5471,8 +6271,8 @@
       const cls = g.state === "turnin" ? "qt-done" : g.state === "accept" ? "qt-go" : "";
       dom.questTracker.classList.remove("hidden");
       dom.questTracker.innerHTML =
-        `<div class="qt-chap">Chapter ${g.chapterIndex} · ${g.chapterTitle}</div>` +
-        `<div class="qt-title">📜 ${g.mission.title}</div>` +
+        `<div class="qt-chap">${t("qt.chapter", { n: g.chapterIndex, title: g.chapterTitle })}</div>` +
+        `<div class="qt-title">${t("qt.missionTitle", { title: tQuestTitle(g.mission) })}</div>` +
         `<div class="qt-obj ${cls}">${g.text}</div>`;
       return;
     }
@@ -5482,7 +6282,7 @@
     const done = Quests.isComplete(quest);
     dom.questTracker.classList.remove("hidden");
     dom.questTracker.innerHTML =
-      `<div class="qt-title">🔸 ${quest.title}${done ? ' <span class="qt-done">✓ return to turn in</span>' : ""}</div>` +
+      `<div class="qt-title">${t("qt.sideTitle", { title: tQuestTitle(quest) })}${done ? ` <span class="qt-done">${t("qt.sideReturn")}</span>` : ""}</div>` +
       `<div class="qt-obj">${Quests.objectiveText(quest)}</div>`;
   }
 
@@ -5510,7 +6310,7 @@
       if (slot) {
         const def = getDef(slot.id);
         cell.innerHTML = `<span class="pk">${key}</span><span class="pi">${def.icon}</span><span class="pc">×${slot.count}</span>`;
-        cell.title = `${def.name} — ${def.desc} (press ${key})`;
+        cell.title = t("potion.slotTitle", { name: tItemName(def), desc: tItemDesc(def), key });
         cell.addEventListener("click", () => { if (gameStarted && !paused && !uiPaused) potionUse(player, i); });
       } else {
         cell.innerHTML = `<span class="pk">${key}</span><span class="pe">·</span>`;
@@ -5529,7 +6329,7 @@
       const def = getDef(b.id);
       const pill = document.createElement("div");
       pill.className = "buff-pill";
-      pill.innerHTML = `${def ? def.icon : "✨"} ${b.label} <b>${Math.ceil(b.time)}s</b>`;
+      pill.innerHTML = t("buff.pill", { icon: def ? def.icon : "✨", label: tPotionLabel(b.id), n: Math.ceil(b.time) });
       dom.buffBar.appendChild(pill);
     }
   }
@@ -5537,7 +6337,7 @@
   // ---- Boss health bar (shown only while a boss is alive) ----
   function showBossBar(boss) {
     if (!dom.bossBar) return;
-    dom.bossName.textContent = "👑 " + boss.name;
+    dom.bossName.textContent = t("boss.barName", { name: bossDisplayName(boss) });
     updateBossBar(boss);
     dom.bossBar.classList.remove("hidden");
   }
@@ -5559,8 +6359,8 @@
 
   function bannerWave(n, monsterCount, bossName) {
     dom.waveBanner.textContent = bossName
-      ? `Wave ${n} — 👑 ${bossName}!`
-      : `Wave ${n} — ${monsterCount} sweets!`;
+      ? t("banner.bossWave", { n, boss: bossName })
+      : t("banner.sweepWave", { n, count: monsterCount });
     dom.waveBanner.classList.remove("show");
     void dom.waveBanner.offsetWidth; // restart the CSS animation
     dom.waveBanner.classList.add("show");
@@ -5570,8 +6370,8 @@
     state.over = true;
     dom.prompt.classList.add("hidden");
     hideBossBar();
-    dom.finalScore.textContent = state.score;
-    if (dom.finalWave) dom.finalWave.textContent = (state.world && state.world.zone ? state.world.zone.name : "—");
+    const where = (state.world && state.world.zone) ? tZoneName(state.world.zone) : "—";
+    if (dom.overText) dom.overText.innerHTML = t("over.tagline", { score: state.score, where });
     setTimeout(() => dom.over.classList.remove("hidden"), 600);
   }
 
@@ -5584,9 +6384,8 @@
     hideBossBar();
     Story.onWin();                         // mark the finale resolved
     updateQuestTracker();                  // campaign complete → clear the tracker
-    if (dom.winScore) dom.winScore.textContent = state.score;
-    if (dom.winWave) dom.winWave.textContent = state.totalKills;
-    if (dom.winStory) dom.winStory.innerHTML = `<b>${STORY.ending.title}</b><br>${STORY.ending.text}`; // ending framing
+    if (dom.winText) dom.winText.innerHTML = t("win.tagline", { score: state.score, kills: state.totalKills });
+    if (dom.winStory) dom.winStory.innerHTML = t("win.ending", { title: tStoryEndingTitle(), text: tStoryEndingText() }); // ending framing
     Sfx.play("artifact");
     setTimeout(() => { if (dom.win) dom.win.classList.remove("hidden"); }, 800);
   }
@@ -5785,7 +6584,7 @@
   // Serialize the current run and hand the player a .json download.
   function downloadSave() {
     const data = serializeGame();
-    if (!data) { toast("Nothing to save yet"); return false; }
+    if (!data) { toast(t("toast.nothingToSave")); return false; }
     try {
       const json = JSON.stringify(data, null, 2);
       const blob = new Blob([json], { type: "application/json" });
@@ -5798,11 +6597,11 @@
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
-      toast("Progress saved! 💾");
+      toast(t("toast.saved"));
       return true;
     } catch (e) {
       console.error(e);
-      toast("Save failed");
+      toast(t("toast.saveFailed"));
       return false;
     }
   }
@@ -5816,13 +6615,13 @@
       let data;
       try { data = JSON.parse(reader.result); } catch (e) { data = null; }
       if (!validateSave(data)) {
-        if (onError) onError("That file isn't a valid Good Game 3D save.");
+        if (onError) onError(t("toast.invalidSave"));
         return;
       }
       sessionSet(PENDING_LOAD_KEY, reader.result);
       window.location.reload();
     };
-    reader.onerror = () => { if (onError) onError("Couldn't read that file."); };
+    reader.onerror = () => { if (onError) onError(t("toast.readError")); };
     reader.readAsText(file);
   }
 
@@ -5839,9 +6638,17 @@
       if (!this.canOpen()) return;
       paused = true;
       this.hideConfirm();
-      if (dom.pauseScore) dom.pauseScore.textContent = stateRef.score;
-      if (dom.pauseWave) dom.pauseWave.textContent = waveSystem ? waveSystem.wave : 0;
+      this.refreshTexts();
       dom.pauseMenu.classList.remove("hidden");
+    },
+    // The wave/score line + any open confirm message are interpolated, so they
+    // localize live when the language is switched from the pause settings.
+    refreshTexts() {
+      const wave = waveSystem ? waveSystem.wave : 0;
+      const score = stateRef ? stateRef.score : 0;
+      if (dom.pauseStats) dom.pauseStats.innerHTML = t("pause.stats", { wave, score });
+      if (this.pendingAction && dom.confirmText)
+        dom.confirmText.textContent = t(this.pendingAction === "restart" ? "pause.confirmRestart" : "pause.confirmExit");
     },
     close() {
       if (!paused) return;
@@ -5880,15 +6687,15 @@
       if (dom.saveBtn) dom.saveBtn.addEventListener("click", () => {
         // The toast lives behind the pause overlay, so confirm on the button.
         if (downloadSave() && dom.saveBtn) {
-          const orig = dom.saveBtn.textContent;
-          dom.saveBtn.textContent = "Saved! 💾";
+          const orig = t("pause.save");
+          dom.saveBtn.textContent = t("pause.savedBtn");
           setTimeout(() => { if (dom.saveBtn) dom.saveBtn.textContent = orig; }, 1600);
         }
       });
       if (dom.restartBtn) dom.restartBtn.addEventListener("click",
-        () => this.askConfirm("restart", "Restart the game? Your current progress will be lost unless you've saved it."));
+        () => this.askConfirm("restart", t("pause.confirmRestart")));
       if (dom.exitBtn) dom.exitBtn.addEventListener("click",
-        () => this.askConfirm("exit", "Exit to the main menu? Your current progress will be lost unless you've saved it."));
+        () => this.askConfirm("exit", t("pause.confirmExit")));
       if (dom.confirmYes) dom.confirmYes.addEventListener("click", () => this.confirmYes());
       if (dom.confirmNo) dom.confirmNo.addEventListener("click", () => this.hideConfirm());
     },
@@ -6098,7 +6905,7 @@
       this._applyVolume();
       if (dom.musicBtn) {
         dom.musicBtn.textContent = this.on ? "🔊" : "🔇";
-        dom.musicBtn.title = this.on ? "Mute music" : "Play music";
+        dom.musicBtn.title = t(this.on ? "btnTitle.muteMusic" : "btnTitle.playMusic");
       }
       return this.on;
     },
@@ -6130,9 +6937,10 @@
       const sync = () => {
         const on = this.active();
         dom.fsBtn.textContent = on ? "✕" : "⛶";
-        dom.fsBtn.title = on ? "Exit fullscreen" : "Fullscreen";
+        dom.fsBtn.title = t(on ? "btnTitle.exitFullscreen" : "btnTitle.fullscreen");
         engine.resize();
       };
+      this.sync = sync;   // let applyLocale refresh the title on a language switch
       dom.fsBtn.addEventListener("click", () => this.toggle());
       document.addEventListener("fullscreenchange", sync);
       document.addEventListener("webkitfullscreenchange", sync);
@@ -6143,6 +6951,19 @@
   function boot() {
     try {
       Input.init();
+
+      // Locale: apply the saved/default language to the static markup before the
+      // world builds, so the start screen paints in the right language, then wire
+      // the selectors on the start screen + pause settings.
+      const savedLocale = localGet(LOCALE_KEY);
+      if (savedLocale && LOCALES[savedLocale]) I18N.locale = savedLocale;
+      try { if (document.documentElement) document.documentElement.lang = I18N.locale; } catch (e) {}
+      applyStaticI18n();
+      _syncLangButtons();
+      const pickLocale = (loc) => applyLocale(loc, true);
+      [["langEn", "en"], ["langRu", "ru"], ["langEnPause", "en"], ["langRuPause", "ru"]].forEach(([id, loc]) => {
+        if (dom[id]) dom[id].addEventListener("click", () => pickLocale(loc));
+      });
 
       // A save chosen on the start screen is stashed in sessionStorage, then the
       // page reloads into this path. Re-seed BEFORE building the world so the
@@ -6161,10 +6982,10 @@
 
       const scene = createScene();
       scene.executeWhenReady(() => {
-        dom.loadHint.textContent = "Ready!";
+        dom.loadHint.textContent = t("hint.ready");
         dom.startBtn.disabled = false;
         if (pendingLoad) {
-          try { applySave(pendingLoad); startGame(true); toast("Progress loaded! 🎮"); }
+          try { applySave(pendingLoad); startGame(true); toast(t("toast.loaded")); }
           catch (e) { console.error(e); showFatal("Couldn't load save: " + e.message); }
         } else if (wantAutostart) {
           startGame();
@@ -6295,6 +7116,11 @@
       equipItem, unequipSlot, recomputeStats, TWO_HANDED, EQUIP_SLOTS,
       potionAdd, potionUse, POTION_SLOTS, enhanceItem, enhanceCost, enhanceMult,
       effectiveStats, featuredForWave, computeWeapon, Sfx, spawnArtifact,
+      // ---- Internationalization (Task 7) ----
+      I18N, LOCALES, RU, t, plural, applyLocale, LOCALE_KEY, localGet,
+      tItemName, tItemDesc, tZoneName, tQuestTitle, tQuestStory, tNpcName, tNpcIntro,
+      tRarityLabel, tMaterialLabel, tResourceLabel, tRelicName, tCastlePartName,
+      tChapterTitle, tWeatherLabel, tDragonName, bossDisplayName, tLairBossName,
       // ---- Adventure systems ----
       MATERIALS, MATERIAL_IDS, RELICS, CASTLE_PARTS, CRAFT_RECIPES, NPC_DATA, QUEST_BY_ID,
       MONSTER_ABILITIES, RESOURCE_KINDS, abilitiesForWave,

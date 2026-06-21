@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <title>Good Game 3D</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <meta name="description" content="Good Game 3D — a third-person browser action-RPG adventure. Take quests, gather and craft, fight living sweets and bosses, raise a castle from five relics, and slay the dragon to win." />
+  <meta name="description" content="Good Game 3D — a third-person browser action-RPG adventure. Take quests, gather and craft, fight living sweets and bosses, raise a castle from five relics, and slay the dragon to win. Playable in English and Russian." />
   <meta name="theme-color" content="#0b0f1a" />
-  <link rel="stylesheet" href="css/style.css?v=13" />
+  <link rel="stylesheet" href="css/style.css?v=14" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
@@ -17,23 +17,29 @@
   <div id="overlay" class="overlay">
     <div class="panel">
       <h1>Good Game <span class="badge">3D</span></h1>
-      <p class="tagline">Run with Lily across a living island of <b>separate lands</b> — meadow vale,
+      <p class="tagline" data-i18n-html="start.tagline">Run with Lily across a living island of <b>separate lands</b> — meadow vale,
         whispering wood, salt shore, frostpeak trail and the boss lairs. <b>Roaming monsters</b>
         guard each place and <b>respawn</b> over time; <b>travel</b> between lands through paths,
         bridges and cave mouths. Follow the <b>chaptered main quest</b> (with optional <b>side quests</b>),
         <b>gather &amp; craft</b>, raise a <b>castle</b> from five relics, then slay the <b>dragon</b> to win!</p>
       <ul class="controls">
-        <li><b>Move</b><span>WASD / Arrows · or the on-screen stick</span></li>
-        <li><b>Attack</b><span>Space / F · or the ✨ button</span></li>
-        <li><b>Interact / talk / gather</b><span>E · or the action button</span></li>
-        <li><b>Inventory</b><span>I · or the 🎒 button</span></li>
-        <li><b>Craft · Quests</b><span>C · J · or the 🛠️ 📜 buttons</span></li>
-        <li><b>Travel</b><span>walk into a path / bridge / cave portal</span></li>
+        <li><b data-i18n="ctrl.move">Move</b><span data-i18n="ctrl.moveKeys">WASD / Arrows · or the on-screen stick</span></li>
+        <li><b data-i18n="ctrl.attack">Attack</b><span data-i18n="ctrl.attackKeys">Space / F · or the ✨ button</span></li>
+        <li><b data-i18n="ctrl.interact">Interact / talk / gather</b><span data-i18n="ctrl.interactKeys">E · or the action button</span></li>
+        <li><b data-i18n="ctrl.inventory">Inventory</b><span data-i18n="ctrl.inventoryKeys">I · or the 🎒 button</span></li>
+        <li><b data-i18n="ctrl.craft">Craft · Quests</b><span data-i18n="ctrl.craftKeys">C · J · or the 🛠️ 📜 buttons</span></li>
+        <li><b data-i18n="ctrl.travel">Travel</b><span data-i18n="ctrl.travelKeys">walk into a path / bridge / cave portal</span></li>
       </ul>
-      <button id="startBtn" class="start-btn">Start Adventure</button>
-      <button id="loadBtn" class="start-btn secondary-btn">Load Progress</button>
+      <button id="startBtn" class="start-btn" data-i18n="start.startBtn">Start Adventure</button>
+      <button id="loadBtn" class="start-btn secondary-btn" data-i18n="start.loadBtn">Load Progress</button>
       <input id="loadFile" type="file" accept="application/json,.json" hidden />
-      <p class="hint" id="loadHint">Loading engine…</p>
+      <p class="hint" id="loadHint" data-i18n="hint.loading">Loading engine…</p>
+      <!-- Language selector (English / Russian) — also available in the pause menu. -->
+      <div class="lang-select" role="group" aria-label="Language">
+        <span class="lang-label" data-i18n="settings.language">Language</span>
+        <button id="langEn" class="lang-btn" lang="en">EN</button>
+        <button id="langRu" class="lang-btn" lang="ru">RU</button>
+      </div>
     </div>
   </div>
 
@@ -46,7 +52,7 @@
       <div class="stat">👹 <span id="monsters">0</span></div>
       <div class="stat" id="clock">☀️ 07:00</div>
       <div class="stat" id="weather">☀️ Clear</div>
-      <div id="prompt" class="prompt hidden">Press <b>E</b></div>
+      <div id="prompt" class="prompt hidden" data-i18n-html="prompt.pressE">Press <b>E</b></div>
     </div>
     <!-- Materials pouch, collected relics, and the active-quest tracker. -->
     <div id="materialsBar" class="materials-bar"></div>
@@ -71,12 +77,12 @@
     <div id="buffBar" class="buff-bar"></div>
     <div id="potionBar" class="potion-bar"></div>
 
-    <button id="fsBtn" class="fs-btn" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
-    <button id="pauseBtn" class="pause-btn" title="Menu (Esc)" aria-label="Open menu">☰</button>
-    <button id="invBtn" class="icon-btn inv-btn" title="Inventory (I)" aria-label="Open inventory">🎒</button>
-    <button id="craftBtn" class="icon-btn craft-btn" title="Crafting (C)" aria-label="Open crafting">🛠️</button>
-    <button id="questBtn" class="icon-btn quest-btn" title="Quest log (J)" aria-label="Open quest log">📜</button>
-    <button id="musicBtn" class="icon-btn music-btn" title="Mute music (M)" aria-label="Toggle music">🔊</button>
+    <button id="fsBtn" class="fs-btn" data-i18n-title="btnTitle.fullscreen" data-i18n-aria="btnAria.fullscreen" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
+    <button id="pauseBtn" class="pause-btn" data-i18n-title="btnTitle.menu" data-i18n-aria="btnAria.menu" title="Menu (Esc)" aria-label="Open menu">☰</button>
+    <button id="invBtn" class="icon-btn inv-btn" data-i18n-title="btnTitle.inventory" data-i18n-aria="btnAria.inventory" title="Inventory (I)" aria-label="Open inventory">🎒</button>
+    <button id="craftBtn" class="icon-btn craft-btn" data-i18n-title="btnTitle.crafting" data-i18n-aria="btnAria.crafting" title="Crafting (C)" aria-label="Open crafting">🛠️</button>
+    <button id="questBtn" class="icon-btn quest-btn" data-i18n-title="btnTitle.questLog" data-i18n-aria="btnAria.questLog" title="Quest log (J)" aria-label="Open quest log">📜</button>
+    <button id="musicBtn" class="icon-btn music-btn" data-i18n-title="btnTitle.muteMusic" data-i18n-aria="btnAria.music" title="Mute music (M)" aria-label="Toggle music">🔊</button>
     <div id="toast" class="toast"></div>
   </div>
 
@@ -85,49 +91,53 @@
     <div id="joystick" class="joystick"><div id="stick" class="stick"></div></div>
     <button id="castBtn" class="cast-btn">✨</button>
     <button id="actionBtn" class="action-btn">E</button>
-    <button id="bagBtn" class="bag-btn" title="Inventory" aria-label="Open inventory">🎒</button>
+    <button id="bagBtn" class="bag-btn" data-i18n-title="btnAria.inventory" data-i18n-aria="btnAria.inventory" title="Inventory" aria-label="Open inventory">🎒</button>
   </div>
 
   <!-- Game over screen -->
   <div id="over" class="overlay hidden">
     <div class="panel">
-      <h1>Game Over 🍭</h1>
-      <p class="tagline">The wild monsters got you! You scored <b><span id="finalScore">0</span></b>
-        and fell in <b><span id="finalWave">—</span></b>.</p>
-      <button id="replayBtn" class="start-btn">Play Again</button>
+      <h1 data-i18n="over.title">Game Over 🍭</h1>
+      <p class="tagline" id="overText">The wild monsters got you!</p>
+      <button id="replayBtn" class="start-btn" data-i18n="over.replay">Play Again</button>
     </div>
   </div>
 
   <!-- Victory screen: shown when the castle is built and the dragon is slain. -->
   <div id="win" class="overlay hidden">
     <div class="panel win-panel">
-      <h1>Victory! 🐉🏰</h1>
-      <p class="tagline">The castle stands and the <b>Ancient Dragon</b> is slain! Meadowgate is
-        saved. You finished with <b><span id="winScore">0</span></b> points after felling
-        <b><span id="winWave">0</span></b> monsters.</p>
+      <h1 data-i18n="win.title">Victory! 🐉🏰</h1>
+      <p class="tagline" id="winText">The castle stands and the Ancient Dragon is slain!</p>
       <p id="winStory" class="win-story"></p>
-      <button id="winReplayBtn" class="start-btn">Play Again</button>
+      <button id="winReplayBtn" class="start-btn" data-i18n="win.replay">Play Again</button>
     </div>
   </div>
 
   <!-- In-game pause menu: opens with ☰ / Esc and freezes the game. -->
   <div id="pauseMenu" class="overlay hidden">
     <div class="panel">
-      <h1>Paused</h1>
-      <p class="tagline">Wave <b id="pauseWave">0</b> · Score <b id="pauseScore">0</b></p>
+      <h1 data-i18n="pause.title">Paused</h1>
+      <p class="tagline" id="pauseStats">Wave <b>0</b> · Score <b>0</b></p>
       <div class="menu-actions">
-        <button id="resumeBtn" class="start-btn">Resume</button>
-        <button id="saveBtn" class="start-btn secondary-btn">Save Progress</button>
-        <button id="restartBtn" class="start-btn secondary-btn">Restart</button>
-        <button id="exitBtn" class="start-btn danger-btn">Exit to Menu</button>
+        <button id="resumeBtn" class="start-btn" data-i18n="pause.resume">Resume</button>
+        <button id="saveBtn" class="start-btn secondary-btn" data-i18n="pause.save">Save Progress</button>
+        <button id="restartBtn" class="start-btn secondary-btn" data-i18n="pause.restart">Restart</button>
+        <button id="exitBtn" class="start-btn danger-btn" data-i18n="pause.exit">Exit to Menu</button>
+      </div>
+
+      <!-- Language selector inside the pause settings (applies live). -->
+      <div class="lang-select" role="group" aria-label="Language">
+        <span class="lang-label" data-i18n="settings.language">Language</span>
+        <button id="langEnPause" class="lang-btn" lang="en">EN</button>
+        <button id="langRuPause" class="lang-btn" lang="ru">RU</button>
       </div>
 
       <!-- Confirmation guard for the destructive Restart / Exit actions. -->
       <div id="confirmDialog" class="confirm-dialog hidden">
         <p id="confirmText" class="confirm-text">Are you sure?</p>
         <div class="confirm-actions">
-          <button id="confirmYes" class="start-btn danger-btn">Yes</button>
-          <button id="confirmNo" class="start-btn secondary-btn">Cancel</button>
+          <button id="confirmYes" class="start-btn danger-btn" data-i18n="pause.confirmYes">Yes</button>
+          <button id="confirmNo" class="start-btn secondary-btn" data-i18n="pause.confirmNo">Cancel</button>
         </div>
       </div>
     </div>
@@ -137,26 +147,26 @@
        Buy normal gear, or sell items from your bag for coins. -->
   <div id="shop" class="shop-overlay hidden">
     <div class="shop-panel">
-      <button id="shopClose" class="shop-close" title="Close" aria-label="Close shop">×</button>
-      <h2>🧙 Travelling Merchant</h2>
-      <p class="shop-tagline">Buy weapons, armour &amp; accessories — or sell your spare gear.</p>
-      <div class="shop-coins">🪙 <span id="shopCoins">0</span> coins</div>
+      <button id="shopClose" class="shop-close" data-i18n-title="btn.close" title="Close" aria-label="Close shop">×</button>
+      <h2 data-i18n="shop.title">🧙 Travelling Merchant</h2>
+      <p class="shop-tagline" data-i18n-html="shop.tagline">Buy weapons, armour &amp; accessories — or sell your spare gear.</p>
+      <div class="shop-coins">🪙 <span id="shopCoins">0</span> <span data-i18n="shop.coins">coins</span></div>
       <div class="shop-tabs">
-        <button id="shopTabBuy" class="shop-tab active">Buy</button>
-        <button id="shopTabRare" class="shop-tab">✨ Rare</button>
-        <button id="shopTabSell" class="shop-tab">Sell</button>
+        <button id="shopTabBuy" class="shop-tab active" data-i18n="shop.tabBuy">Buy</button>
+        <button id="shopTabRare" class="shop-tab" data-i18n="shop.tabRare">✨ Rare</button>
+        <button id="shopTabSell" class="shop-tab" data-i18n="shop.tabSell">Sell</button>
       </div>
       <div id="shopItems" class="shop-items"></div>
-      <button id="shopDone" class="start-btn shop-done">Done</button>
+      <button id="shopDone" class="start-btn shop-done" data-i18n="shop.done">Done</button>
     </div>
   </div>
 
   <!-- Inventory & equipment: opened with the 🎒 button or the "I" key. -->
   <div id="inventory" class="inv-overlay hidden">
     <div class="inv-panel">
-      <button id="invClose" class="shop-close" title="Close" aria-label="Close inventory">×</button>
-      <h2>🎒 Inventory &amp; Equipment</h2>
-      <p class="shop-tagline">Click a bag item to equip it; click an equipped slot to remove it.</p>
+      <button id="invClose" class="shop-close" data-i18n-title="btn.close" title="Close" aria-label="Close inventory">×</button>
+      <h2 data-i18n-html="inv.title">🎒 Inventory &amp; Equipment</h2>
+      <p class="shop-tagline" data-i18n="inv.tagline">Click a bag item to equip it; click an equipped slot to remove it.</p>
       <div class="inv-cols">
         <div class="inv-left">
           <div id="invEquip" class="equip-grid"></div>
@@ -164,7 +174,7 @@
         </div>
         <div id="invBag" class="inv-bag"></div>
       </div>
-      <button id="invDone" class="start-btn shop-done">Done</button>
+      <button id="invDone" class="start-btn shop-done" data-i18n="inv.done">Done</button>
     </div>
   </div>
 
@@ -172,12 +182,12 @@
        pressing E. Spend coins to enhance weapons & equipment. -->
   <div id="anvil" class="shop-overlay hidden">
     <div class="shop-panel">
-      <button id="anvilClose" class="shop-close" title="Close" aria-label="Close anvil">×</button>
-      <h2>🔨 Blacksmith</h2>
-      <p class="shop-tagline">Enhance your weapons &amp; equipment. Rarer gear forges further and gains more per level.</p>
-      <div class="shop-coins">🪙 <span id="anvilCoins">0</span> coins</div>
+      <button id="anvilClose" class="shop-close" data-i18n-title="btn.close" title="Close" aria-label="Close anvil">×</button>
+      <h2 data-i18n="anvil.title">🔨 Blacksmith</h2>
+      <p class="shop-tagline" data-i18n-html="anvil.tagline">Enhance your weapons &amp; equipment. Rarer gear forges further and gains more per level.</p>
+      <div class="shop-coins">🪙 <span id="anvilCoins">0</span> <span data-i18n="shop.coins">coins</span></div>
       <div id="anvilItems" class="shop-items"></div>
-      <button id="anvilDone" class="start-btn shop-done">Done</button>
+      <button id="anvilDone" class="start-btn shop-done" data-i18n="anvil.done">Done</button>
     </div>
   </div>
 
@@ -185,7 +195,7 @@
        Accept quests, check progress, and turn completed ones in for rewards. -->
   <div id="dialogue" class="shop-overlay hidden">
     <div class="shop-panel dialogue-panel">
-      <button id="dlgClose" class="shop-close" title="Close" aria-label="Close dialogue">×</button>
+      <button id="dlgClose" class="shop-close" data-i18n-title="btn.close" title="Close" aria-label="Close dialogue">×</button>
       <h2 id="dlgName">NPC</h2>
       <div id="dlgText" class="dlg-text"></div>
       <div id="dlgActions" class="dlg-actions"></div>
@@ -195,12 +205,12 @@
   <!-- Crafting bench: opened with 🛠️ / C. Spend gathered materials on recipes. -->
   <div id="crafting" class="shop-overlay hidden">
     <div class="shop-panel">
-      <button id="craftClose" class="shop-close" title="Close" aria-label="Close crafting">×</button>
-      <h2>🛠️ Crafting Bench</h2>
-      <p class="shop-tagline">Turn gathered materials into potions &amp; gear. Cut trees, mine rock, gather herbs and collect water across the land.</p>
+      <button id="craftClose" class="shop-close" data-i18n-title="btn.close" title="Close" aria-label="Close crafting">×</button>
+      <h2 data-i18n="craft.title">🛠️ Crafting Bench</h2>
+      <p class="shop-tagline" data-i18n-html="craft.tagline">Turn gathered materials into potions &amp; gear. Cut trees, mine rock, gather herbs and collect water across the land.</p>
       <div id="craftMats" class="craft-mats"></div>
       <div id="craftItems" class="shop-items"></div>
-      <button id="craftDone" class="start-btn shop-done">Done</button>
+      <button id="craftDone" class="start-btn shop-done" data-i18n="craft.done">Done</button>
     </div>
   </div>
 
@@ -208,23 +218,23 @@
        coins to raise each part; completing the keep wakes the dragon. -->
   <div id="castle" class="shop-overlay hidden">
     <div class="shop-panel">
-      <button id="castleClose" class="shop-close" title="Close" aria-label="Close castle">×</button>
-      <h2>🏰 Build the Castle</h2>
-      <p class="shop-tagline">Raise the castle from five relics. Find the relics through quests and exploration, then build each part in order.</p>
-      <div class="shop-coins">🪙 <span id="castleCoins">0</span> coins · <span id="castleProgress">0/5 parts raised</span></div>
+      <button id="castleClose" class="shop-close" data-i18n-title="btn.close" title="Close" aria-label="Close castle">×</button>
+      <h2 data-i18n="castleui.title">🏰 Build the Castle</h2>
+      <p class="shop-tagline" data-i18n="castleui.tagline">Raise the castle from five relics. Find the relics through quests and exploration, then build each part in order.</p>
+      <div class="shop-coins">🪙 <span id="castleCoins">0</span> <span data-i18n="castleui.coins">coins ·</span> <span id="castleProgress">0/5 parts raised</span></div>
       <div id="castleItems" class="shop-items"></div>
-      <button id="castleDone" class="start-btn shop-done">Done</button>
+      <button id="castleDone" class="start-btn shop-done" data-i18n="castleui.done">Done</button>
     </div>
   </div>
 
   <!-- Quest log: opened with 📜 / J. Lists active + completed quests. -->
   <div id="questLog" class="shop-overlay hidden">
     <div class="shop-panel">
-      <button id="questLogClose" class="shop-close" title="Close" aria-label="Close quest log">×</button>
-      <h2>📜 Quest Log</h2>
-      <p class="shop-tagline">Your <b>main story</b> runs in chapters across the lands — follow the tracker from one ❗ giver to the next. <b>Side quests</b> are optional bounties &amp; errands, listed separately.</p>
+      <button id="questLogClose" class="shop-close" data-i18n-title="btn.close" title="Close" aria-label="Close quest log">×</button>
+      <h2 data-i18n="questlog.title">📜 Quest Log</h2>
+      <p class="shop-tagline" data-i18n-html="questlog.tagline">Your <b>main story</b> runs in chapters across the lands — follow the tracker from one ❗ giver to the next. <b>Side quests</b> are optional bounties &amp; errands, listed separately.</p>
       <div id="questLogItems" class="quest-log-items"></div>
-      <button id="questLogDone" class="start-btn shop-done">Done</button>
+      <button id="questLogDone" class="start-btn shop-done" data-i18n="questlog.done">Done</button>
     </div>
   </div>
 
@@ -234,6 +244,6 @@
 
   <canvas id="renderCanvas"></canvas>
 
-  <script src="js/game.js?v=13"></script>
+  <script src="js/game.js?v=14"></script>
 </body>
 </html>

@@ -369,6 +369,26 @@ html, body {
 /* On the start screen the load button gets a little breathing room. */
 #loadBtn { margin-top: 12px; }
 
+/* ---------- Language selector (start screen + pause settings) ---------- */
+.lang-select {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-top: 16px; flex-wrap: wrap;
+}
+.lang-label { font-size: 13px; opacity: 0.7; margin-right: 2px; }
+.lang-btn {
+  appearance: none; cursor: pointer;
+  font-size: 14px; font-weight: 800; letter-spacing: 0.5px; color: var(--ink);
+  padding: 7px 16px; border-radius: 999px; min-width: 54px;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.16);
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+.lang-btn:hover { background: rgba(255, 255, 255, 0.12); }
+.lang-btn:active { transform: scale(0.95); }
+.lang-btn.active {
+  background: linear-gradient(135deg, var(--accent2), #8be0ff); color: #15233b;
+  border-color: transparent;
+}
+
 /* ---------- Confirmation guard (restart / exit) ---------- */
 .confirm-dialog {
   margin-top: 18px; padding: 16px;
