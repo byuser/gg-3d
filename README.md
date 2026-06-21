@@ -109,6 +109,13 @@ runs in English without a browser.
   through dawn, day, dusk and night (see the HUD **clock**), while the **weather** drifts
   between **clear**, **cloudy**, **foggy**, **rain** and **storm** (with falling rain) — shown
   on the HUD weather chip.
+- **Lighting & shadows:** crisp, **grounded sun shadows** (cascaded + contact-hardening on
+  capable GPUs, soft PCF in the middle, a cheap blurred map on weak hardware), **ACES tone
+  mapping** so colours sit in a coherent filmic light, a **subtle bloom** on glowing props and
+  optional **soft ambient occlusion** — all on a **graphics tier** auto-detected from your
+  device (desktop → full, phones → lighter) so it stays smooth. Each land carries its own light
+  **mood** (airy peaks, moody caverns) on top of the day/night + weather tint. *(Force a tier for
+  testing with `?` → `window.__GG_QUALITY__ = "high" | "medium" | "low"`.)*
 - **Impactful hits:** bolts, arrows and melee swings now **knock sweets back** and throw a
   **shower of shards** on impact; bolts also **splat** on the ground and solid scenery. Bombers
   detonate in a shockwave that shoves everything nearby.
@@ -244,9 +251,12 @@ the **RPG zones** suite (per-zone **location spawns**, monster **roaming**, time
 **lair boss** spawn/clear/persist, streamed **zone travel**), the **main-story campaign**
 suite: strict **mission ordering/unlocks**, the **guided tracker**, **main-vs-side** separation,
 **repeatable** side quests, the **finale** enablement, the UI render paths, and the **story-state
-save/load round-trip**, and the new **i18n** suite: **EN/RU key-parity**, `t()`
+save/load round-trip**, the **i18n** suite: **EN/RU key-parity**, `t()`
 **interpolation**, **Russian pluralization**, **data-translation completeness**, locale-aware
-objective text, and the **locale-persistence round-trip** — all without a browser:
+objective text, and the **locale-persistence round-trip**, and the new **lighting & shadows**
+suite: the **quality-tier** decision (a pure function of device facts), **every zone building +
+tearing down its shadow generator** without leaking, the **feature-detected post-FX** setup
+(tone mapping / bloom / SSAO) and the **per-zone light mood** — all without a browser:
 
 ```bash
 node test/harness.js
@@ -320,6 +330,14 @@ node test/harness.js
   brute / jumper / shooter / bomber); shooters fire `Hazard`s, bombers explode on death.
 - **`DayNight` / `Weather`** — a keyframed sun/sky/fog cycle and a weather state machine (with a
   rain particle system) that layer over the scene.
+- **`Quality` / `makeSunShadows` / `setupPostFX` / `applyZoneMood`** — the lighting layer.
+  `Quality` auto-detects one graphics **tier** (high / medium / low) from device facts (its
+  `pick()` is a pure, tested function); `makeSunShadows` builds the directional sun's shadow
+  generator for that tier (cascaded + contact-hardening → PCF → blurred-exponential, with tuned
+  bias/darkness so casters sit grounded); `setupPostFX` wires **ACES tone mapping** plus
+  tier-gated **bloom** and **SSAO** onto the camera once; `applyZoneMood` nudges exposure/contrast
+  per zone. Every engine-only feature is detected + `try`/caught, so weak GPUs and the headless
+  harness simply run without the heavy parts. `DayNight`/`Weather` still own the sun/sky/fog tint.
 - **`Burst` / `spawnImpact`** — pooled, self-disposing impact effects + monster **knockback** so
   hits land with weight (feature-detected so it stays headless-safe).
 
@@ -383,4 +401,8 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 - [x] **Russian language support** — full **English + Russian** localization (UI + all data) via a
       `LOCALES`/`t()` i18n layer, switchable on the start screen & in pause settings, applied live
       and persisted (`localStorage`); EN/RU key-parity + data-completeness enforced by tests
+- [x] **More realistic lighting & shadows** — grounded sun shadows (**cascaded + contact-hardening**
+      → PCF → blurred-exponential), **ACES tone mapping**, subtle **bloom** + optional **SSAO**, and
+      a **per-zone light mood** — all gated by an auto-detected **graphics tier** (`Quality`) so it
+      degrades cleanly on phones/weak GPUs and stays headless-safe
 - [ ] Puzzles (levers, plates, gated doors)

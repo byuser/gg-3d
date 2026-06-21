@@ -196,7 +196,14 @@ A task is **done** only when **all** of these are true:
   pipeline.
 
 ### Task 4 — More + more‑realistic shadows & lighting
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-21 · Shipped tier‑gated, feature‑detected lighting: a new `Quality`
+  module auto‑detects a graphics tier (high/medium/low) from device facts (pure, tested `pick()`);
+  `makeSunShadows` builds the sun's shadow generator per tier — **cascaded + contact‑hardening** on
+  capable desktops, **PCF** in the middle, **blurred‑exponential** on weak GPUs/WebGL1 — with tuned
+  bias/normalBias/darkness so casters sit grounded; `setupPostFX` wires **ACES tone mapping** plus
+  tier‑gated **bloom** and **SSAO2** onto the camera once; and `applyZoneMood` gives each zone its
+  own exposure/contrast mood (airy peaks, moody lairs) on top of `DayNight`/`Weather`. New harness
+  suite [29] + a two‑tier browser‑path smoke check. No save‑schema change.
 - **Depends on:** none (do **before** Task 3 ideally).
 - **Goal.** Make light and shadow look believable and grounded across all zones
   and times of day, without tanking performance.
@@ -397,6 +404,24 @@ and note it; if it's expensive or irreversible, ask me first.
 
 ## 7. Changelog
 
+- 2026-06-21 · **Task 4 — More + more‑realistic shadows & lighting**: a tier‑gated, fully
+  feature‑detected lighting pass. A new `Quality` module picks one graphics tier
+  (high/medium/low) from device facts — `Quality.pick()` is a pure, unit‑tested function and
+  `window.__GG_QUALITY__` can force a tier. `makeSunShadows` replaces the old one‑size shadow
+  setup with a per‑tier directional‑sun generator: a **CascadedShadowGenerator** with
+  **contact‑hardening** outdoors on capable desktops, **PCF** on the middle tier, and the cheap
+  **blurred‑exponential** map on weak GPUs / WebGL1 / indoors — all with tuned
+  bias/normalBias/darkness + tightened shadow Z‑bounds so casters sit grounded with no acne or
+  peter‑panning. `setupPostFX` adds **ACES tone mapping** (exposure/contrast) on the scene image
+  processing, with **bloom** (DefaultRenderingPipeline, medium+high) and **SSAO2** (high only,
+  `IsSupported`‑checked) layered on the camera once and `try`/caught. `applyZoneMood` tunes
+  exposure/contrast per zone (bright peaks, moody caverns) via new optional `theme.expMul/conMul/
+  shadowDark` fields, integrated with the travel hook and kept in sync with `DayNight`/`Weather`
+  (which still own the sun/sky/fog tint). Every engine‑only API is feature‑detected so the Node
+  harness stays green; new suite [29] covers tier selection, per‑zone build/teardown of the shadow
+  generator, post‑FX/`makeSunShadows` headless‑safety, and the per‑zone mood, plus a throwaway
+  two‑tier (high/low) WebGL2 browser‑path smoke check. No save‑schema change (`SAVE_VERSION`
+  untouched). `index.html` `?v=` bumped to 15.
 - 2026-06-21 · **Task 7 — Russian language support**: full **English + Russian** localization.
   A new i18n layer — `LOCALES = { en, ru }` flat dictionaries + `t(key, params)` (with
   `{placeholder}` interpolation, English fallback and a `plural()` helper for Russian one/few/many)
