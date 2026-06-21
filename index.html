@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <title>Good Game 3D</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <meta name="description" content="Good Game 3D — a third-person browser adventure. Wield a magic wand, blast waves of living sweets, and collect artifacts for points." />
+  <meta name="description" content="Good Game 3D — a third-person browser action-RPG adventure. Take quests, gather and craft, fight living sweets and bosses, raise a castle from five relics, and slay the dragon to win." />
   <meta name="theme-color" content="#0b0f1a" />
-  <link rel="stylesheet" href="css/style.css?v=10" />
+  <link rel="stylesheet" href="css/style.css?v=11" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
@@ -17,14 +17,15 @@
   <div id="overlay" class="overlay">
     <div class="panel">
       <h1>Good Game <span class="badge">3D</span></h1>
-      <p class="tagline">Run with Lily, raise your <b>magic wand</b>, and survive the waves of
-        <b>living sweets</b>. Blast monsters and grab artifacts to score!</p>
+      <p class="tagline">Run with Lily across a living island: take <b>quests</b> from villagers,
+        <b>gather &amp; craft</b>, fight <b>wild monsters</b>, and raise a <b>castle</b> from five
+        relics. Build it, and the <b>dragon</b> awakens — slay it to win!</p>
       <ul class="controls">
         <li><b>Move</b><span>WASD / Arrows · or the on-screen stick</span></li>
-        <li><b>Look</b><span>Drag the screen / mouse</span></li>
         <li><b>Attack</b><span>Space / F · or the ✨ button</span></li>
+        <li><b>Interact / talk / gather</b><span>E · or the action button</span></li>
         <li><b>Inventory</b><span>I · or the 🎒 button</span></li>
-        <li><b>Interact / shop</b><span>E · or the action button</span></li>
+        <li><b>Craft · Quests</b><span>C · J · or the 🛠️ 📜 buttons</span></li>
         <li><b>Next&nbsp;wave</b><span>Enter / N · or the Next Wave button</span></li>
       </ul>
       <button id="startBtn" class="start-btn">Start Adventure</button>
@@ -41,8 +42,14 @@
       <div class="stat">🪙 <span id="coins">0</span></div>
       <div class="stat">Wave <span id="wave">0</span></div>
       <div class="stat">🍬 <span id="monsters">0 / 0</span></div>
+      <div class="stat" id="clock">☀️ 07:00</div>
+      <div class="stat" id="weather">☀️ Clear</div>
       <div id="prompt" class="prompt hidden">Press <b>E</b></div>
     </div>
+    <!-- Materials pouch, collected relics, and the active-quest tracker. -->
+    <div id="materialsBar" class="materials-bar"></div>
+    <div id="relicBar" class="relic-bar"></div>
+    <div id="questTracker" class="quest-tracker hidden"></div>
     <div class="healthwrap">
       <span class="heart">❤</span>
       <div class="healthbar"><div id="healthFill" class="health-fill"></div></div>
@@ -86,6 +93,8 @@
     <button id="fsBtn" class="fs-btn" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
     <button id="pauseBtn" class="pause-btn" title="Menu (Esc)" aria-label="Open menu">☰</button>
     <button id="invBtn" class="icon-btn inv-btn" title="Inventory (I)" aria-label="Open inventory">🎒</button>
+    <button id="craftBtn" class="icon-btn craft-btn" title="Crafting (C)" aria-label="Open crafting">🛠️</button>
+    <button id="questBtn" class="icon-btn quest-btn" title="Quest log (J)" aria-label="Open quest log">📜</button>
     <button id="musicBtn" class="icon-btn music-btn" title="Mute music (M)" aria-label="Toggle music">🔊</button>
     <div id="toast" class="toast"></div>
   </div>
@@ -105,6 +114,17 @@
       <p class="tagline">The living sweets got you! You scored <b><span id="finalScore">0</span></b>
         and survived to <b>wave <span id="finalWave">0</span></b>.</p>
       <button id="replayBtn" class="start-btn">Play Again</button>
+    </div>
+  </div>
+
+  <!-- Victory screen: shown when the castle is built and the dragon is slain. -->
+  <div id="win" class="overlay hidden">
+    <div class="panel win-panel">
+      <h1>Victory! 🐉🏰</h1>
+      <p class="tagline">The castle stands and the <b>Ancient Dragon</b> is slain! Meadowgate is
+        saved. You finished with <b><span id="winScore">0</span></b> points on
+        <b>wave <span id="winWave">0</span></b>.</p>
+      <button id="winReplayBtn" class="start-btn">Play Again</button>
     </div>
   </div>
 
@@ -179,8 +199,55 @@
     </div>
   </div>
 
+  <!-- NPC dialogue: opened by walking up to a story NPC and pressing E.
+       Accept quests, check progress, and turn completed ones in for rewards. -->
+  <div id="dialogue" class="shop-overlay hidden">
+    <div class="shop-panel dialogue-panel">
+      <button id="dlgClose" class="shop-close" title="Close" aria-label="Close dialogue">×</button>
+      <h2 id="dlgName">NPC</h2>
+      <div id="dlgText" class="dlg-text"></div>
+      <div id="dlgActions" class="dlg-actions"></div>
+    </div>
+  </div>
+
+  <!-- Crafting bench: opened with 🛠️ / C. Spend gathered materials on recipes. -->
+  <div id="crafting" class="shop-overlay hidden">
+    <div class="shop-panel">
+      <button id="craftClose" class="shop-close" title="Close" aria-label="Close crafting">×</button>
+      <h2>🛠️ Crafting Bench</h2>
+      <p class="shop-tagline">Turn gathered materials into potions &amp; gear. Cut trees, mine rock, gather herbs and collect water across the land.</p>
+      <div id="craftMats" class="craft-mats"></div>
+      <div id="craftItems" class="shop-items"></div>
+      <button id="craftDone" class="start-btn shop-done">Done</button>
+    </div>
+  </div>
+
+  <!-- Castle build panel: opened at the Castle Hill build site. Spend relics +
+       coins to raise each part; completing the keep wakes the dragon. -->
+  <div id="castle" class="shop-overlay hidden">
+    <div class="shop-panel">
+      <button id="castleClose" class="shop-close" title="Close" aria-label="Close castle">×</button>
+      <h2>🏰 Build the Castle</h2>
+      <p class="shop-tagline">Raise the castle from five relics. Find the relics through quests and exploration, then build each part in order.</p>
+      <div class="shop-coins">🪙 <span id="castleCoins">0</span> coins · <span id="castleProgress">0/5 parts raised</span></div>
+      <div id="castleItems" class="shop-items"></div>
+      <button id="castleDone" class="start-btn shop-done">Done</button>
+    </div>
+  </div>
+
+  <!-- Quest log: opened with 📜 / J. Lists active + completed quests. -->
+  <div id="questLog" class="shop-overlay hidden">
+    <div class="shop-panel">
+      <button id="questLogClose" class="shop-close" title="Close" aria-label="Close quest log">×</button>
+      <h2>📜 Quest Log</h2>
+      <p class="shop-tagline">Seek out the ❗ NPCs at each landmark. Complete their tasks for coins, gear and the castle relics.</p>
+      <div id="questLogItems" class="quest-log-items"></div>
+      <button id="questLogDone" class="start-btn shop-done">Done</button>
+    </div>
+  </div>
+
   <canvas id="renderCanvas"></canvas>
 
-  <script src="js/game.js?v=10"></script>
+  <script src="js/game.js?v=11"></script>
 </body>
 </html>

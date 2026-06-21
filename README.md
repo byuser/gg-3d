@@ -1,9 +1,21 @@
 # Good Game 3D
 
-A third-person browser **action-RPG**. Run as **Lily**, equip **weapons, armour and
-accessories**, and survive escalating **waves of living sweets**. Loot **gear** from a
-merchant and from **bosses**, manage your **inventory**, and grab glowing **artifacts**
-to rack up your **score**.
+A third-person browser **action-RPG adventure**. Run as **Lily** across a green **island**
+ringed by sea and snow-capped mountains: take **quests** from villagers, **gather and craft**,
+fight varied **monsters** and **bosses**, and raise a **castle** from five hidden **relics**.
+Build it and the **Ancient Dragon** awakens — slay it to **win the game**.
+
+Along the way: equip **weapons, armour and accessories**, brew **potions**, survive escalating
+**waves of living sweets**, weather **rain and storms** under a rolling **day/night cycle**,
+and loot **gear** from a merchant, bosses and quests.
+
+## The story
+
+Meadowgate is besieged by living sweets. An old castle once warded the vale — help the
+villagers raise it again. Collect **coins** to fund construction and roam the **map** to find
+the five castle **relics** (Foundation Stone, Rampart Runes, Tower Crystal, Golden Gate Key and
+the Dragon Sigil), won from **NPC quests** and far-flung **landmarks**. Build all five parts of
+the castle and the **dragon** appears for the final battle. Defeat it and you **win**.
 
 ▶️ **Play:** once GitHub Pages is enabled, the game is live at
 `https://<owner>.github.io/gg-3d/`
@@ -20,12 +32,46 @@ to rack up your **score**.
 | Attack (weapon) | `Space` or `F` (hold) | ✨ button (bottom-right) |
 | Use potion (belt 1/2/3) | `1` `2` `3` | tap a potion slot (bottom-left) |
 | Inventory / equipment | `I` (or `B`) | 🎒 button |
-| Collect / shop / forge (`E`) | `E` | action button (bottom-right) |
+| Crafting bench | `C` | 🛠️ button (top-right) |
+| Quest log | `J` (or `L`) | 📜 button (top-right) |
+| Talk / collect / gather / shop / build (`E`) | `E` | action button (bottom-right) |
 | Start next wave | `Enter` / `N` | corner widget (top-right) |
 | Music on/off | `M` | 🔊 button (top-right) |
 | Pause / menu | `Esc` | ☰ button (top-right) |
 
-## How to play
+## How to play — the adventure
+
+- **Quests & NPCs:** five **story NPCs** stand at the island's landmarks (the village, the
+  grove, the shore, the mountain pass and the ruins), each marked with a floating **❗ / ✓**.
+  Walk up + press **E** to **talk**: accept a quest, check progress, or turn a finished one in.
+  Quest objectives are **hunt** (defeat sweets), **gather** (collect a material), **reach** a
+  place, or **talk** to someone; rewards mix **coins**, **gear** and the all-important castle
+  **relics**. Track everything in the **quest log** (`J` / 📜). The HUD shows a live tracker for
+  your current quest.
+- **Gathering & crafting:** the world is dotted with **resource nodes** — chop **trees** for
+  wood, mine **rock** and **crystal**, gather **herbs**, cut **fibers** and collect **water** at
+  the shore (walk up + **E**; nodes respawn after a cooldown). Open the **crafting bench**
+  (`C` / 🛠️) to turn materials into **potions** (straight to your belt) and **gear** (to your
+  bag). Your materials pouch is shown top-left.
+- **The castle:** on **Castle Hill** stands the build site (walk up + **E**). Spend a matching
+  **relic** + **coins** to raise each of the five parts in order — **Foundation → Walls →
+  Towers → Gatehouse → Keep** — and watch it grow in the world. Finish the **Keep** and the
+  **Ancient Dragon** is summoned for the climactic fight. Slay it to **win**.
+- **The dragon:** a huge winged final boss that **hovers**, **dives** and breathes fans of
+  **fire**. It has a big health bar of its own; felling it triggers the **Victory** screen.
+- **Monster variety (Plants-vs-Zombies-style):** every living sweet rolls an **ability** that
+  unlocks as the waves escalate — **chasers**, fast **runners**, tanky **brutes**, leaping
+  **jumpers**, ranged **shooters** that spit candy bolts, and **bombers** that **explode** on
+  death. Each is tinted so you can read the threat at a glance.
+- **Weather & time:** a rolling **day/night cycle** sweeps the sun, sky, ambient light and fog
+  through dawn, day, dusk and night (see the HUD **clock**), while the **weather** drifts
+  between **clear**, **cloudy**, **foggy**, **rain** and **storm** (with falling rain) — shown
+  on the HUD weather chip.
+- **Impactful hits:** bolts, arrows and melee swings now **knock sweets back** and throw a
+  **shower of shards** on impact; bolts also **splat** on the ground and solid scenery. Bombers
+  detonate in a shockwave that shoves everything nearby.
+
+## How to play — the waves
 
 - **Waves:** each wave a swarm of **living sweets** marches in from the meadow's edge.
   Clear them all and a **wave-results window** pops up — it shows your tally (sweets
@@ -142,7 +188,11 @@ gameplay code can run in Node — verifying collision, the river barrier, wave s
 the **boss archetypes** (caster bolts, summoned minions, scaling, rare drops), the
 **gear economy** (buy / equip / dual-wield / sell), **projectile physics** (gravity arc
 + finite life), the seeded RNG, the **save/load round-trip** (inventory + equipment) and
-the **pause menu** without a browser:
+the **pause menu** — plus the new **adventure systems**: **monster abilities** +
+**knockback** + **bomber** explosions, **gathering & crafting**, the **quest** flow (accept
+/ progress / turn-in / rewards), the **day/night + weather** systems, **impact bursts**, the
+**castle → dragon → victory** path, and the **save/load** round-trip of the full adventure
+state — all without a browser:
 
 ```bash
 node test/harness.js
@@ -186,8 +236,21 @@ node test/harness.js
   artifacts, wave clock) back on top; stats are recomputed from the restored gear.
 - **`Pause`** — the in-game pause menu (Resume / Save / Restart / Exit) that freezes the
   simulation, with a confirmation guard on the destructive actions.
+- **`Quests` / `QuestGiver` / `Dialogue`** — the story spine: NPCs (`NPC_DATA`) offer quest
+  chains (`hunt` / `gather` / `reach` / `talk`) whose rewards (coins / gear / **relics**) are
+  paid out on turn-in; the `Dialogue` overlay drives accept/progress/turn-in.
+- **`ResourceNode` / materials / `CRAFT_RECIPES` / `Crafting`** — harvestable world nodes feed a
+  materials pouch (`player.materials`); the crafting bench spends them on potions + gear.
+- **`CastleSite` / `CastleUI` / `Dragon`** — the five-part castle build (relic + coins per part)
+  that grows in the world and summons the **dragon** final boss; felling it calls `winGame`.
+- **Monster abilities (`MONSTER_ABILITIES`)** — every sweet rolls a behaviour (chaser / runner /
+  brute / jumper / shooter / bomber); shooters fire `Hazard`s, bombers explode on death.
+- **`DayNight` / `Weather`** — a keyframed sun/sky/fog cycle and a weather state machine (with a
+  rain particle system) that layer over the scene.
+- **`Burst` / `spawnImpact`** — pooled, self-disposing impact effects + monster **knockback** so
+  hits land with weight (feature-detected so it stays headless-safe).
 
-The bottom of `game.js` documents the remaining seams for **PuzzleSystem** and **DialogueSystem**.
+The bottom of `game.js` documents the remaining seam for **PuzzleSystem**.
 
 ## Run locally
 
@@ -227,5 +290,14 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 - [x] Score + health + game-over
 - [x] In-game pause menu (resume / save / restart / exit, with confirmations)
 - [x] Save progress to a file & load it back (seeded world + full game state)
+- [x] **Story mode**: collect coins + five relics, raise the castle, then beat the **dragon** to win
+- [x] **Quest-giving NPCs** with dialogue, story chains, and coin / gear / relic rewards
+- [x] **Crafting + gathering**: chop trees, mine rock/crystal, gather herbs/fibers, collect water → craft potions & gear
+- [x] **Monster abilities** (chaser / runner / brute / jumper / shooter / bomber) that unlock with the waves
+- [x] **Dragon** final boss (hover / dive / fire-breath) + a Victory screen
+- [x] **Day/night cycle** + **weather** (clear / cloudy / fog / rain / storm) driving sky, sun, fog and rain
+- [x] **Bigger world**: an island with a sky dome, surrounding sea, distant mountains and named landmarks
+- [x] **Impact feedback**: knockback + shard bursts on hits, ground/scenery splats, bomber shockwaves
+- [x] Prettier character animation (swinging ponytails + feet, a forward lean and hip sway)
+- [x] Save/load extended to the full adventure state (materials, relics, quests, castle, time, weather)
 - [ ] Puzzles (levers, plates, gated doors)
-- [ ] NPC dialogue (Babylon GUI panels)

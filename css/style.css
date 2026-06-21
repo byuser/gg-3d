@@ -417,9 +417,12 @@ html, body {
 }
 .icon-btn:hover { background: rgba(11, 15, 26, 0.85); }
 .icon-btn:active { transform: scale(0.92); }
-/* Row, right→left: fullscreen, pause(+52), inventory(+104), music(+156). */
+/* Row, right→left: fullscreen, pause(+52), inventory(+104), craft(+156),
+   quest(+208), music(+260). */
 .inv-btn   { right: calc(max(12px, env(safe-area-inset-right)) + 104px); }
-.music-btn { right: calc(max(12px, env(safe-area-inset-right)) + 156px); }
+.craft-btn { right: calc(max(12px, env(safe-area-inset-right)) + 156px); }
+.quest-btn { right: calc(max(12px, env(safe-area-inset-right)) + 208px); }
+.music-btn { right: calc(max(12px, env(safe-area-inset-right)) + 260px); }
 
 /* ---------- Shop Buy/Sell tabs ---------- */
 .shop-tabs { display: flex; gap: 8px; justify-content: center; margin: 0 0 14px; }
@@ -553,4 +556,74 @@ html, body {
   .potion-bar { bottom: 172px; }
   .buff-bar { bottom: 232px; }
   .potion-slot { width: 48px; height: 48px; }
+}
+
+/* ---------- Adventure HUD: materials, relics, quest tracker ---------- */
+.materials-bar {
+  position: absolute; top: 58px; left: max(12px, env(safe-area-inset-left));
+  display: flex; flex-wrap: wrap; gap: 6px; max-width: 60vw; pointer-events: none;
+}
+.mat-chip {
+  display: inline-flex; align-items: center; gap: 2px;
+  background: rgba(11, 15, 26, 0.6); border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9px; padding: 3px 8px; font-size: 13px; font-weight: 700;
+}
+.relic-bar {
+  position: absolute; top: 92px; left: max(12px, env(safe-area-inset-left));
+  display: flex; align-items: center; gap: 4px; font-size: 14px; font-weight: 700;
+  color: var(--accent); pointer-events: none;
+}
+.relic-chip { font-size: 18px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+.quest-tracker {
+  position: absolute; top: 122px; left: max(12px, env(safe-area-inset-left));
+  max-width: min(320px, 64vw); pointer-events: none;
+  background: rgba(11, 15, 26, 0.62); border: 1px solid rgba(255, 207, 92, 0.3);
+  border-left: 3px solid var(--accent); border-radius: 10px; padding: 8px 12px;
+}
+.qt-title { font-size: 14px; font-weight: 800; color: var(--accent); }
+.qt-title .qt-done { color: #5be0a0; font-size: 11px; font-weight: 700; }
+.qt-obj { font-size: 12px; opacity: 0.85; margin-top: 2px; }
+
+/* ---------- NPC dialogue ---------- */
+.dialogue-panel { max-width: 520px; }
+.dlg-text { font-size: 15px; line-height: 1.5; margin: 6px 0 16px; opacity: 0.92; }
+.dlg-text p { margin: 0 0 10px; }
+.dlg-quest { color: var(--accent); font-weight: 600; }
+.dlg-obj { color: var(--accent2); font-size: 13px; }
+.dlg-reward { color: #5be0a0; font-size: 13px; }
+.dlg-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.dlg-actions .start-btn { font-size: 15px; padding: 10px 22px; margin: 0; }
+
+/* ---------- Crafting bench ---------- */
+.craft-mats {
+  display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
+  margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.craft-btn-busy { opacity: 0.5; }
+
+/* ---------- Castle build ---------- */
+.castle-row.built { opacity: 0.7; }
+.castle-row.built .name { color: #5be0a0; }
+#castleProgress { color: var(--accent2); font-weight: 700; }
+
+/* ---------- Quest log ---------- */
+.quest-log-items { display: grid; gap: 10px; margin-bottom: 16px; }
+.quest-row {
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px; padding: 10px 14px;
+}
+.quest-row.qdone { border-color: rgba(91, 224, 160, 0.4); }
+.qr-title { font-weight: 800; font-size: 15px; color: var(--accent); }
+.qr-obj { font-size: 13px; color: var(--accent2); margin: 2px 0; }
+.qr-from { font-size: 12px; opacity: 0.7; }
+.quest-sep { font-size: 13px; opacity: 0.7; margin-top: 6px; font-weight: 700; }
+.quest-row.qcomplete { opacity: 0.7; font-size: 14px; padding: 8px 14px; }
+
+/* ---------- Victory screen ---------- */
+.win-panel h1 { background: linear-gradient(135deg, #ffd34e, #ff9d5c, #ff6c8a); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* On small screens, keep the left-side HUD chips legible. */
+@media (max-width: 560px) {
+  .materials-bar { max-width: 52vw; }
+  .quest-tracker { max-width: 56vw; }
 }

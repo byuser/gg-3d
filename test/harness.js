@@ -34,11 +34,29 @@ class Vec3 {
 class Color3 {
   constructor(r = 0, g = 0, b = 0) { this.r = r; this.g = g; this.b = b; }
   scale(s) { return new Color3(this.r * s, this.g * s, this.b * s); }
-  toColor4() { return { r: this.r, g: this.g, b: this.b, a: 1 }; }
+  add(o) { return new Color3(this.r + o.r, this.g + o.g, this.b + o.b); }
+  clone() { return new Color3(this.r, this.g, this.b); }
+  toColor4(a = 1) { return new Color4(this.r, this.g, this.b, a); }
+  static Lerp(a, b, t) { return new Color3(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t); }
   static FromHexString(h) {
     h = String(h).replace("#", "");
     return new Color3(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255);
   }
+}
+class Color4 {
+  constructor(r = 0, g = 0, b = 0, a = 1) { this.r = r; this.g = g; this.b = b; this.a = a; }
+  static FromColor3(c, a = 1) { return new Color4(c.r, c.g, c.b, a); }
+}
+// A generic chainable no-op used for visual-only Babylon features (particles,
+// glow layer, …) that the headless harness doesn't need to simulate.
+function makeNoop() {
+  const fn = () => proxy;
+  const target = { color1: {}, color2: {}, colorDead: {}, emitter: null };
+  const proxy = new Proxy(target, {
+    get(t, p) { if (p in t) return t[p]; return fn; },
+    set(t, p, v) { t[p] = v; return true; },
+  });
+  return proxy;
 }
 
 function makeNode() {
@@ -61,19 +79,28 @@ const Observable = () => { const l = []; return { add: (f) => l.push(f), _fire: 
 const scenes = [];
 
 const BABYLON = {
-  Vector3: Vec3, Color3,
+  Vector3: Vec3, Color3, Color4,
   Engine: class { getDeltaTime() { return 16; } runRenderLoop() {} resize() {} },
-  Scene: class { constructor() { this.onBeforeRenderObservable = Observable(); scenes.push(this); } render() {} executeWhenReady(cb) { cb(); } },
+  Scene: class { constructor() { this.onBeforeRenderObservable = Observable(); scenes.push(this); } render() {} executeWhenReady(cb) { cb(); } registerBeforeRender(f) { this.onBeforeRenderObservable.add(f); } },
   ArcRotateCamera: class { constructor() { this.alpha = -Math.PI / 2; this.target = new Vec3(0, 1.4, 12); this.inputs = { removeByType() {} }; } attachControl() {} },
   HemisphericLight: class { constructor() { return makeNode(); } },
   DirectionalLight: class { constructor() { return makeNode(); } },
   PointLight: class { constructor() { return makeNode(); } },
-  ShadowGenerator: class { addShadowCaster() {} },
+  ShadowGenerator: class { addShadowCaster() {} getShadowMap() { return { renderList: [] }; } },
   StandardMaterial: class { constructor() { return makeNode(); } },
   TransformNode: class { constructor() { return makeNode(); } },
   MeshBuilder: new Proxy({}, { get: () => () => makeNode() }),
+  // Visual-only systems the harness simulates as inert no-ops.
+  ParticleSystem: class { constructor() { return makeNoop(); } },
+  GlowLayer: class { constructor() { return makeNoop(); } },
+  Texture: class { constructor() { return makeNode(); } },
+  DynamicTexture: class { constructor() { return makeNode(); } getContext() { return new Proxy({}, { get: () => () => {} }); } update() {} },
+  Sound: class { constructor() { return makeNoop(); } },
 };
+BABYLON.Texture.WRAP_ADDRESSMODE = 1;
+BABYLON.ParticleSystem.BLENDMODE_ONEONE = 1;
 BABYLON.Scene.FOGMODE_EXP2 = 2;
+BABYLON.Scene.FOGMODE_LINEAR = 1;
 
 const handlers = {};
 function makeEl() {
@@ -319,7 +346,7 @@ st.coinsList.length = 0; st.coinsList.push(new T.Coin(scene, world.shadow, new V
 st.drops.length = 0; st.drops.push(new T.ItemDrop(scene, world.shadow, new Vec3(4, 0, 4), "storm_bow"));
 
 const save = T.serializeGame();
-ok(save && save.v === 3, "serializeGame produced a versioned save");
+ok(save && save.v === 4, "serializeGame produced a versioned save");
 ok(T.validateSave(save), "save passes structural validation");
 ok(save.score === 4242 && save.money === 99, "score + money captured");
 ok(save.player.inventory.length === 2, "bag captured");
@@ -504,6 +531,146 @@ delete legacy.player.potions;
 ok(T.validateSave(legacy), "a legacy v2 save still validates");
 T.applySave(legacy);
 ok(sp.equipment.hand1 && sp.equipment.hand1.id === "magic_wand", "legacy string-id equipment restored");
+
+console.log("\n[19] monster abilities, knockback & bomber explosions");
+T.state.over = false;
+ok(T.abilitiesForWave(1).length === 1 && T.abilitiesForWave(6).length === 6, "ability variety unlocks as waves escalate");
+// Ability table: brutes hit hard + lumber, runners sprint.
+ok(T.MONSTER_ABILITIES.brute.dmg > T.MONSTER_ABILITIES.chaser.dmg && T.MONSTER_ABILITIES.brute.speed < 1, "brute deals more damage + moves slower");
+ok(T.MONSTER_ABILITIES.runner.speed > 1, "runner is a faster ability");
+// Derived stats (contact damage + body size) reflect the ability on construction.
+const baseM = new T.Monster(scene, world.shadow, new Vec3(0, 0, 0), 1, { kind: "gummy", hp: 3, speed: 2, ability: "chaser" });
+const bruteM = new T.Monster(scene, world.shadow, new Vec3(0, 0, 0), 1, { kind: "gummy", hp: 3, speed: 2, ability: "brute" });
+ok(bruteM.contactDamage > baseM.contactDamage && bruteM.radius > baseM.radius, "a brute sweet hits harder + is chunkier");
+// Knockback shoves a monster across the ground.
+const km = new T.Monster(scene, world.shadow, new Vec3(0, 0, 0), 1, { kind: "gummy", hp: 9, speed: 0, ability: "chaser" });
+km.knockback(1, 0, 8); const kx0 = km.root.position.x;
+km.update(0.05, new Vec3(0, 0, 60), T.state); // player far off so it can't chase
+ok(km.root.position.x > kx0, "knockback impulse displaces the monster");
+// A shooter sweet spits a hostile bolt when the player is in range.
+T.state.monsters.length = 0; T.state.enemyBolts.length = 0;
+const shooterM = new T.Monster(scene, world.shadow, new Vec3(8, 0, 0), 5, { kind: "gummy", hp: 3, speed: 0, ability: "shooter" });
+shooterM.attackTimer = 0; T.player.root.position.set(0, 0, 0);
+shooterM.update(0.05, T.player.position, T.state);
+ok(T.state.enemyBolts.length > 0, "shooter sweet launched a hostile bolt");
+// A bomber sweet detonates on death and damages a nearby player.
+T.state.monsters.length = 0; T.state.enemyBolts.length = 0; T.state.over = false;
+T.player.root.position.set(0, 0, 0); T.player.health = 100; T.player.maxHealth = 100; T.player.damageReduction = 0;
+const bombM = new T.Monster(scene, world.shadow, new Vec3(3, 0, 0), 1, { kind: "gummy", hp: 1, speed: 0, ability: "bomber" });
+T.state.monsters.push(bombM);
+T.state.bolts.push(shoot(bombM, 50));
+step(3);
+ok(T.player.health < 100, "bomber sweet detonated and hurt the nearby player");
+
+console.log("\n[20] gathering, materials & crafting");
+const cp = T.player;
+for (const id of T.MATERIAL_IDS) cp.materials[id] = 0;
+T.addMaterial(cp, "herb", 5); T.addMaterial(cp, "water", 3);
+ok(cp.materials.herb === 5 && cp.materials.water === 3, "gathered materials accumulate in the pouch");
+ok(T.hasMaterials(cp, { herb: 2, water: 1 }) && !T.hasMaterials(cp, { crystal: 1 }), "material sufficiency check works");
+cp.potions = [null, null, null];
+const potRecipe = T.CRAFT_RECIPES.find((r) => r.out === "minor_potion");
+const herb0 = cp.materials.herb;
+ok(T.craftRecipe(cp, potRecipe), "crafted a minor potion from herb + water");
+ok(cp.materials.herb === herb0 - potRecipe.mats.herb, "crafting consumed the materials");
+ok(cp.potions.some((s) => s && s.id === "minor_potion"), "crafted potion landed on the belt");
+for (const id of T.MATERIAL_IDS) cp.materials[id] = 99;
+cp.inventory = [];
+const gearRecipe = T.CRAFT_RECIPES.find((r) => T.getDef(r.out).type !== "potion");
+ok(T.craftRecipe(cp, gearRecipe), "crafted a gear item from materials");
+ok(cp.inventory.some((it) => it.id === gearRecipe.out), "crafted gear landed in the bag");
+for (const id of T.MATERIAL_IDS) cp.materials[id] = 0;
+const treeNode = new T.ResourceNode(scene, world.shadow, T.interaction, new Vec3(20, 0, 20), "tree", cp, T.state);
+treeNode.harvest();
+ok(cp.materials.wood > 0, "harvesting a tree node yielded wood");
+ok(treeNode.respawn > 0 && treeNode.it.enabled === false, "harvested node depletes + enters respawn cooldown");
+
+console.log("\n[21] quests — accept, progress, turn in, rewards");
+const Q = T.Quests;
+Q.active = []; Q.completed = []; Q.acceptKills = {}; Q.flags = {};
+T.state.totalKills = 0; T.player.relics = [];
+ok(Q.nextForNpc("mayor") && Q.nextForNpc("mayor").id === "mayor_1", "an NPC offers its first quest");
+ok(Q.accept("mayor_1") && Q.isActive("mayor_1"), "accepted a hunt quest");
+ok(!Q.isComplete(T.QUEST_BY_ID["mayor_1"]), "quest starts incomplete");
+T.state.totalKills += 5; Q.onKill();
+ok(Q.isComplete(T.QUEST_BY_ID["mayor_1"]), "hunt quest completes after enough kills");
+const qCoins0 = T.state.coins;
+ok(Q.turnIn("mayor_1"), "turned the quest in");
+ok(Q.isDone("mayor_1") && T.state.coins > qCoins0, "turn-in marks done + pays the reward");
+ok(Q.nextForNpc("mayor").id === "mayor_2", "the next quest unlocks after the previous is done");
+Q.accept("mayor_2"); Q.onReach("ruins");
+ok(Q.isComplete(T.QUEST_BY_ID["mayor_2"]), "a 'reach' objective is satisfied by visiting the place");
+const relics0 = T.player.relics.length;
+Q.turnIn("mayor_2");
+ok(T.player.relics.includes("relic_foundation") && T.player.relics.length === relics0 + 1, "reach quest awarded a castle relic");
+Q.accept("mayor_3"); T.player.materials.stone = 8;
+ok(Q.isComplete(T.QUEST_BY_ID["mayor_3"]), "a 'gather' objective reads the player's materials");
+const stone0 = T.player.materials.stone;
+Q.turnIn("mayor_3");
+ok(T.player.materials.stone === stone0 - 8, "gather turn-in consumed the required materials");
+Q.accept("hermit_1");
+ok(!Q.isComplete(T.QUEST_BY_ID["hermit_1"]), "a 'talk' quest starts incomplete");
+Q.onTalk("mayor");
+ok(Q.isComplete(T.QUEST_BY_ID["hermit_1"]), "talking to the target completes the talk quest");
+
+console.log("\n[22] day/night cycle + weather");
+ok(typeof T.DayNight.t === "number", "the day/night clock exists");
+T.DayNight.set(0.5); T.DayNight.update(0.01);
+ok(T.DayNight.phase === "day", "noon reads as 'day'");
+T.DayNight.set(0.0); T.DayNight.update(0.01);
+ok(T.DayNight.phase === "night", "midnight reads as 'night'");
+let weatherThrew = false;
+try { T.Weather.setState("rain"); T.Weather.update(0.1, T.player.position); T.Weather.setState("storm"); T.Weather.update(0.1, T.player.position); T.Weather.setState("clear"); } catch (e) { weatherThrew = true; }
+ok(!weatherThrew, "weather transitions run headless-safe");
+ok(T.Weather.STATES.rain && T.Weather.STATES.storm && T.Weather.STATES.fog, "rain/storm/fog weather states exist");
+
+console.log("\n[23] impact effects (bursts)");
+T.state.fx = T.state.fx || [];
+const fx0 = T.state.fx.length;
+T.spawnImpact(T.state, new Vec3(0, 0, 0), "#ffffff", { count: 6 });
+ok(T.state.fx.length === fx0 + 1, "spawnImpact queues a burst");
+const burst = T.state.fx[T.state.fx.length - 1];
+ok(burst.parts.length === 6, "the burst created the requested shards");
+let bAlive = true; for (let i = 0; i < 60 && bAlive; i++) bAlive = burst.update(0.05);
+ok(!bAlive, "the burst expires (self-cleans, never leaks)");
+
+console.log("\n[24] save/load round-trips the adventure state");
+const ap2 = T.player;
+for (const id of T.MATERIAL_IDS) ap2.materials[id] = 0;
+ap2.materials.wood = 7; ap2.materials.crystal = 2;
+ap2.relics = ["relic_walls"];
+T.Quests.active = ["herb_1"]; T.Quests.completed = ["mayor_1"];
+T.Quests.acceptKills = { herb_1: 3 }; T.Quests.flags = {};
+T.state.totalKills = 12;
+T.DayNight.set(0.42); T.Weather.setState("fog");
+if (T.state.castle) T.state.castle.built = ["foundation"];
+const advSave = T.serializeGame();
+ok(advSave.player.materials.wood === 7 && advSave.player.relics[0] === "relic_walls", "materials + relics serialized");
+ok(advSave.quests.active[0] === "herb_1" && advSave.quests.completed[0] === "mayor_1", "quest state serialized");
+ok(advSave.castle[0] === "foundation" && advSave.weather === "fog", "castle progress + weather serialized");
+ok(advSave.totalKills === 12, "lifetime kill counter serialized");
+for (const id of T.MATERIAL_IDS) ap2.materials[id] = 0;
+ap2.relics = []; T.Quests.active = []; T.Quests.completed = [];
+T.applySave(advSave);
+ok(ap2.materials.wood === 7 && ap2.relics.includes("relic_walls"), "materials + relics restored");
+ok(T.Quests.active.includes("herb_1") && T.Quests.isDone("mayor_1"), "quest state restored");
+ok(T.state.castle && T.state.castle.isBuilt("foundation"), "castle build state restored");
+
+console.log("\n[25] building the castle summons the dragon → victory");
+const site = T.state.castle;
+ok(!!site, "the castle build site exists");
+T.player.relics = T.CASTLE_PARTS.map((p) => p.relic);
+T.state.coins = 100000; T.state.won = false; T.state.over = false; T.state.dragon = null;
+T.state.monsters.length = 0; site.built = [];
+let builtAll = true;
+for (const part of T.CASTLE_PARTS) if (!site.build(part)) builtAll = false;
+ok(builtAll && site.built.length === T.CASTLE_PARTS.length, "all five castle parts built (relic + coins, in order)");
+ok(T.state.dragon && T.state.dragon.isDragon, "finishing the keep summoned the dragon");
+T.player.root.position.set(-50, 0, -50);
+T.state.bolts = T.state.bolts || [];
+T.state.bolts.push(shoot(T.state.dragon, T.state.dragon.maxHp + 100));
+step(3);
+ok(T.won === true, "slaying the dragon wins the game");
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED ✅" : failures + " CHECK(S) FAILED ❌"}`);
 process.exit(failures === 0 ? 0 : 1);

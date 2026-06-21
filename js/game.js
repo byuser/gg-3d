@@ -114,6 +114,23 @@
     coinPickupRange: 1.9,     // walk this close to scoop a coin up
     coinMagnetRange: 4.5,     // coins drift toward the player inside this range
     coinLife: 30,             // seconds before an uncollected coin fades away
+
+    // World / exploration (the bigger story map).
+    gatherRange: 3.0,         // reach to harvest a resource node
+    questReachRange: 6.0,     // how close counts as "reaching" a location/NPC
+
+    // Day / night cycle — one full day every `dayLength` seconds.
+    dayLength: 180,           // seconds for a full dawn→dusk→night→dawn cycle
+    startTimeOfDay: 0.30,     // begin mid-morning (0=midnight, 0.5=noon)
+
+    // Weather — chance to change each "weather tick" and how long a spell lasts.
+    weatherMinTime: 35,       // min seconds a weather state holds
+    weatherMaxTime: 75,       // max seconds before it may change
+
+    // The dragon — the final boss summoned once the castle is complete.
+    dragonBaseHp: 900,
+    dragonContactDamage: 30,
+    dragonScore: 5000,
   };
 
   const PALETTE = ["#6cc6ff", "#a06cff", "#ff6c8a", "#ffd34e", "#5be0a0", "#ff944e"];
@@ -318,6 +335,173 @@
   const FEATURED_POOL = Object.keys(ITEM_DB).filter((id) =>
     isGear(id) && ["rare", "epic", "legendary"].includes(ITEM_DB[id].rarity));
 
+  // =========================================================================
+  // ADVENTURE / STORY CONTENT — crafting materials, castle relics, the castle
+  // build plan, crafting recipes, the quest catalogue and the world's named
+  // locations + story NPCs. This is the data that turns the wave survival game
+  // into a story: gather + craft, run quests for coins/relics/gear, raise a
+  // castle from five relics, then face the dragon to win.
+  // =========================================================================
+
+  // ---- Crafting materials (gathered from the world; not gear/inventory). ----
+  const MATERIALS = {
+    wood:    { label: "Wood",    icon: "🪵", tint: "#a6692e" },
+    stone:   { label: "Stone",   icon: "🪨", tint: "#9aa0a6" },
+    water:   { label: "Water",   icon: "💧", tint: "#3aa0e0" },
+    herb:    { label: "Herb",    icon: "🌿", tint: "#4caa4c" },
+    fiber:   { label: "Fiber",   icon: "🧵", tint: "#caa46a" },
+    crystal: { label: "Crystal", icon: "🔮", tint: "#9fd0ff" },
+  };
+  const MATERIAL_IDS = Object.keys(MATERIALS);
+
+  // ---- Harvestable resource node kinds (cut trees, mine rock, collect water…). ----
+  const RESOURCE_KINDS = {
+    tree:    { mat: "wood",    label: "Chop tree",      amount: [1, 3], respawn: 22 },
+    rock:    { mat: "stone",   label: "Mine rock",      amount: [1, 2], respawn: 28 },
+    herb:    { mat: "herb",    label: "Gather herbs",   amount: [1, 2], respawn: 16 },
+    water:   { mat: "water",   label: "Collect water",  amount: [1, 2], respawn: 12 },
+    fiber:   { mat: "fiber",   label: "Cut fibers",     amount: [1, 2], respawn: 18 },
+    crystal: { mat: "crystal", label: "Mine crystal",   amount: [1, 1], respawn: 38 },
+  };
+
+  // ---- Castle relics — the five story collectibles. Each completes one part of
+  // the castle. Relics are won from quests and found at the world's far reaches;
+  // they live in their own pouch (player.relics), not the gear bag. ----
+  const RELICS = {
+    relic_foundation: { name: "Foundation Stone",  icon: "🗿", part: "foundation", desc: "An immense, rune-etched cornerstone." },
+    relic_walls:      { name: "Rampart Runes",     icon: "🧱", part: "walls",      desc: "Stones that remember how to stand as walls." },
+    relic_towers:     { name: "Tower Crystal",     icon: "🔮", part: "towers",     desc: "A crystal that sings the spires into being." },
+    relic_gate:       { name: "Golden Gate Key",   icon: "🗝️", part: "gate",       desc: "A great key that conjures an unbreakable gate." },
+    relic_keep:       { name: "Dragon Sigil",      icon: "🐲", part: "keep",       desc: "The seal of the old keep — and a dragon's attention." },
+  };
+  const RELIC_IDS = Object.keys(RELICS);
+  const getRelic = (id) => RELICS[id];
+
+  // ---- Castle build plan — five ordered parts, each needing its relic + coins.
+  // Building the final "keep" summons the dragon for the climactic battle. ----
+  const CASTLE_PARTS = [
+    { id: "foundation", name: "Foundation", icon: "🟫", relic: "relic_foundation", cost: 40,  desc: "Lay the great cornerstone." },
+    { id: "walls",      name: "Walls",      icon: "🧱", relic: "relic_walls",      cost: 80,  desc: "Raise the curtain walls." },
+    { id: "towers",     name: "Towers",     icon: "🗼", relic: "relic_towers",     cost: 130, desc: "Conjure the corner spires." },
+    { id: "gate",       name: "Gatehouse",  icon: "🏰", relic: "relic_gate",       cost: 190, desc: "Hang the golden gate." },
+    { id: "keep",       name: "Keep",       icon: "👑", relic: "relic_keep",       cost: 260, desc: "Crown the keep — and wake the dragon." },
+  ];
+  const CASTLE_PART_BY_ID = {};
+  for (const p of CASTLE_PARTS) CASTLE_PART_BY_ID[p.id] = p;
+
+  // ---- Crafting recipes — turn gathered materials into potions + basic gear.
+  // `out` is an ITEM_DB id (potions go to the belt; gear goes to the bag). ----
+  const CRAFT_RECIPES = [
+    { out: "minor_potion",   mats: { herb: 2, water: 1 } },
+    { out: "health_potion",  mats: { herb: 3, water: 2 } },
+    { out: "greater_potion", mats: { herb: 5, water: 3, crystal: 1 } },
+    { out: "elixir_swift",   mats: { herb: 2, water: 1, fiber: 2 } },
+    { out: "elixir_might",   mats: { herb: 2, water: 1, crystal: 1 } },
+    { out: "leather_cap",    mats: { fiber: 3, wood: 1 } },
+    { out: "leather_vest",   mats: { fiber: 5, wood: 2 } },
+    { out: "leather_boots",  mats: { fiber: 3, wood: 2 } },
+    { out: "iron_dagger",    mats: { wood: 2, stone: 3 } },
+    { out: "iron_sword",     mats: { wood: 2, stone: 5 } },
+    { out: "iron_helm",      mats: { stone: 4, fiber: 2 } },
+    { out: "iron_plate",     mats: { stone: 8, fiber: 3, crystal: 1 } },
+    { out: "apprentice_staff", mats: { wood: 4, crystal: 2 } },
+  ];
+
+  // ---- Monster abilities (the "Plants vs Zombies" variety). Every living sweet
+  // rolls one of these behaviours; later waves field the nastier ones. ----
+  //   chaser  — marches straight at you (the classic).
+  //   runner  — fast and frail.
+  //   brute   — slow, tanky, hits hard.
+  //   jumper  — periodically LEAPS across the gap at you.
+  //   shooter — hangs back and SPITS candy bolts (a Hazard).
+  //   bomber  — rushes in and EXPLODES on death for area damage.
+  const MONSTER_ABILITIES = {
+    chaser:  { hp: 1.0,  speed: 1.0,  dmg: 1.0,  tint: null },
+    runner:  { hp: 0.6,  speed: 1.7,  dmg: 0.8,  tint: "#7ef0ff" },
+    brute:   { hp: 2.6,  speed: 0.6,  dmg: 1.8,  tint: "#ff7a4e", scale: 1.4 },
+    jumper:  { hp: 1.0,  speed: 1.1,  dmg: 1.1,  tint: "#b6ff6c" },
+    shooter: { hp: 0.9,  speed: 0.8,  dmg: 1.0,  tint: "#ff6cf0", standoff: 11 },
+    bomber:  { hp: 0.8,  speed: 1.25, dmg: 1.0,  tint: "#ffd34e", explodes: true },
+  };
+  // Which abilities are in play by a given wave (variety unlocks over time).
+  function abilitiesForWave(w) {
+    const pool = ["chaser"];
+    if (w >= 2) pool.push("runner");
+    if (w >= 3) pool.push("jumper");
+    if (w >= 4) pool.push("brute");
+    if (w >= 5) pool.push("shooter");
+    if (w >= 6) pool.push("bomber");
+    return pool;
+  }
+
+  // ---- Named locations scattered across the larger world. Each is a landmark
+  // the story sends you to; several host a story NPC with quests + rewards. ----
+  const LOCATIONS = [
+    { id: "village",  name: "Meadowgate Village", icon: "🏘️", x: 0,    z: -14, color: "#ffd98a" },
+    { id: "grove",    name: "Whisperwood Grove",  icon: "🌲", x: -48,  z: -40, color: "#5be0a0" },
+    { id: "seaside",  name: "Saltmarsh Shore",    icon: "🌊", x: 60,   z: 52,  color: "#6cc6ff" },
+    { id: "mountain", name: "Frostpeak Pass",     icon: "⛰️", x: -58,  z: 50,  color: "#cfe3ff" },
+    { id: "ruins",    name: "Sunken Ruins",       icon: "🏛️", x: 56,   z: -52, color: "#c8a86a" },
+    { id: "castle",   name: "Castle Hill",        icon: "🏰", x: 0,    z: 64,  color: "#ff9d5c" },
+  ];
+  const LOCATION_BY_ID = {};
+  for (const l of LOCATIONS) LOCATION_BY_ID[l.id] = l;
+
+  // ---- Story NPCs. Each stands at a location, has a little story, and offers a
+  // short chain of quests. Quest objectives: hunt (kill sweets), gather (collect
+  // a material), reach (visit a location), talk (speak to another NPC). Rewards
+  // mix coins, gear and the castle relics, so questing is how the castle rises.
+  //   quest: { id, title, story, obj:{type,target,count}, reward:{coins,item,relic,mats} }
+  // =========================================================================
+  const NPC_DATA = [
+    {
+      id: "mayor", name: "Mayor Plum", icon: "🎩", loc: "village",
+      intro: "Meadowgate is besieged by living sweets! They say a castle once warded this vale. Help us raise it again, hero.",
+      quests: [
+        { id: "mayor_1", title: "A Taste of Battle", story: "Cull the sweets prowling our fields.", obj: { type: "hunt", count: 5 }, reward: { coins: 30, mats: { wood: 3, water: 2 } } },
+        { id: "mayor_2", title: "The Cornerstone", story: "The Foundation Stone lies in the Sunken Ruins. Bring it and we can begin.", obj: { type: "reach", target: "ruins" }, reward: { coins: 40, relic: "relic_foundation" } },
+        { id: "mayor_3", title: "Stones for the Walls", story: "Walls need good stone. Mine some from the hills.", obj: { type: "gather", target: "stone", count: 8 }, reward: { coins: 50, relic: "relic_walls" } },
+      ],
+    },
+    {
+      id: "herbalist", name: "Sage Willow", icon: "👩‍🌾", loc: "grove",
+      intro: "The Whisperwood gives freely to those who listen. Gather with me, and I'll share old secrets.",
+      quests: [
+        { id: "herb_1", title: "Green Hands", story: "Gather herbs from the grove for my poultices.", obj: { type: "gather", target: "herb", count: 6 }, reward: { coins: 25, item: "health_potion", mats: { crystal: 1 } } },
+        { id: "herb_2", title: "Thin the Swarm", story: "The deeper wood crawls with sweets. Thin them for me.", obj: { type: "hunt", count: 10 }, reward: { coins: 45, item: "ring_swift" } },
+      ],
+    },
+    {
+      id: "fisher", name: "Old Brin", icon: "🎣", loc: "seaside",
+      intro: "Hah! A landlubber at my shore. The sea keeps the Tower Crystal — earn it, and it's yours.",
+      quests: [
+        { id: "fish_1", title: "Fresh Water", story: "Fetch clean water from the river for my nets.", obj: { type: "gather", target: "water", count: 6 }, reward: { coins: 30, mats: { fiber: 4 } } },
+        { id: "fish_2", title: "Crystal Tide", story: "Defeat the sweets washing up on my shore, and the Tower Crystal is yours.", obj: { type: "hunt", count: 12 }, reward: { coins: 60, relic: "relic_towers" } },
+      ],
+    },
+    {
+      id: "smith2", name: "Forgemother Tova", icon: "⚒️", loc: "mountain",
+      intro: "Frostpeak iron is the finest there is. Prove your arm and I'll forge you the Gate Key.",
+      quests: [
+        { id: "smith_1", title: "Ore for the Forge", story: "Bring me crystal from the high rocks.", obj: { type: "gather", target: "crystal", count: 3 }, reward: { coins: 50, item: "iron_helm" } },
+        { id: "smith_2", title: "The Golden Gate", story: "Slay the sweets haunting the pass and claim the Gate Key.", obj: { type: "hunt", count: 14 }, reward: { coins: 80, relic: "relic_gate" } },
+      ],
+    },
+    {
+      id: "hermit", name: "The Hermit", icon: "🧙", loc: "ruins",
+      intro: "You seek the Dragon Sigil? Few are ready. Speak with the Mayor first, then return to me.",
+      quests: [
+        { id: "hermit_1", title: "Word from the Vale", story: "Speak to Mayor Plum, then come back to me.", obj: { type: "talk", target: "mayor" }, reward: { coins: 30, mats: { crystal: 2 } } },
+        { id: "hermit_2", title: "The Dragon's Seal", story: "Defeat 18 sweets to prove your worth and earn the Dragon Sigil.", obj: { type: "hunt", count: 18 }, reward: { coins: 120, relic: "relic_keep" } },
+      ],
+    },
+  ];
+  const NPC_BY_ID = {};
+  for (const n of NPC_DATA) NPC_BY_ID[n.id] = n;
+  // Flatten every quest for quick lookup by id.
+  const QUEST_BY_ID = {};
+  for (const n of NPC_DATA) for (const q of n.quests) { q.npc = n.id; QUEST_BY_ID[q.id] = q; }
+
   // A monotonically increasing id so inventory/equipment entries are distinct
   // even when two of the same item are owned.
   let _instSeq = 1;
@@ -501,6 +685,71 @@
     updateBuffBar(player); // refresh the countdown each frame while buffs run
   }
 
+  // ---- Crafting materials -------------------------------------------------
+  function addMaterial(player, mat, n) {
+    if (!(mat in player.materials)) player.materials[mat] = 0;
+    player.materials[mat] += n;
+    updateMaterialsHud(player);
+    Quests.onGather(player, mat, n);
+  }
+  function hasMaterials(player, mats) {
+    for (const k in mats) if ((player.materials[k] || 0) < mats[k]) return false;
+    return true;
+  }
+  function spendMaterials(player, mats) {
+    if (!hasMaterials(player, mats)) return false;
+    for (const k in mats) player.materials[k] -= mats[k];
+    updateMaterialsHud(player);
+    return true;
+  }
+  // A short "3 🪵 · 2 💧" summary of a material cost map.
+  function matSummary(mats) {
+    return Object.keys(mats).map((k) => `${mats[k]} ${(MATERIALS[k] || {}).icon || k}`).join(" · ");
+  }
+
+  // ---- Castle relics ------------------------------------------------------
+  function addRelic(player, id) {
+    if (!RELICS[id]) return;
+    if (!player.relics.includes(id)) player.relics.push(id);
+    updateRelicHud(player);
+  }
+  const hasRelic = (player, id) => player.relics.includes(id);
+
+  // ---- Crafting -----------------------------------------------------------
+  // Spend a recipe's materials to produce its output (a potion → belt, or gear
+  // → bag). Returns true on success.
+  function craftRecipe(player, recipe) {
+    const def = getDef(recipe.out);
+    if (!def) return false;
+    if (!hasMaterials(player, recipe.mats)) { toast("Not enough materials"); Sfx.play("error"); return false; }
+    if (def.type === "potion") {
+      if (!potionAdd(player, recipe.out)) { toast("Potion belt full (3 kinds)"); Sfx.play("error"); return false; }
+    } else {
+      if (player.inventory.length >= player.invCap) { toast("Bag full"); Sfx.play("error"); return false; }
+      invAdd(player, makeItem(recipe.out));
+    }
+    spendMaterials(player, recipe.mats);
+    updatePotionBar(player);
+    Sfx.play("enhance");
+    toast(`🛠️ Crafted ${def.icon} ${def.name}`);
+    Quests.onCraft(player, recipe.out);
+    return true;
+  }
+
+  // ---- Quest reward payout (coins / material / gear item / castle relic). ----
+  function grantReward(player, state, reward) {
+    if (!reward) return;
+    if (reward.coins) { state.coins += reward.coins; updateCoins(state); }
+    if (reward.mats) for (const k in reward.mats) addMaterial(player, k, reward.mats[k]);
+    if (reward.item && getDef(reward.item)) {
+      const d = getDef(reward.item);
+      if (d.type === "potion") potionAdd(player, reward.item);
+      else invAdd(player, makeItem(reward.item));
+      updatePotionBar(player);
+    }
+    if (reward.relic) addRelic(player, reward.relic);
+  }
+
   // ---- DOM ---------------------------------------------------------------
   const dom = {
     canvas: document.getElementById("renderCanvas"),
@@ -586,6 +835,43 @@
     confirmText: document.getElementById("confirmText"),
     confirmYes: document.getElementById("confirmYes"),
     confirmNo: document.getElementById("confirmNo"),
+    // ---- Adventure HUD: materials pouch, relics, quest tracker, clock, weather ----
+    materialsBar: document.getElementById("materialsBar"),
+    relicBar: document.getElementById("relicBar"),
+    questTracker: document.getElementById("questTracker"),
+    clock: document.getElementById("clock"),
+    weather: document.getElementById("weather"),
+    craftBtn: document.getElementById("craftBtn"),
+    questBtn: document.getElementById("questBtn"),
+    // ---- Victory screen ----
+    win: document.getElementById("win"),
+    winScore: document.getElementById("winScore"),
+    winWave: document.getElementById("winWave"),
+    winReplayBtn: document.getElementById("winReplayBtn"),
+    // ---- NPC dialogue overlay ----
+    dialogue: document.getElementById("dialogue"),
+    dlgName: document.getElementById("dlgName"),
+    dlgText: document.getElementById("dlgText"),
+    dlgActions: document.getElementById("dlgActions"),
+    dlgClose: document.getElementById("dlgClose"),
+    // ---- Crafting overlay ----
+    crafting: document.getElementById("crafting"),
+    craftMats: document.getElementById("craftMats"),
+    craftItems: document.getElementById("craftItems"),
+    craftClose: document.getElementById("craftClose"),
+    craftDone: document.getElementById("craftDone"),
+    // ---- Castle build overlay ----
+    castle: document.getElementById("castle"),
+    castleCoins: document.getElementById("castleCoins"),
+    castleItems: document.getElementById("castleItems"),
+    castleProgress: document.getElementById("castleProgress"),
+    castleClose: document.getElementById("castleClose"),
+    castleDone: document.getElementById("castleDone"),
+    // ---- Quest log overlay ----
+    questLog: document.getElementById("questLog"),
+    questLogItems: document.getElementById("questLogItems"),
+    questLogClose: document.getElementById("questLogClose"),
+    questLogDone: document.getElementById("questLogDone"),
   };
 
   const isTouch = window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
@@ -748,6 +1034,11 @@
       this.buffs = [];           // active timed potion buffs
       this.weapon = cloneWeapon(FISTS);
 
+      // Adventure state: gathered crafting materials + collected castle relics.
+      this.materials = {};       // { wood: n, stone: n, … }
+      for (const id of MATERIAL_IDS) this.materials[id] = 0;
+      this.relics = [];          // relic ids collected but not yet built in
+
       this._build(scene, shadow);
     }
 
@@ -792,9 +1083,15 @@
       const fringe = add(sphere(scene, "fringe", 0.5, hair), lean);
       fringe.position.set(0, 1.92, 0.04); fringe.scaling.set(1, 0.6, 1);
 
+      // Ponytails ride on their own pivots at the back of the head so they can
+      // swing with the stride (added in _animateLocomotion) — a touch of life.
+      this.tails = [];
       for (const s of [-1, 1]) {
-        const tail = add(sphere(scene, "tail", 0.22, hair), lean);
-        tail.position.set(0.27 * s, 1.86, -0.04); tail.scaling.set(1, 1.7, 1);
+        const tp = new BABYLON.TransformNode("tailP" + s, scene);
+        tp.parent = lean; tp.position.set(0.27 * s, 2.02, -0.04);
+        const tail = add(sphere(scene, "tail", 0.22, hair), tp);
+        tail.position.set(0, -0.18, 0); tail.scaling.set(1, 1.7, 1);
+        this.tails.push(tp);
         const eye = add(sphere(scene, "eye", 0.08, eyeMat), lean);
         eye.position.set(0.1 * s, 1.76, 0.23);
       }
@@ -811,10 +1108,11 @@
       this.armR = limb("armR", 1.45, 0.32, dress, 0.6);
       this.legL = limb("legL", 0.7, -0.14, skin, 0.6);
       this.legR = limb("legR", 0.7, 0.14, skin, 0.6);
-      // Shoes
-      for (const [pivot, x] of [[this.legL, -0.14], [this.legR, 0.14]]) {
-        const sh = add(box(scene, "shoe", 0.22, 0.14, 0.34, shoe), lean);
-        sh.position.set(x, 0.07, 0.05); this["shoe" + x] = sh;
+      // Shoes parented to the leg pivots so the feet swing with the stride.
+      this.shoes = [];
+      for (const pivot of [this.legL, this.legR]) {
+        const sh = add(box(scene, "shoe", 0.22, 0.14, 0.34, shoe), pivot);
+        sh.position.set(0, -0.62, 0.06); this.shoes.push(sh);
       }
 
       // ---- The MAGIC WAND, held in the right hand. ----
@@ -1002,22 +1300,33 @@
 
     _animateLocomotion(speed) {
       if (this.state === "walk") {
-        const sw = Math.sin(this.walkPhase) * 0.7 * (0.3 + speed);
+        // A bouncier stride: longer leg swing, counter-swinging arms, a forward
+        // lean, gentle hip sway and a vertical bob — reads far more lively.
+        const sw = Math.sin(this.walkPhase) * 0.8 * (0.35 + speed);
         this.legL.rotation.x = sw; this.legR.rotation.x = -sw;
-        this.armL.rotation.x = -sw * 0.8; this.armR.rotation.x = sw * 0.8;
-        this.lean.position.y = Math.abs(Math.sin(this.walkPhase)) * 0.06;
-        this.lean.rotation.x = 0;
+        this.armL.rotation.x = -sw * 0.85; this.armR.rotation.x = sw * 0.85;
+        this.armL.rotation.z = lerp(this.armL.rotation.z || 0, 0.14, 0.25);
+        this.armR.rotation.z = lerp(this.armR.rotation.z || 0, -0.14, 0.25);
+        this.lean.position.y = Math.abs(Math.sin(this.walkPhase)) * 0.09;
+        this.lean.rotation.x = lerp(this.lean.rotation.x, 0.08, 0.2);   // lean into the run
+        this.lean.rotation.z = Math.sin(this.walkPhase) * 0.05;          // hip/shoulder sway
+        this._tailSway = -Math.sin(this.walkPhase) * 0.3 + 0.25;
       } else {
-        // Idle: breathing + a touch of arm sway.
+        // Idle: breathing + a touch of arm sway + a subtle weight shift.
         const b = Math.sin(this.walkPhase) * 0.05;
-        this.legL.rotation.x = this.legR.rotation.x = 0;
+        this.legL.rotation.x = lerp(this.legL.rotation.x, 0, 0.2);
+        this.legR.rotation.x = lerp(this.legR.rotation.x, 0, 0.2);
         this.armL.rotation.x = lerp(this.armL.rotation.x, 0.08 + b, 0.2);
         this.armR.rotation.x = lerp(this.armR.rotation.x, 0.08 - b, 0.2);
         this.armL.rotation.z = lerp(this.armL.rotation.z || 0, 0.08, 0.2);
         this.armR.rotation.z = lerp(this.armR.rotation.z || 0, -0.08, 0.2);
         this.lean.position.y = lerp(this.lean.position.y, b * 0.4, 0.2);
         this.lean.rotation.x = lerp(this.lean.rotation.x, 0, 0.2);
+        this.lean.rotation.z = lerp(this.lean.rotation.z || 0, Math.sin(this.walkPhase * 0.5) * 0.02, 0.1);
+        this._tailSway = Math.sin(this.walkPhase) * 0.06;
       }
+      // Swing the ponytails toward the target sway with a little lag.
+      if (this.tails) for (const tp of this.tails) tp.rotation.x = lerp(tp.rotation.x || 0, this._tailSway || 0, 0.2);
     }
 
     // Crouch -> grab -> stand and raise the artifact, which then poofs into points.
@@ -1079,6 +1388,8 @@
       this.radius = opts.radius || CONFIG.boltRadius;  // hit radius vs monsters
       this.damage = opts.damage || 1;
       this.pierce = opts.pierce || 0;                  // extra enemies a bolt passes through
+      this.knock = opts.knock || 0;                    // extra knockback on impact
+      this.color = opts.color || "#bfe3ff";            // impact-burst tint
       this.hitSet = new Set();                         // monsters already struck (no double-hits)
       this.dead = false;
       const arrow = opts.shape === "arrow";
@@ -1154,28 +1465,43 @@
   ];
 
   class Monster {
-    // `restore` (optional) rebuilds a saved sweet exactly: { kind, hp, speed }.
+    // `restore` (optional) rebuilds a saved sweet exactly: { kind, hp, speed, ability }.
     constructor(scene, shadow, pos, wave, restore) {
       this.scene = scene;
+      // Each sweet rolls a "Plants vs Zombies"-style ability: a chaser, a fast
+      // runner, a tanky brute, a leaping jumper, a ranged shooter or a bomber
+      // that bursts on death. Variety unlocks as the waves escalate. A `restore`
+      // captures the FINAL hp/speed (ability already folded in), so we only apply
+      // the ability multipliers for freshly-spawned sweets — never on restore.
       if (restore) {
-        this.hp = restore.hp;
-        this.speed = restore.speed;
         this.kind = restore.kind;
+        this.ability = restore.ability && MONSTER_ABILITIES[restore.ability] ? restore.ability : "chaser";
+        this.hp = this.maxHp = restore.hp;
+        this.speed = restore.speed;
       } else {
-        this.hp = 1 + Math.floor((wave - 1) / CONFIG.monsterHpPerWaves); // sturdier in later waves
-        this.speed = Math.min(
-          CONFIG.monsterMaxSpeed,
-          CONFIG.monsterBaseSpeed + rng() * 0.7 + (wave - 1) * CONFIG.monsterSpeedPerWave
-        );
+        const pool = abilitiesForWave(wave);
+        this.ability = pool[(rng() * pool.length) | 0];
+        const ab0 = MONSTER_ABILITIES[this.ability];
+        const baseHp = 1 + Math.floor((wave - 1) / CONFIG.monsterHpPerWaves); // sturdier in later waves
+        this.hp = this.maxHp = Math.max(1, Math.round(baseHp * ab0.hp));
+        const spd = CONFIG.monsterBaseSpeed + rng() * 0.7 + (wave - 1) * CONFIG.monsterSpeedPerWave;
+        this.speed = Math.min(CONFIG.monsterMaxSpeed, spd) * ab0.speed;
         this.kind = SWEETS[(rng() * SWEETS.length) | 0];
       }
+      // Contact damage + body size are derived from the ability every time (they
+      // aren't saved), so they're correct on both fresh spawns and restores.
+      const ab = MONSTER_ABILITIES[this.ability] || MONSTER_ABILITIES.chaser;
       this.alive = true;
       this.dying = 0;                               // >0 while playing the pop animation
-      this.radius = 0.85;
+      this.radius = 0.85 * (ab.scale || 1);
       this.isBoss = false;
-      this.contactDamage = CONFIG.contactDamage;    // damage dealt to the player on contact
+      this.contactDamage = CONFIG.contactDamage * ab.dmg;
       this.bob = rng() * Math.PI * 2;
       this.biteTimer = 0;                           // cooldown before this sweet bites again
+      this.attackTimer = 1 + rng() * 2;             // jumper leap / shooter spit cadence
+      this.jumpT = 0;                               // >0 while mid-leap
+      this.kx = 0; this.kz = 0;                     // knockback velocity (impact feedback)
+      this._abScale = ab.scale || 1;
       this._build(scene, shadow, pos);
     }
 
@@ -1186,8 +1512,11 @@
       const body = new BABYLON.TransformNode("monsterBody", scene);
       body.parent = root; this.body = body;
 
-      const candy = PALETTE[(rng() * PALETTE.length) | 0];
-      const main = emat(scene, "swt" + root.uniqueId, candy, 0.18);
+      // A special ability tints the sweet so you can read the threat at a glance.
+      const ab = MONSTER_ABILITIES[this.ability] || MONSTER_ABILITIES.chaser;
+      const candy = ab.tint || PALETTE[(rng() * PALETTE.length) | 0];
+      this.tint = candy;
+      const main = emat(scene, "swt" + root.uniqueId, candy, ab.tint ? 0.28 : 0.18);
       const cream = emat(scene, "cream" + root.uniqueId, "#fff3e0", 0.1);
       const dark = emat(scene, "swtd" + root.uniqueId, "#7a4030", 0.08);
       const add = (m) => { m.parent = body; shadow.addShadowCaster(m); return m; };
@@ -1284,32 +1613,108 @@
       const blob = disc(scene, "mblob", this.radius, emat(scene, "mblobM" + root.uniqueId, "#000000", 0));
       blob.material.alpha = 0.25; blob.rotation.x = Math.PI / 2; blob.position.y = 0.02;
       blob.parent = root; blob.isPickable = false;
+
+      // A floating marker telegraphs the ranged "shooter" and the volatile
+      // "bomber" so the player can plan around them.
+      if (this.ability === "shooter") {
+        const orb = sphere(scene, "mShot", 0.3, emat(scene, "mShotM" + root.uniqueId, "#ff6cf0", 1));
+        orb.parent = body; orb.position.set(0, topY + 0.7, 0.3); orb.isPickable = false;
+        this.marker = orb;
+      } else if (this.ability === "bomber") {
+        const fuse = sphere(scene, "mFuse", 0.22, emat(scene, "mFuseM" + root.uniqueId, "#ff3b3b", 0.9));
+        fuse.parent = body; fuse.position.set(0, topY + 0.7, 0); fuse.isPickable = false;
+        this.marker = fuse;
+      }
+
+      // The ability's body scale (brutes are chunkier) is the resting scale that
+      // hit-squash + death animations play against.
+      body.scaling.setAll(this._abScale);
     }
 
-    // Move toward the player; return true if currently touching them.
-    update(dt, playerPos) {
+    // Apply a knockback impulse (used by weapon/boss impacts) in world XZ.
+    knockback(dx, dz, force) {
+      const d = Math.hypot(dx, dz) || 1;
+      this.kx += (dx / d) * force; this.kz += (dz / d) * force;
+    }
+
+    // Move toward the player; return true if currently touching them. `state`
+    // lets ranged "shooter" sweets launch hostile bolts into the world.
+    update(dt, playerPos, state) {
       if (this.biteTimer > 0) this.biteTimer -= dt;
+      const s = this._abScale;
       if (this.dying > 0) {
         this.dying -= dt;
         const k = Math.max(0, this.dying / 0.35);
-        this.body.scaling.setAll(k);
+        this.body.scaling.setAll(k * s);
         this.body.rotation.y += dt * 12;
         if (this.dying <= 0) { this.alive = false; this.root.dispose(); }
         return false;
       }
       this.bob += dt * 6;
-      // Ease back to normal scale after a non-fatal hit squashed us bigger.
-      if (this.body.scaling.x !== 1) this.body.scaling.setAll(lerp(this.body.scaling.x, 1, 0.25));
+      // Ease back to the resting scale after a non-fatal hit squashed us bigger.
+      if (Math.abs(this.body.scaling.x - s) > 1e-3) this.body.scaling.setAll(lerp(this.body.scaling.x, s, 0.25));
+
+      // Decaying knockback impulse — gives weapon/boss impacts physical weight.
+      if (this.kx || this.kz) {
+        this.root.position.x += this.kx * dt;
+        this.root.position.z += this.kz * dt;
+        const decay = Math.exp(-dt * 6);
+        this.kx *= decay; this.kz *= decay;
+        if (Math.hypot(this.kx, this.kz) < 0.05) { this.kx = this.kz = 0; }
+      }
+
       const to = playerPos.subtract(this.root.position); to.y = 0;
       const dist = to.length();
-      if (dist > 0.001) {
-        to.normalize();
-        const step = Math.min(this.speed * dt, Math.max(0, dist - 1.0));
-        this.root.position.addInPlace(to.scale(step));
-        this.body.rotation.y = lerpAngle(this.body.rotation.y, Math.atan2(to.x, to.z), 0.2);
+      const ab = MONSTER_ABILITIES[this.ability] || MONSTER_ABILITIES.chaser;
+      if (dist > 0.001) this.body.rotation.y = lerpAngle(this.body.rotation.y, Math.atan2(to.x / dist, to.z / dist), 0.2);
+      if (this.marker) this.marker.rotation.y += dt * 4;
+
+      // ---- Mid-leap (jumper): arc fast toward the locked-in landing spot. ----
+      if (this.jumpT > 0) {
+        this.jumpT -= dt;
+        const prog = 1 - Math.max(0, this.jumpT / this._jumpDur);
+        if (this._jumpDir) this.root.position.addInPlace(this._jumpDir.scale(this._jumpSpeed * dt));
+        this.body.position.y = Math.sin(prog * Math.PI) * 1.8; // a real hop arc
+        if (this.jumpT <= 0) this.body.position.y = 0;
+        return dist <= this.radius + 1.0;
       }
-      // Hoppy bob.
-      this.body.position.y = Math.abs(Math.sin(this.bob)) * 0.18;
+
+      this.attackTimer -= dt;
+
+      // ---- Shooter: hang back at a standoff and spit candy bolts. ----
+      if (this.ability === "shooter") {
+        const standoff = ab.standoff || 11;
+        if (dist > standoff + 0.4) this.root.position.addInPlace(to.scale(Math.min(this.speed * dt, dist - standoff) / dist));
+        else if (dist < standoff - 1.5) this.root.position.addInPlace(to.scale(-this.speed * 0.7 * dt / dist));
+        if (this.attackTimer <= 0 && state && state.enemyBolts && dist < standoff + 6) {
+          this.attackTimer = 2.2 + rng() * 1.2;
+          const origin = this.root.position.add(new BABYLON.Vector3(0, 1.6, 0));
+          const aim = new BABYLON.Vector3(to.x / dist, 0.22, to.z / dist);
+          state.enemyBolts.push(new Hazard(this.scene, origin, aim, { speed: 16, damage: 8, gravity: 5, color: ab.tint || "#ff6cf0", radius: 0.7 }));
+          if (this.marker) this.marker.scaling.setAll(1.4);
+          Sfx.play("boss_cast");
+        } else if (this.marker) this.marker.scaling.setAll(lerp(this.marker.scaling.x, 1, 0.2));
+        this.body.position.y = Math.abs(Math.sin(this.bob)) * 0.14;
+        return dist <= this.radius + 1.0;
+      }
+
+      // ---- Jumper: when in mid-range, crouch and LEAP across the gap. ----
+      if (this.ability === "jumper" && this.attackTimer <= 0 && dist > 3 && dist < 14) {
+        this.attackTimer = 2.5 + rng();
+        this.jumpT = this._jumpDur = 0.55;
+        this._jumpDir = new BABYLON.Vector3(to.x / dist, 0, to.z / dist);
+        this._jumpSpeed = Math.min(dist - 1, 9) / this._jumpDur;
+        Sfx.play("hit");
+        return false;
+      }
+
+      // ---- Default pursuit (chaser / runner / brute / bomber). ----
+      if (dist > 0.001) {
+        const step = Math.min(this.speed * dt, Math.max(0, dist - 1.0));
+        this.root.position.addInPlace(to.scale(step / dist));
+      }
+      // Hoppy bob (brutes lumber slower).
+      this.body.position.y = Math.abs(Math.sin(this.bob * (this.ability === "brute" ? 0.6 : 1))) * 0.18;
       return dist <= this.radius + 1.0;
     }
 
@@ -1317,7 +1722,7 @@
       this.hp -= dmg;
       if (this.hp <= 0 && this.dying <= 0) { this.dying = 0.35; return true; } // killed
       // flash / squash on a non-fatal hit
-      this.body.scaling.setAll(1.25);
+      this.body.scaling.setAll(this._abScale * 1.25);
       return false;
     }
 
@@ -1715,6 +2120,57 @@
   }
 
   // =========================================================================
+  // Visual effects — short-lived "impact" bursts so hits read physically: a
+  // puff of shards flies out and fades whenever a bolt or swing connects, when
+  // a bolt smacks the ground/scenery, or when a bomber sweet detonates. Built
+  // from cheap primitives so it stays headless-safe (the test harness stubs the
+  // meshes) and never leaks (each burst self-disposes when its life runs out).
+  // =========================================================================
+  let _fxSeq = 1;
+  class Burst {
+    constructor(scene, pos, color, opts = {}) {
+      this.t = 0; this.life = opts.life || 0.5; this.parts = [];
+      this.grav = opts.gravity != null ? opts.gravity : 9;
+      const mat = emat(scene, "fx" + (_fxSeq++), color || "#ffe27a", 1.0);
+      mat.alpha = 1; this.mat = mat;
+      const n = opts.count || 8;
+      const y0 = (pos.y || 0) + (opts.y != null ? opts.y : 1.0);
+      for (let i = 0; i < n; i++) {
+        const m = sphere(scene, "fxp", opts.size || 0.18, mat);
+        m.position.set(pos.x, y0, pos.z); m.isPickable = false;
+        const a = rng() * Math.PI * 2, sp = (opts.spread || 4) * (0.4 + rng());
+        this.parts.push({ m, vx: Math.cos(a) * sp, vy: (opts.up || 2) * (0.4 + rng()), vz: Math.sin(a) * sp });
+      }
+    }
+    update(dt) {
+      this.t += dt;
+      const k = Math.min(1, this.t / this.life);
+      for (const p of this.parts) {
+        p.vy -= this.grav * dt;
+        p.m.position.x += p.vx * dt; p.m.position.y += p.vy * dt; p.m.position.z += p.vz * dt;
+        if (p.m.position.y < 0.05) { p.m.position.y = 0.05; p.vy = 0; p.vx *= 0.7; p.vz *= 0.7; }
+        p.m.scaling.setAll(Math.max(0.01, 1 - k));
+      }
+      if (this.mat) this.mat.alpha = Math.max(0, 1 - k);
+      return this.t < this.life;
+    }
+    dispose() { for (const p of this.parts) p.m.dispose(); if (this.mat) this.mat.dispose(); }
+  }
+
+  // Spawn an impact burst into the live effects list (capped for performance).
+  function spawnImpact(state, pos, color, opts) {
+    if (!state || !state.fx) return;
+    if (state.fx.length > 48) return;          // never let effects pile up
+    state.fx.push(new Burst(state.scene, pos, color, opts));
+  }
+  function updateFx(state, dt) {
+    if (!state.fx) return;
+    for (let i = state.fx.length - 1; i >= 0; i--) {
+      if (!state.fx[i].update(dt)) { state.fx[i].dispose(); state.fx.splice(i, 1); }
+    }
+  }
+
+  // =========================================================================
   // Merchant — a friendly NPC who appears at the plaza after a wave is cleared
   // and leaves when the next wave begins. Walk up + press E to open the shop.
   // =========================================================================
@@ -1869,6 +2325,391 @@
   }
 
   // =========================================================================
+  // ResourceNode — a harvestable spot in the world (cut a tree, mine rock or
+  // crystal, gather herbs, cut fibers, collect water). Walk up + press E to
+  // harvest its material; it depletes, then respawns after a cooldown. The raw
+  // materials feed the crafting bench. Reuses the Interactable contract.
+  // =========================================================================
+  class ResourceNode {
+    constructor(scene, shadow, interaction, pos, kind, player, state) {
+      this.kind = kind; this.def = RESOURCE_KINDS[kind];
+      this.respawn = 0; this.bob = rng() * Math.PI * 2;
+      this.player = player; this.state = state;
+      const root = new BABYLON.TransformNode("res_" + kind, scene);
+      root.position.copyFrom(pos); this.root = root;
+      this._build(scene, shadow);
+      this.it = new Interactable(root, {
+        label: this.def.label, range: CONFIG.gatherRange,
+        onInteract: () => this.harvest(),
+      });
+      interaction.register(this.it);
+    }
+
+    _build(scene, shadow) {
+      const body = new BABYLON.TransformNode("resBody", scene);
+      body.parent = this.root; this.body = body;
+      const add = (m) => { m.parent = body; shadow.addShadowCaster(m); return m; };
+      const matCol = (MATERIALS[this.def.mat] || {}).icon;
+      if (this.kind === "tree") {
+        add(cyl(scene, "rTrunk", 0.4, 0.55, 1.8, mat(scene, "rTrunkM", "#7a5230"))).position.y = 0.9;
+        for (let k = 0; k < 3; k++) { const l = add(sphere(scene, "rLeaf", 1.6 + rng() * 0.6, mat(scene, "rLeaf" + this.root.uniqueId + k, "#3f9d4a"))); l.position.set((rng() - 0.5) * 0.5, 2.0 + k * 0.5, (rng() - 0.5) * 0.5); }
+      } else if (this.kind === "rock") {
+        const r = add(BABYLON.MeshBuilder.CreateIcoSphere("rRock", { radius: 0.9, subdivisions: 1 }, scene));
+        r.material = mat(scene, "rRockM", "#9aa0a6"); r.position.y = 0.55; r.rotation.set(rng(), rng(), rng());
+      } else if (this.kind === "crystal") {
+        const base = add(BABYLON.MeshBuilder.CreateIcoSphere("rCb", { radius: 0.7, subdivisions: 1 }, scene));
+        base.material = mat(scene, "rCbM", "#6a6f78"); base.position.y = 0.4;
+        for (let k = 0; k < 3; k++) { const c = add(BABYLON.MeshBuilder.CreatePolyhedron("rC", { type: 1, size: 0.4 + rng() * 0.2 }, scene)); c.material = emat(scene, "rCM" + this.root.uniqueId + k, "#9fd0ff", 0.7); c.position.set((rng() - 0.5) * 0.6, 0.7 + rng() * 0.4, (rng() - 0.5) * 0.6); }
+      } else if (this.kind === "herb") {
+        for (let k = 0; k < 4; k++) { const s = add(cone(scene, "rHerb", 0.18, 0.0, 0.7, mat(scene, "rHerbM" + this.root.uniqueId + k, "#4caa4c"))); s.position.set((rng() - 0.5) * 0.5, 0.35, (rng() - 0.5) * 0.5); }
+        const f = add(sphere(scene, "rFlow", 0.22, emat(scene, "rFlowM" + this.root.uniqueId, "#7ef07e", 0.4))); f.position.y = 0.7;
+      } else if (this.kind === "fiber") {
+        for (let k = 0; k < 5; k++) { const s = add(cyl(scene, "rReed", 0.06, 0.06, 1.2, mat(scene, "rReedM" + this.root.uniqueId + k, "#caa46a"))); s.position.set((rng() - 0.5) * 0.6, 0.6, (rng() - 0.5) * 0.6); s.rotation.z = (rng() - 0.5) * 0.4; }
+      } else { // water
+        const puddle = disc(scene, "rWater", 0.9, emat(scene, "rWaterM" + this.root.uniqueId, "#3aa0e0", 0.3));
+        puddle.material.alpha = 0.85; puddle.rotation.x = Math.PI / 2; puddle.position.y = 0.06; puddle.parent = body; puddle.isPickable = false;
+      }
+      // A floating material icon so harvest spots are easy to read.
+      const iconMat = emat(scene, "rIcon" + this.root.uniqueId, (MATERIALS[this.def.mat] || {}).tint || "#ffffff", 0.9);
+      const icon = sphere(scene, "rIconM", 0.28, iconMat);
+      icon.parent = body; icon.position.y = this.iconY = 2.7; icon.isPickable = false;
+      icon.material.alpha = 0.85; this.icon = icon;
+    }
+
+    harvest() {
+      if (this.respawn > 0) return;
+      const [lo, hi] = this.def.amount;
+      const n = lo + ((rng() * (hi - lo + 1)) | 0);
+      addMaterial(this.player, this.def.mat, n);
+      spawnImpact(this.state, this.root.position, "#cfe0b0", { y: 0.8, count: 7, spread: 3 });
+      Sfx.play("hit");
+      toast(`${MATERIALS[this.def.mat].icon} +${n} ${MATERIALS[this.def.mat].label}`);
+      this.respawn = this.def.respawn;
+      this.body.setEnabled(false);
+      this.it.enabled = false;
+    }
+
+    update(dt) {
+      if (this.respawn > 0) {
+        this.respawn -= dt;
+        if (this.respawn <= 0) { this.body.setEnabled(true); this.it.enabled = true; }
+        return;
+      }
+      this.bob += dt;
+      if (this.icon) { this.icon.position.y = this.iconY + Math.sin(this.bob * 2) * 0.14; this.icon.rotation.y += dt * 1.4; }
+    }
+  }
+
+  // =========================================================================
+  // QuestGiver — a story NPC standing at a location. Walk up + press E to talk:
+  // accept quests, check progress, and turn completed ones in for coins, gear or
+  // a castle relic. A floating marker shows when a quest is ready (❗ new, ✓ turn
+  // in). Reuses the Interactable contract.
+  // =========================================================================
+  class QuestGiver {
+    constructor(scene, shadow, interaction, npcData, onTalk) {
+      this.data = npcData; this.bob = rng() * Math.PI * 2;
+      const loc = LOCATION_BY_ID[npcData.loc] || { x: 0, z: 0, color: "#ffd98a" };
+      const root = new BABYLON.TransformNode("npc_" + npcData.id, scene);
+      // Offset a little so the NPC stands beside its landmark, not on it.
+      root.position.set(loc.x + 3, 0, loc.z + 3); this.root = root;
+      this._build(scene, shadow, loc.color);
+      this.it = new Interactable(root, { label: "Talk to " + npcData.name, range: 3.6, onInteract: () => onTalk(this) });
+      interaction.register(this.it);
+    }
+
+    _build(scene, shadow, color) {
+      const robe = emat(scene, "npcRobe" + this.root.uniqueId, color, 0.1);
+      const skin = emat(scene, "npcSkin" + this.root.uniqueId, "#ffd9b8", 0.08);
+      const hair = emat(scene, "npcHair" + this.root.uniqueId, "#5a3a2a", 0.06);
+      const add = (m) => { m.parent = this.root; shadow.addShadowCaster(m); return m; };
+      add(cone(scene, "npcBody", 0.9, 0.35, 1.4, robe)).position.y = 0.7;
+      const head = add(sphere(scene, "npcHead", 0.5, skin)); head.position.y = 1.65;
+      add(sphere(scene, "npcHair", 0.54, hair)).position.set(0, 1.78, -0.04);
+      for (const s of [-1, 1]) { const eye = add(sphere(scene, "npcEye", 0.07, emat(scene, "npcEyeM" + this.root.uniqueId, "#2a2a3a", 0))); eye.position.set(0.13 * s, 1.66, 0.4); }
+      // The floating "!" / "?" quest marker.
+      const markMat = emat(scene, "npcMark" + this.root.uniqueId, "#ffd34e", 0.9);
+      const mark = BABYLON.MeshBuilder.CreatePolyhedron("npcMarkM", { type: 0, size: 0.28 }, scene);
+      mark.material = markMat; mark.parent = this.root; mark.position.y = 2.5; mark.isPickable = false;
+      this.mark = mark; this.markMat = markMat;
+      const glow = new BABYLON.PointLight("npcGlow" + this.root.uniqueId, new BABYLON.Vector3(0, 2, 0), scene);
+      glow.parent = this.root; glow.diffuse = BABYLON.Color3.FromHexString(color); glow.intensity = 0.35; glow.range = 6;
+    }
+
+    // Returns the NPC's status for the marker + interaction prompt.
+    status() {
+      const id = this.data.id;
+      const active = Quests.activeForNpc(id);
+      if (active && Quests.isComplete(QUEST_BY_ID[active])) return "turnin";
+      if (active) return "active";
+      if (Quests.nextForNpc(id)) return "new";
+      return "done";
+    }
+
+    update(dt) {
+      this.bob += dt;
+      this.mark.position.y = 2.5 + Math.sin(this.bob * 2) * 0.14;
+      this.mark.rotation.y += dt * 1.6;
+      const st = this.status();
+      const col = st === "turnin" ? "#5be0a0" : st === "new" ? "#ffd34e" : st === "active" ? "#6cc6ff" : "#555a66";
+      try { this.markMat.emissiveColor = BABYLON.Color3.FromHexString(col).scale(0.9); this.markMat.diffuseColor = BABYLON.Color3.FromHexString(col); } catch (e) {}
+      this.mark.setEnabled(st !== "done");
+      this.it.label = st === "turnin" ? `✓ ${this.data.name}: turn in` : st === "new" ? `❗ ${this.data.name}: new quest` : `Talk to ${this.data.name}`;
+    }
+  }
+
+  // =========================================================================
+  // CastleSite — the heart of the story. Stands on Castle Hill. Spend a castle
+  // relic + coins to raise each of the five parts (foundation → walls → towers
+  // → gate → keep), watching the castle grow in the world. Building the final
+  // keep summons the DRAGON for the climactic battle. Walk up + press E to open
+  // the build panel (CastleUI).
+  // =========================================================================
+  class CastleSite {
+    constructor(scene, shadow, interaction, player, state) {
+      this.scene = scene; this.shadow = shadow; this.player = player; this.state = state;
+      this.built = [];
+      const loc = LOCATION_BY_ID.castle;
+      const root = new BABYLON.TransformNode("castleSite", scene);
+      root.position.set(loc.x, 0, loc.z + 8); this.root = root;
+      this.parts = {};
+      this._build(scene, shadow);
+      this.it = new Interactable(root, { label: "🏰 Build castle", range: 6, onInteract: () => CastleUI.openPanel() });
+      interaction.register(this.it);
+    }
+
+    _build(scene, shadow) {
+      const stone = mat(scene, "csStone", "#b8b2a6");
+      const stoneDk = mat(scene, "csStoneDk", "#8d887c");
+      const roof = emat(scene, "csRoof", "#b5366a", 0.06);
+      const gold = emat(scene, "csGold", "#ffcf3a", 0.4);
+      const add = (m, parent) => { m.parent = parent || this.root; shadow.addShadowCaster(m); return m; };
+      // A construction platform that's always present.
+      const plat = disc(scene, "csPlat", 9, mat(scene, "csPlatM", "#caa46a"));
+      plat.rotation.x = Math.PI / 2; plat.position.y = 0.05; plat.parent = this.root; plat.receiveShadows = true;
+
+      const node = (id) => { const n = new BABYLON.TransformNode("cp_" + id, scene); n.parent = this.root; n.setEnabled(false); this.parts[id] = n; return n; };
+
+      // foundation: a raised stone base.
+      const fnd = node("foundation");
+      add(cyl(scene, "csFnd", 14, 15, 1.0, stoneDk), fnd).position.y = 0.5;
+      add(cyl(scene, "csFnd2", 12, 13, 0.6, stone), fnd).position.y = 1.1;
+
+      // walls: a square curtain wall with crenellations.
+      const walls = node("walls");
+      for (const [dx, dz, w, d] of [[0, 6, 12, 1], [0, -6, 12, 1], [6, 0, 1, 12], [-6, 0, 1, 12]]) {
+        add(box(scene, "csWall", w, 2.6, d, stone), walls).position.set(dx, 2.6, dz);
+      }
+
+      // towers: four corner spires with conical roofs.
+      const towers = node("towers");
+      for (const sx of [-6, 6]) for (const sz of [-6, 6]) {
+        add(cyl(scene, "csTow", 2.2, 2.4, 5, stone), towers).position.set(sx, 3.7, sz);
+        add(cone(scene, "csTowR", 2.6, 0.1, 2.4, roof), towers).position.set(sx, 7.0, sz);
+      }
+
+      // gate: a gatehouse on the south wall with a golden door.
+      const gate = node("gate");
+      add(box(scene, "csGate", 4.5, 4.5, 2, stoneDk), gate).position.set(0, 3.4, 6);
+      add(box(scene, "csDoor", 2.4, 3.0, 0.4, gold), gate).position.set(0, 2.6, 7.1);
+
+      // keep: a tall central tower with a banner.
+      const keep = node("keep");
+      add(cyl(scene, "csKeep", 4.5, 5, 9, stone), keep).position.set(0, 6.0, 0);
+      add(cone(scene, "csKeepR", 5.2, 0.1, 4, roof), keep).position.set(0, 12.0, 0);
+      const pole = add(cyl(scene, "csPole", 0.15, 0.15, 2.5, stoneDk), keep); pole.position.set(0, 15, 0);
+      add(box(scene, "csFlag", 1.6, 1.0, 0.06, gold), keep).position.set(0.85, 15.4, 0);
+
+      // A floating banner marker for the build site.
+      const sign = new BABYLON.TransformNode("csSign", scene); sign.parent = this.root; sign.position.y = 3.0; this.sign = sign;
+      const flag = box(scene, "csSignFlag", 1.2, 0.8, 0.06, gold); flag.parent = sign; flag.position.x = 0.4;
+      const stick = cyl(scene, "csSignStick", 0.1, 0.1, 1.6, stoneDk); stick.parent = sign;
+      this.bob = 0;
+    }
+
+    isBuilt(id) { return this.built.includes(id); }
+    nextPart() { return CASTLE_PARTS.find((p) => !this.isBuilt(p.id)); }
+    canBuild(part) {
+      if (!part || this.isBuilt(part.id)) return false;
+      const idx = CASTLE_PARTS.indexOf(part);
+      if (idx > 0 && !this.isBuilt(CASTLE_PARTS[idx - 1].id)) return false; // must build in order
+      return hasRelic(this.player, part.relic) && this.state.coins >= part.cost;
+    }
+
+    build(part) {
+      if (!this.canBuild(part)) return false;
+      // Consume the relic + coins.
+      this.player.relics.splice(this.player.relics.indexOf(part.relic), 1);
+      this.state.coins -= part.cost;
+      updateCoins(this.state); updateRelicHud(this.player);
+      this.built.push(part.id);
+      const n = this.parts[part.id];
+      if (n) { n.setEnabled(true); n.scaling.setAll(0.01); n._pop = 1; }
+      spawnImpact(this.state, this.root.position, "#ffd34e", { y: 4, count: 16, spread: 6, up: 4 });
+      Sfx.play("enhance");
+      toast(`🏰 ${part.name} raised!`);
+      if (this.built.length >= CASTLE_PARTS.length) this._complete();
+      return true;
+    }
+
+    // Rebuild instantly from a save (no animation, no dragon re-trigger).
+    restore(builtIds) {
+      this.built = (builtIds || []).filter((id) => CASTLE_PART_BY_ID[id]);
+      for (const id of this.built) if (this.parts[id]) this.parts[id].setEnabled(true);
+    }
+
+    _complete() {
+      toast("🐉 The castle is complete... the DRAGON awakens!");
+      bannerWave(this.state.wave, 0, "The Dragon");
+      // Summon the dragon a little in front of the castle.
+      const pos = new BABYLON.Vector3(this.root.position.x, 0, this.root.position.z - 16);
+      const dragon = new Dragon(this.scene, this.shadow, pos, this.state);
+      this.state.dragon = dragon;
+      this.state.monsters.push(dragon);
+      showBossBar(dragon);
+      Sfx.play("boss_spawn");
+    }
+
+    update(dt) {
+      this.bob += dt;
+      if (this.sign) { this.sign.position.y = 3.0 + Math.sin(this.bob * 2) * 0.12; this.sign.rotation.y += dt * 0.8; }
+      // Pop newly-built parts up to full size.
+      for (const id in this.parts) {
+        const n = this.parts[id];
+        if (n._pop) { const s = lerp(n.scaling.x, 1, 0.15); n.scaling.setAll(s); if (s > 0.99) { n.scaling.setAll(1); n._pop = 0; } }
+      }
+      const next = this.nextPart();
+      this.it.label = next ? (this.canBuild(next) ? `🏰 Build ${next.name}` : `🏰 Castle (need ${next.icon} ${next.name})`) : "🏰 Castle complete";
+    }
+  }
+
+  // =========================================================================
+  // Dragon — the final boss, summoned when the castle is finished. A huge winged
+  // serpent that hovers, swoops and breathes fans of fire (Hazards). Shares the
+  // boss interface (isBoss / hp / maxHp / name / update / hit / position) so the
+  // health bar, projectile and contact systems treat it like a Sweet King, but
+  // felling it WINS the game (see onMonsterDefeated → winGame).
+  // =========================================================================
+  class Dragon {
+    constructor(scene, shadow, pos, state) {
+      this.scene = scene; this.state = state;
+      this.name = "Ancient Dragon";
+      this.maxHp = CONFIG.dragonBaseHp; this.hp = this.maxHp;
+      this.isBoss = true; this.isDragon = true;
+      this.alive = true; this.dying = 0;
+      this.radius = 3.2; this.contactDamage = CONFIG.dragonContactDamage; this.biteTimer = 0;
+      this.bob = 0; this.actionTimer = 4; this.swoop = 0; this.hover = 7;
+      this._build(scene, shadow, pos);
+    }
+
+    _build(scene, shadow, pos) {
+      const root = new BABYLON.TransformNode("dragon", scene);
+      root.position.copyFrom(pos); root.position.y = this.hover; this.root = root;
+      const body = new BABYLON.TransformNode("dragonBody", scene); body.parent = root; this.body = body;
+      const scale = emat(scene, "drgM" + root.uniqueId, "#9d2b2b", 0.16);
+      const belly = emat(scene, "drgB" + root.uniqueId, "#e0a24e", 0.1);
+      const wingM = emat(scene, "drgW" + root.uniqueId, "#5a1a1a", 0.08);
+      const add = (m) => { m.parent = body; shadow.addShadowCaster(m); return m; };
+      // Serpentine torso (stacked capsules) + tail.
+      add(capsule(scene, "drgTor", 4.5, 1.5, scale)).position.set(0, 0, 0);
+      add(sphere(scene, "drgBelly", 1.6, belly)).position.set(0, -0.3, 0.6);
+      const neck = add(capsule(scene, "drgNeck", 2.6, 0.7, scale)); neck.position.set(0, 1.4, 1.6); neck.rotation.x = 0.8;
+      const head = add(sphere(scene, "drgHead", 1.4, scale)); head.position.set(0, 2.6, 2.8); head.scaling.set(1, 0.9, 1.3);
+      add(cone(scene, "drgSnout", 0.7, 0.1, 1.0, belly)).position.set(0, 2.5, 3.7);
+      for (const s of [-1, 1]) {
+        const horn = add(cone(scene, "drgHorn", 0.3, 0.02, 1.0, belly)); horn.position.set(0.4 * s, 3.4, 2.6); horn.rotation.x = -0.5;
+        const eye = add(sphere(scene, "drgEye", 0.25, emat(scene, "drgEyeM" + root.uniqueId, "#ffd34e", 0.9))); eye.position.set(0.45 * s, 2.9, 3.3);
+      }
+      // Big bat wings on pivots so they can flap.
+      this.wings = [];
+      for (const s of [-1, 1]) {
+        const pivot = new BABYLON.TransformNode("drgWP" + s, scene); pivot.parent = body; pivot.position.set(1.2 * s, 0.6, -0.2);
+        const wing = box(scene, "drgWing", 4.5, 0.2, 3.2, wingM); wing.parent = pivot; wing.position.set(2.2 * s, 0, 0);
+        shadow.addShadowCaster(wing); this.wings.push(pivot);
+      }
+      add(capsule(scene, "drgTail", 4.0, 0.6, scale)).position.set(0, -0.4, -3.0);
+      // Fire origin + an ominous glow.
+      this.fireTip = new BABYLON.TransformNode("drgFire", scene); this.fireTip.parent = body; this.fireTip.position.set(0, 2.5, 4.2);
+      const glow = new BABYLON.PointLight("drgGlow", new BABYLON.Vector3(0, 0, 0), scene);
+      glow.parent = root; glow.diffuse = BABYLON.Color3.FromHexString("#ff6a3a"); glow.intensity = 1.0; glow.range = 22; this.glow = glow;
+      const blob = disc(scene, "drgBlob", 4.5, emat(scene, "drgBlobM" + root.uniqueId, "#000000", 0));
+      blob.material.alpha = 0.28; blob.rotation.x = Math.PI / 2; blob.position.y = 0.05 - this.hover; blob.parent = root; blob.isPickable = false;
+    }
+
+    update(dt, playerPos, state) {
+      if (this.biteTimer > 0) this.biteTimer -= dt;
+      if (this.dying > 0) {
+        this.dying -= dt;
+        const k = Math.max(0, this.dying / 1.4);
+        this.body.scaling.setAll(k);
+        this.root.position.y = lerp(this.root.position.y, 0.5, 0.05);
+        this.body.rotation.z += dt * 3;
+        if (this.dying <= 0) { this.alive = false; this.root.dispose(); }
+        return false;
+      }
+      this.bob += dt;
+      // Wing flap + a gentle hover bob.
+      const flap = Math.sin(this.bob * 4) * 0.6;
+      if (this.wings) { this.wings[0].rotation.z = -flap; this.wings[1].rotation.z = flap; }
+
+      const to = playerPos.subtract(this.root.position); to.y = 0;
+      const dist = to.length();
+      const dir = dist > 0.001 ? to.scale(1 / dist) : new BABYLON.Vector3(0, 0, 1);
+      this.body.rotation.y = lerpAngle(this.body.rotation.y, Math.atan2(dir.x, dir.z), 0.05);
+
+      this.actionTimer -= dt;
+      if (this.swoop > 0) {
+        // Diving attack: drop low and rush the player.
+        this.swoop -= dt;
+        this.root.position.addInPlace(dir.scale(14 * dt));
+        this.root.position.y = lerp(this.root.position.y, 2.2, 0.1);
+        if (this.swoop <= 0) this.actionTimer = 3;
+        return dist <= this.radius + 2.5;
+      }
+      // Hover at a stand-off, circling slightly.
+      const targetY = this.hover + Math.sin(this.bob * 1.5) * 0.6;
+      this.root.position.y = lerp(this.root.position.y, targetY, 0.04);
+      const standoff = 16;
+      if (dist > standoff) this.root.position.addInPlace(dir.scale(4 * dt));
+      else this.root.position.addInPlace(new BABYLON.Vector3(-dir.z, 0, dir.x).scale(3 * dt)); // strafe
+
+      if (this.actionTimer <= 0) {
+        if (rng() < 0.6) this._breatheFire(playerPos, dir, state);
+        else { this.swoop = 1.1; Sfx.play("boss_charge"); toast("🐉 The dragon dives!"); }
+        this.actionTimer = 3.2;
+      }
+      if (this.glow) this.glow.intensity = 0.9 + Math.abs(Math.sin(this.bob * 3)) * 0.6;
+      return dist <= this.radius + 2.0;
+    }
+
+    _breatheFire(playerPos, dir, state) {
+      Sfx.play("boss_cast");
+      toast("🔥 Dragon's breath!");
+      const origin = this.fireTip.getAbsolutePosition ? this.fireTip.getAbsolutePosition() : this.root.position;
+      const base = Math.atan2(dir.x, dir.z);
+      for (let i = 0; i < 7; i++) {
+        const ang = base + (i - 3) * 0.16;
+        const aim = new BABYLON.Vector3(Math.sin(ang), -0.05, Math.cos(ang));
+        state.enemyBolts.push(new Hazard(this.scene, origin.clone ? origin.clone() : new BABYLON.Vector3(origin.x, origin.y, origin.z), aim, {
+          speed: 22, damage: 16, gravity: 2.5, color: "#ff7a3a", radius: 1.1, life: 3,
+        }));
+      }
+      spawnImpact(state, origin, "#ff7a3a", { y: 0, count: 14, spread: 5, up: 2 });
+    }
+
+    hit(dmg) {
+      this.hp -= dmg;
+      updateBossBar(this);
+      if (this.hp <= 0 && this.dying <= 0) { this.dying = 1.4; return true; }
+      this.body.scaling.setAll(1.06);
+      if (this.body.scaling.x > 1) this.body.scaling.setAll(lerp(this.body.scaling.x, 1, 0.2));
+      return false;
+    }
+
+    get position() { return this.root.position; }
+  }
+
+  // =========================================================================
   // World — procedural environment.
   // =========================================================================
   function buildWorld(scene) {
@@ -1888,9 +2729,43 @@
     // The world grew a lot — size the ground/roads to the new playable radius.
     const GROUND = CONFIG.worldRadius * 2 + 60; // a generous skirt beyond the fence
 
-    // Grass ground.
+    // Grass ground — the playable "island" that sits on the surrounding sea.
     const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: GROUND, height: GROUND }, scene);
     ground.material = mat(scene, "grass", "#5fae4f"); ground.receiveShadows = true;
+
+    // ---- BACKDROP: a sky dome, a surrounding SEA, distant MOUNTAINS and a sandy
+    // shoreline — so the playable meadow reads as a green island ringed by water
+    // and snow-capped peaks. All purely decorative (no collision). The day/night
+    // + weather systems tint the sky/sun/fog returned here. ----
+    const skyMat = emat(scene, "sky", "#86c5ff", 1.0);
+    skyMat.backFaceCulling = false; skyMat.disableLighting = true;
+    const sky = BABYLON.MeshBuilder.CreateSphere("skyDome", { diameter: 900, segments: 16, sideOrientation: 1 }, scene);
+    sky.material = skyMat; sky.infiniteDistance = true; sky.isPickable = false;
+
+    // The sea: a vast plane just below the island, lapping at its shores.
+    const seaMat = emat(scene, "sea", "#2c78c8", 0.16);
+    seaMat.specularColor = new BABYLON.Color3(0.4, 0.5, 0.6);
+    const sea = BABYLON.MeshBuilder.CreateGround("sea", { width: 1600, height: 1600 }, scene);
+    sea.material = seaMat; sea.position.y = -0.35; sea.isPickable = false;
+
+    // A sandy beach skirt around the island edge.
+    const beach = BABYLON.MeshBuilder.CreateGround("beach", { width: GROUND + 26, height: GROUND + 26 }, scene);
+    beach.material = mat(scene, "beachM", "#e6d2a0"); beach.position.y = -0.08; beach.receiveShadows = true; beach.isPickable = false;
+
+    // Distant snow-capped mountains ringing the horizon, out across the sea.
+    const rockFar = mat(scene, "mtnRock", "#7c8696");
+    const snowFar = emat(scene, "mtnSnow", "#eef4ff", 0.05);
+    const mtnCount = 30;
+    for (let i = 0; i < mtnCount; i++) {
+      const a = (i / mtnCount) * Math.PI * 2 + rng() * 0.1;
+      const r = 165 + rng() * 90;
+      const h = 34 + rng() * 46;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      const m = cone(scene, "mtn", 26 + rng() * 22, 0.5, h, rockFar);
+      m.position.set(x, h / 2 - 1, z); m.isPickable = false;
+      const cap = cone(scene, "mtnCap", (10 + rng() * 6), 0.2, h * 0.34, snowFar);
+      cap.position.set(x, h - h * 0.17 - 1, z); cap.isPickable = false;
+    }
 
     // ---- Solid scenery is tracked here as {x,z,r} circles for collision. ----
     const obstacles = [];
@@ -2149,15 +3024,209 @@
       return new BABYLON.Vector3(tx, cur.y, tz);
     }
 
-    // A gentle shimmer + bob so the river reads as flowing water.
+    // ---- Location beacons: a glowing pillar + floating icon orb + platform at
+    // every named place, so the story's landmarks are easy to spot from afar. ----
+    const beacons = [];
+    for (const loc of LOCATIONS) {
+      const bm = emat(scene, "beacon_" + loc.id, loc.color, 0.9);
+      const plat = disc(scene, "locPlat_" + loc.id, 4.5, mat(scene, "locPlatM_" + loc.id, "#caa46a"));
+      plat.rotation.x = Math.PI / 2; plat.position.set(loc.x, 0.05, loc.z); plat.receiveShadows = true; plat.isPickable = false;
+      const pillar = cyl(scene, "locPillar_" + loc.id, 0.5, 0.7, 14, bm);
+      pillar.position.set(loc.x, 7, loc.z); pillar.material.alpha = 0.32; pillar.isPickable = false;
+      const orb = sphere(scene, "locOrb_" + loc.id, 1.0, bm);
+      orb.position.set(loc.x, 15, loc.z); orb.isPickable = false;
+      beacons.push({ orb, y: 15 });
+    }
+
+    // A gentle shimmer + bob so the river + sea read as living water.
     const baseWaterY = water.position.y;
     scene.onBeforeRenderObservable.add(() => {
       const t = performance.now() / 1000;
       water.position.y = baseWaterY + Math.sin(t * 1.5) * 0.015;
       waterMat.emissiveColor = BABYLON.Color3.FromHexString("#3aa0e0").scale(0.14 + Math.sin(t * 2) * 0.05);
+      seaMat.emissiveColor = BABYLON.Color3.FromHexString("#2c78c8").scale(0.12 + Math.sin(t * 0.8) * 0.04);
+      for (const b of beacons) b.orb.position.y = b.y + Math.sin(t * 1.5 + b.orb.uniqueId) * 0.4;
     });
 
-    return { shadow, onRoad, obstacles, inRiver, moveActor, water, waterMat };
+    return { shadow, onRoad, obstacles, inRiver, moveActor, water, waterMat,
+             hemi, sun, sky, skyMat, seaMat, ground };
+  }
+
+  // =========================================================================
+  // Day / night cycle — advances a clock that drives the sun's position +
+  // colour, the ambient light, the sky dome and the fog tint through dawn, day,
+  // dusk and night. One full cycle every CONFIG.dayLength seconds. Headless-safe
+  // (every handle it touches is a no-op stub in the test harness).
+  // =========================================================================
+  const DayNight = {
+    world: null, t: CONFIG.startTimeOfDay, phase: "day",
+    // Sky / fog / sun-colour + ambient brightness keyframes across the day.
+    KEYS: [
+      { t: 0.00, sky: "#0b1430", fog: "#0b1430", sun: "#2a3f7a", amb: 0.20 },
+      { t: 0.22, sky: "#243a66", fog: "#2b3f6e", sun: "#5a4a8a", amb: 0.34 },
+      { t: 0.29, sky: "#f6b27a", fog: "#f0c69a", sun: "#ffb060", amb: 0.62 },
+      { t: 0.50, sky: "#86c5ff", fog: "#a9d4ff", sun: "#fff4e0", amb: 1.00 },
+      { t: 0.73, sky: "#ffa566", fog: "#ffc28e", sun: "#ff9a50", amb: 0.62 },
+      { t: 0.82, sky: "#3a2a58", fog: "#352e5c", sun: "#6a4a9a", amb: 0.34 },
+      { t: 1.00, sky: "#0b1430", fog: "#0b1430", sun: "#2a3f7a", amb: 0.20 },
+    ],
+    init(world, t) { this.world = world; if (t != null) this.t = ((t % 1) + 1) % 1; },
+    set(t) { this.t = ((t % 1) + 1) % 1; },
+
+    phaseFor(t) {
+      if (t < 0.23 || t >= 0.84) return "night";
+      if (t < 0.31) return "dawn";
+      if (t < 0.74) return "day";
+      return "dusk";
+    },
+    _lerp(t) {
+      const K = this.KEYS, C = (h) => BABYLON.Color3.FromHexString(h);
+      let a = K[0], b = K[K.length - 1];
+      for (let i = 0; i < K.length - 1; i++) if (t >= K[i].t && t < K[i + 1].t) { a = K[i]; b = K[i + 1]; break; }
+      const f = Math.min(1, Math.max(0, (t - a.t) / ((b.t - a.t) || 1)));
+      return {
+        sky: BABYLON.Color3.Lerp(C(a.sky), C(b.sky), f),
+        fog: BABYLON.Color3.Lerp(C(a.fog), C(b.fog), f),
+        sun: BABYLON.Color3.Lerp(C(a.sun), C(b.sun), f),
+        amb: a.amb + (b.amb - a.amb) * f,
+      };
+    },
+
+    update(dt) {
+      this.t = (this.t + dt / CONFIG.dayLength) % 1;
+      const w = this.world; if (!w) return;
+      const k = this._lerp(this.t);
+      this.amb = k.amb; this.skyColor = k.sky; this.fogColor = k.fog; this.sunColor = k.sun;
+      // Sky dome + clear colour + fog colour.
+      if (w.skyMat) w.skyMat.emissiveColor = k.sky;
+      if (sceneRef) { sceneRef.clearColor = k.sky.toColor4 ? k.sky.toColor4(1) : k.sky; sceneRef.fogColor = k.fog; }
+      // Sun: arcs overhead through the day, dim + cool at night.
+      if (w.sun) {
+        const az = this.t * Math.PI * 2;
+        const elev = Math.sin((this.t - 0.25) * Math.PI * 2); // +1 noon, -1 midnight
+        const yDir = -(0.35 + Math.max(0, elev) * 0.85);
+        w.sun.direction = new BABYLON.Vector3(Math.cos(az) * 0.7, yDir, Math.sin(az) * 0.7);
+        if (w.sun.direction.normalize) w.sun.direction.normalize();
+        w.sun.intensity = 0.12 + Math.max(0, k.amb) * 1.05;
+        w.sun.diffuse = k.sun;
+      }
+      if (w.hemi) {
+        w.hemi.intensity = 0.28 + k.amb * 0.8;
+        w.hemi.diffuse = BABYLON.Color3.Lerp(BABYLON.Color3.FromHexString("#404a6a"), BABYLON.Color3.FromHexString("#ffffff"), k.amb);
+      }
+      this.phase = this.phaseFor(this.t);
+      updateClock(this.t, this.phase);
+    },
+  };
+
+  // =========================================================================
+  // Weather — cycles between clear, cloudy, foggy, rainy and stormy spells that
+  // layer ON TOP of the day/night colours: thickening the fog, dimming the sun,
+  // and (where supported) driving a rain particle system that follows the
+  // player. Particle effects are feature-detected so the sim stays headless-safe.
+  // =========================================================================
+  const Weather = {
+    world: null, scene: null, state: "clear", timer: 0, rain: null, rainOn: false, rainEmitter: null,
+    STATES: {
+      clear:  { label: "Clear",  icon: "☀️", fog: 1.0, dark: 0.00, rain: 0,   weight: 4 },
+      cloudy: { label: "Cloudy", icon: "☁️", fog: 1.7, dark: 0.12, rain: 0,   weight: 3 },
+      fog:    { label: "Foggy",  icon: "🌫️", fog: 4.2, dark: 0.10, rain: 0,   weight: 2 },
+      rain:   { label: "Rain",   icon: "🌧️", fog: 2.2, dark: 0.26, rain: 1.0, weight: 2 },
+      storm:  { label: "Storm",  icon: "⛈️", fog: 3.0, dark: 0.40, rain: 1.7, weight: 1 },
+    },
+
+    init(world, scene) {
+      this.world = world; this.scene = scene;
+      this.timer = CONFIG.weatherMinTime;
+      this._buildRain(scene);
+      this.setState("clear");
+    },
+
+    _buildRain(scene) {
+      if (!BABYLON.ParticleSystem) return;
+      try {
+        const emitter = new BABYLON.TransformNode("rainEmit", scene);
+        emitter.position.set(0, 16, 0); this.rainEmitter = emitter;
+        const ps = new BABYLON.ParticleSystem("rain", 1400, scene);
+        const tex = particleTexture(scene); if (tex) ps.particleTexture = tex;
+        ps.emitter = emitter;
+        ps.minEmitBox = new BABYLON.Vector3(-30, 0, -30);
+        ps.maxEmitBox = new BABYLON.Vector3(30, 0, 30);
+        ps.color1 = new BABYLON.Color4(0.7, 0.8, 1.0, 0.55);
+        ps.color2 = new BABYLON.Color4(0.6, 0.7, 1.0, 0.45);
+        ps.colorDead = new BABYLON.Color4(0.6, 0.7, 1.0, 0.0);
+        ps.minSize = 0.06; ps.maxSize = 0.14;
+        ps.minLifeTime = 0.5; ps.maxLifeTime = 0.9;
+        ps.emitRate = 1000;
+        ps.gravity = new BABYLON.Vector3(0, -90, 0);
+        ps.direction1 = new BABYLON.Vector3(-2, -20, -2);
+        ps.direction2 = new BABYLON.Vector3(2, -20, 2);
+        ps.minEmitPower = 8; ps.maxEmitPower = 14;
+        this.rain = ps;
+      } catch (e) { this.rain = null; }
+    },
+
+    setState(s) {
+      if (!this.STATES[s]) s = "clear";
+      this.state = s;
+      const st = this.STATES[s];
+      updateWeatherHud(st.label, st.icon);
+      if (this.rain) {
+        const on = st.rain > 0;
+        try {
+          if (on && !this.rainOn) this.rain.start();
+          else if (!on && this.rainOn) this.rain.stop();
+          this.rain.emitRate = 700 * st.rain;
+        } catch (e) {}
+        this.rainOn = on;
+      }
+    },
+    pick() {
+      const entries = Object.keys(this.STATES);
+      let total = 0; for (const k of entries) total += this.STATES[k].weight;
+      let r = rng() * total;
+      for (const k of entries) { r -= this.STATES[k].weight; if (r <= 0) return k; }
+      return "clear";
+    },
+
+    update(dt, playerPos) {
+      this.timer -= dt;
+      if (this.timer <= 0) {
+        this.setState(this.pick());
+        this.timer = CONFIG.weatherMinTime + rng() * (CONFIG.weatherMaxTime - CONFIG.weatherMinTime);
+      }
+      const st = this.STATES[this.state];
+      // Layer weather on top of the day/night base each frame.
+      if (sceneRef) sceneRef.fogDensity = 0.0019 * st.fog;
+      const w = this.world;
+      if (st.dark > 0) {
+        if (w && w.sun) w.sun.intensity *= (1 - st.dark);
+        if (w && w.hemi) w.hemi.intensity *= (1 - st.dark * 0.7);
+      }
+      // Keep the rain cloud centred above the player.
+      if (this.rainOn && this.rainEmitter && playerPos) this.rainEmitter.position.set(playerPos.x, 16, playerPos.z);
+    },
+  };
+
+  // A soft round particle sprite (a radial-gradient dot) built once and shared
+  // by the weather + impact effects. Falls back to null if 2D canvas isn't
+  // available (e.g. the headless harness), where particles are no-ops anyway.
+  let _dotTex = null, _dotTried = false;
+  function particleTexture(scene) {
+    if (_dotTried) return _dotTex;
+    _dotTried = true;
+    try {
+      const tex = new BABYLON.DynamicTexture("dot", 64, scene, false);
+      const ctx = tex.getContext();
+      const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+      g.addColorStop(0, "rgba(255,255,255,1)");
+      g.addColorStop(0.4, "rgba(255,255,255,0.7)");
+      g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
+      tex.hasAlpha = true; tex.update();
+      _dotTex = tex;
+    } catch (e) { _dotTex = null; }
+    return _dotTex;
   }
 
   // =========================================================================
@@ -2239,6 +3308,54 @@
     });
     artifact._it = it; interaction.register(it); state.artifacts.push(artifact);
     return artifact;
+  }
+
+  // =========================================================================
+  // populateAdventure — scatter the story layer across the world: harvestable
+  // resource nodes, the story NPCs at their landmarks, and the castle build
+  // site on Castle Hill. Called once after the world is built.
+  // =========================================================================
+  function populateAdventure(scene, world, interaction, player, state) {
+    const FAR = CONFIG.worldRadius - 6;
+    const scatter = (minR, maxR) => {
+      for (let tries = 0; tries < 26; tries++) {
+        const a = rng() * Math.PI * 2, r = minR + rng() * (maxR - minR);
+        const x = Math.cos(a) * r, z = Math.sin(a) * r;
+        if (r > 8 && !world.onRoad(x, z) && !world.inRiver(x, z)) return { x, z };
+      }
+      return null;
+    };
+    // Resource nodes: thematic radius bands (crystal high + outer, water near the
+    // shore, the rest scattered through the meadow).
+    const spec = [
+      { kind: "tree", n: 16, band: [12, FAR] },
+      { kind: "rock", n: 12, band: [12, FAR] },
+      { kind: "herb", n: 14, band: [10, FAR] },
+      { kind: "fiber", n: 10, band: [10, FAR] },
+      { kind: "crystal", n: 7, band: [50, FAR] },
+      { kind: "water", n: 8, band: [FAR - 8, FAR] },
+    ];
+    for (const s of spec) {
+      for (let i = 0; i < s.n; i++) {
+        const p = scatter(s.band[0], s.band[1]); if (!p) continue;
+        state.resources.push(new ResourceNode(scene, world.shadow, interaction, new BABYLON.Vector3(p.x, 0, p.z), s.kind, player, state));
+      }
+    }
+    // Story NPCs at their landmarks.
+    for (const data of NPC_DATA) {
+      state.npcs.push(new QuestGiver(scene, world.shadow, interaction, data, (npc) => Dialogue.talk(npc)));
+    }
+    // The castle build site.
+    state.castle = new CastleSite(scene, world.shadow, interaction, player, state);
+    CastleUI.setSite(state.castle);
+  }
+
+  // Fire "reach a location" quest objectives when the player gets close enough.
+  function checkLocations(state, player) {
+    for (const loc of LOCATIONS) {
+      const dx = player.position.x - loc.x, dz = player.position.z - loc.z;
+      if (Math.hypot(dx, dz) <= CONFIG.questReachRange) Quests.onReach(loc.id);
+    }
   }
 
   // =========================================================================
@@ -2592,6 +3709,314 @@
   };
 
   // =========================================================================
+  // Quests — the story spine. Story NPCs (NPC_DATA) each offer a short chain of
+  // quests with objectives (hunt sweets / gather a material / reach a place /
+  // talk to someone) and rewards (coins, gear, and the five castle relics).
+  // Progress is computed live: hunts off the lifetime kill counter snapshotted
+  // at accept time, gathers off the player's current material stock, and reach/
+  // talk off one-shot flags. Completing the relic quests is how the castle rises.
+  // =========================================================================
+  const Quests = {
+    state: null, player: null,
+    active: [],            // accepted, not-yet-turned-in quest ids
+    completed: [],         // turned-in quest ids
+    acceptKills: {},       // totalKills snapshot when a hunt quest was accepted
+    flags: {},             // reach/talk objective flags, keyed by quest id
+
+    init(state, player) {
+      this.state = state; this.player = player;
+      this.active = []; this.completed = []; this.acceptKills = {}; this.flags = {};
+    },
+
+    isActive(id) { return this.active.includes(id); },
+    isDone(id) { return this.completed.includes(id); },
+    activeForNpc(npcId) { return this.active.find((id) => QUEST_BY_ID[id] && QUEST_BY_ID[id].npc === npcId); },
+
+    // The next quest an NPC can offer: the first in their list that's neither
+    // done nor active, gated so their chain unlocks one quest at a time.
+    nextForNpc(npcId) {
+      const npc = NPC_BY_ID[npcId]; if (!npc) return null;
+      for (let i = 0; i < npc.quests.length; i++) {
+        const q = npc.quests[i];
+        if (this.isDone(q.id) || this.isActive(q.id)) continue;
+        if (i > 0 && !this.isDone(npc.quests[i - 1].id)) return null; // previous not done yet
+        return q;
+      }
+      return null;
+    },
+
+    accept(id) {
+      const q = QUEST_BY_ID[id];
+      if (!q || this.isActive(id) || this.isDone(id)) return false;
+      this.active.push(id);
+      this.acceptKills[id] = this.state.totalKills;
+      this.flags[id] = false;
+      Sfx.play("buy");
+      toast(`📜 Quest: ${q.title}`);
+      updateQuestTracker(this);
+      return true;
+    },
+
+    // Live { have, need } progress for a quest's objective.
+    progress(q) {
+      const o = q.obj;
+      if (o.type === "hunt") return { have: Math.min(o.count, Math.max(0, this.state.totalKills - (this.acceptKills[q.id] || 0))), need: o.count };
+      if (o.type === "gather") return { have: Math.min(o.count, this.player.materials[o.target] || 0), need: o.count };
+      if (o.type === "reach" || o.type === "talk") return { have: this.flags[q.id] ? 1 : 0, need: 1 };
+      return { have: 0, need: 1 };
+    },
+    isComplete(q) { const p = this.progress(q); return p.have >= p.need; },
+
+    // A one-line objective description for the dialogue + HUD tracker.
+    objectiveText(q) {
+      const o = q.obj, p = this.progress(q);
+      if (o.type === "hunt") return `Defeat sweets — ${p.have}/${p.need}`;
+      if (o.type === "gather") { const m = MATERIALS[o.target] || {}; return `Gather ${m.icon || ""} ${o.target} — ${p.have}/${p.need}`; }
+      if (o.type === "reach") { const l = LOCATION_BY_ID[o.target] || {}; return `Reach ${l.name || o.target}` + (p.have ? " ✓" : ""); }
+      if (o.type === "talk") { const n = NPC_BY_ID[o.target] || {}; return `Speak with ${n.name || o.target}` + (p.have ? " ✓" : ""); }
+      return "";
+    },
+
+    // Turn a completed quest in: consume gathered mats, pay the reward, advance.
+    turnIn(id) {
+      const q = QUEST_BY_ID[id];
+      if (!q || !this.isActive(id) || !this.isComplete(q)) return false;
+      if (q.obj.type === "gather") spendMaterials(this.player, { [q.obj.target]: q.obj.count });
+      this.active.splice(this.active.indexOf(id), 1);
+      this.completed.push(id);
+      grantReward(this.player, this.state, q.reward);
+      Sfx.play("artifact");
+      const r = q.reward || {};
+      const bits = [];
+      if (r.coins) bits.push(`🪙 ${r.coins}`);
+      if (r.item) bits.push(`${getDef(r.item).icon} ${getDef(r.item).name}`);
+      if (r.relic) bits.push(`${RELICS[r.relic].icon} ${RELICS[r.relic].name}`);
+      toast(`✅ ${q.title} complete! ${bits.join(" · ")}`);
+      updateQuestTracker(this);
+      if (Inventory.open) Inventory.render();
+      return true;
+    },
+
+    // ---- Event hooks fired by gameplay ----
+    onKill() { updateQuestTracker(this); },
+    onGather() { updateQuestTracker(this); },
+    onCraft() { updateQuestTracker(this); },
+    onReach(locId) {
+      for (const id of this.active) {
+        const q = QUEST_BY_ID[id];
+        if (q && q.obj.type === "reach" && q.obj.target === locId && !this.flags[id]) {
+          this.flags[id] = true; toast(`📍 Reached ${(LOCATION_BY_ID[locId] || {}).name || locId}`);
+        }
+      }
+      updateQuestTracker(this);
+    },
+    onTalk(npcId) {
+      for (const id of this.active) {
+        const q = QUEST_BY_ID[id];
+        if (q && q.obj.type === "talk" && q.obj.target === npcId && !this.flags[id]) this.flags[id] = true;
+      }
+      updateQuestTracker(this);
+    },
+
+    // The quest shown in the small HUD tracker (first active, complete ones first).
+    tracked() {
+      const done = this.active.filter((id) => this.isComplete(QUEST_BY_ID[id]));
+      const id = done[0] || this.active[0];
+      return id ? QUEST_BY_ID[id] : null;
+    },
+  };
+
+  // A human-readable summary of a quest reward (coins · item · relic · mats).
+  function rewardText(r) {
+    if (!r) return "";
+    const bits = [];
+    if (r.coins) bits.push(`🪙 ${r.coins}`);
+    if (r.item && getDef(r.item)) bits.push(`${getDef(r.item).icon} ${getDef(r.item).name}`);
+    if (r.relic && RELICS[r.relic]) bits.push(`${RELICS[r.relic].icon} ${RELICS[r.relic].name}`);
+    if (r.mats) bits.push(matSummary(r.mats));
+    return bits.join(" · ");
+  }
+
+  // Close whichever blocking menu is open (so the menus stay mutually exclusive).
+  function closeOtherMenus(except) {
+    if (except !== Shop && Shop.open) Shop.closeShop();
+    if (except !== Inventory && Inventory.open) Inventory.close();
+    if (except !== Anvil && Anvil.open) Anvil.close();
+    if (except !== Dialogue && Dialogue.open) Dialogue.close();
+    if (except !== Crafting && Crafting.open) Crafting.close();
+    if (except !== CastleUI && CastleUI.open) CastleUI.close();
+    if (except !== QuestLog && QuestLog.open) QuestLog.close();
+  }
+
+  // =========================================================================
+  // Dialogue — the NPC conversation overlay. Greets the player, offers the
+  // NPC's next quest (Accept), reports progress on an active quest, or lets you
+  // turn a completed quest in for its reward.
+  // =========================================================================
+  const Dialogue = {
+    open: false, npc: null, player: null, state: null,
+    init(state, player) { this.state = state; this.player = player; },
+
+    talk(npc) {
+      closeOtherMenus(this);
+      this.npc = npc; this.open = true; uiPaused = true;
+      dom.dialogue.classList.remove("hidden");
+      Quests.onTalk(npc.data.id);          // satisfies "talk to X" objectives
+      this.render();
+    },
+    close() {
+      if (!this.open) return;
+      this.open = false; uiPaused = false; this.npc = null;
+      dom.dialogue.classList.add("hidden");
+    },
+
+    render() {
+      if (!this.open || !this.npc) return;
+      const npc = this.npc.data;
+      dom.dlgName.textContent = `${npc.icon} ${npc.name}`;
+      dom.dlgActions.innerHTML = "";
+      const addBtn = (label, cls, fn) => {
+        const b = document.createElement("button"); b.className = "start-btn " + cls; b.textContent = label;
+        b.addEventListener("click", fn); dom.dlgActions.appendChild(b);
+      };
+      const activeId = Quests.activeForNpc(npc.id);
+      const next = Quests.nextForNpc(npc.id);
+      if (activeId && Quests.isComplete(QUEST_BY_ID[activeId])) {
+        const q = QUEST_BY_ID[activeId];
+        dom.dlgText.innerHTML = `<p>"${q.title}" — done, and done well!</p><p class="dlg-reward">Reward: ${rewardText(q.reward)}</p>`;
+        addBtn("Turn in ✅", "", () => { Quests.turnIn(activeId); this.render(); });
+      } else if (activeId) {
+        const q = QUEST_BY_ID[activeId];
+        dom.dlgText.innerHTML = `<p>"${q.story}"</p><p class="dlg-obj">${Quests.objectiveText(q)}</p>`;
+        addBtn("Onward", "secondary-btn", () => this.close());
+      } else if (next) {
+        dom.dlgText.innerHTML = `<p>${npc.intro}</p><p class="dlg-quest">📜 <b>${next.title}</b> — ${next.story}</p>` +
+          `<p class="dlg-obj">${Quests.objectiveText(next)}</p><p class="dlg-reward">Reward: ${rewardText(next.reward)}</p>`;
+        addBtn("Accept 📜", "", () => { Quests.accept(next.id); this.render(); });
+        addBtn("Maybe later", "secondary-btn", () => this.close());
+      } else {
+        dom.dlgText.innerHTML = `<p>Thank you, hero. The vale is in your debt. Raise that castle!</p>`;
+        addBtn("Farewell", "secondary-btn", () => this.close());
+      }
+    },
+  };
+
+  // =========================================================================
+  // Crafting — the crafting bench. Spend gathered materials on recipes that
+  // yield potions (to the belt) and basic gear (to the bag).
+  // =========================================================================
+  const Crafting = {
+    open: false, player: null, state: null,
+    init(state, player) { this.state = state; this.player = player; },
+    toggle() { if (this.open) this.close(); else this.openBench(); },
+    openBench() {
+      closeOtherMenus(this);
+      this.open = true; uiPaused = true;
+      dom.crafting.classList.remove("hidden");
+      this.render();
+    },
+    close() { if (!this.open) return; this.open = false; uiPaused = false; dom.crafting.classList.add("hidden"); },
+
+    craft(recipe) { if (craftRecipe(this.player, recipe)) this.render(); },
+
+    render() {
+      if (!this.open) return;
+      const p = this.player;
+      // Owned-materials strip.
+      dom.craftMats.innerHTML = MATERIAL_IDS.map((id) =>
+        `<span class="mat-chip">${MATERIALS[id].icon} ${p.materials[id] || 0}</span>`).join("");
+      dom.craftItems.innerHTML = "";
+      for (const recipe of CRAFT_RECIPES) {
+        const def = getDef(recipe.out);
+        const can = hasMaterials(p, recipe.mats);
+        const card = itemCard(def, can ? "Craft 🛠️" : "Need mats", "buy-btn craft-btn", !can,
+          () => this.craft(recipe), matSummary(recipe.mats));
+        dom.craftItems.appendChild(card);
+      }
+    },
+  };
+
+  // =========================================================================
+  // CastleUI — the castle build panel. Lists the five parts; spend the matching
+  // relic + coins to raise each in order. Completing the keep wakes the dragon.
+  // =========================================================================
+  const CastleUI = {
+    open: false, site: null, state: null, player: null,
+    init(state, player) { this.state = state; this.player = player; },
+    setSite(site) { this.site = site; },
+    openPanel() {
+      if (!this.site) return;
+      closeOtherMenus(this);
+      this.open = true; uiPaused = true;
+      dom.castle.classList.remove("hidden");
+      this.render();
+    },
+    close() { if (!this.open) return; this.open = false; uiPaused = false; dom.castle.classList.add("hidden"); },
+
+    build(part) { if (this.site.build(part)) { this.render(); updateRelicHud(this.player); } },
+
+    render() {
+      if (!this.open || !this.site) return;
+      dom.castleCoins.textContent = this.state.coins;
+      dom.castleItems.innerHTML = "";
+      for (const part of CASTLE_PARTS) {
+        const built = this.site.isBuilt(part.id);
+        const relic = RELICS[part.relic];
+        const haveRelic = hasRelic(this.player, part.relic);
+        const idx = CASTLE_PARTS.indexOf(part);
+        const prevBuilt = idx === 0 || this.site.isBuilt(CASTLE_PARTS[idx - 1].id);
+        const row = document.createElement("div");
+        row.className = "shop-item castle-row" + (built ? " built" : "");
+        let status, btnLabel, disabled;
+        if (built) { status = "✅ Built"; btnLabel = "Built"; disabled = true; }
+        else if (!prevBuilt) { status = "🔒 Build the previous part first"; btnLabel = "Locked"; disabled = true; }
+        else {
+          const needRelic = haveRelic ? `${relic.icon} ✓` : `${relic.icon} ${relic.name} ✗`;
+          const needCoins = this.state.coins >= part.cost ? `🪙 ${part.cost} ✓` : `🪙 ${part.cost} ✗`;
+          status = `Needs ${needRelic} · ${needCoins}`;
+          disabled = !this.site.canBuild(part);
+          btnLabel = "Build 🏰";
+        }
+        row.innerHTML = `<div class="icon">${part.icon}</div><div class="info"><div class="name">${part.name}</div>` +
+          `<div class="desc">${part.desc}<br>${status}</div></div>`;
+        const btn = document.createElement("button");
+        btn.className = "buy-btn castle-build-btn"; btn.textContent = btnLabel; btn.disabled = disabled;
+        if (!disabled) btn.addEventListener("click", () => this.build(part));
+        row.appendChild(btn);
+        dom.castleItems.appendChild(row);
+      }
+      const left = CASTLE_PARTS.filter((p) => !this.site.isBuilt(p.id)).length;
+      dom.castleProgress.textContent = left === 0 ? "The castle stands! The dragon stirs…" : `${CASTLE_PARTS.length - left}/${CASTLE_PARTS.length} parts raised`;
+    },
+  };
+
+  // =========================================================================
+  // QuestLog — a simple journal of active + completed quests (opened from HUD).
+  // =========================================================================
+  const QuestLog = {
+    open: false,
+    toggle() { if (this.open) this.close(); else this.openLog(); },
+    openLog() { closeOtherMenus(this); this.open = true; uiPaused = true; dom.questLog.classList.remove("hidden"); this.render(); },
+    close() { if (!this.open) return; this.open = false; uiPaused = false; dom.questLog.classList.add("hidden"); },
+    render() {
+      if (!this.open) return;
+      const rows = [];
+      if (Quests.active.length === 0) rows.push(`<div class="shop-empty">No active quests. Seek out the ❗ NPCs across the land.</div>`);
+      for (const id of Quests.active) {
+        const q = QUEST_BY_ID[id]; const done = Quests.isComplete(q);
+        const npc = NPC_BY_ID[q.npc];
+        rows.push(`<div class="quest-row ${done ? "qdone" : ""}"><div class="qr-title">📜 ${q.title} ${done ? "✓" : ""}</div>` +
+          `<div class="qr-obj">${Quests.objectiveText(q)}</div><div class="qr-from">from ${npc.icon} ${npc.name} · reward ${rewardText(q.reward)}</div></div>`);
+      }
+      if (Quests.completed.length) {
+        rows.push(`<div class="quest-sep">Completed (${Quests.completed.length})</div>`);
+        for (const id of Quests.completed) { const q = QUEST_BY_ID[id]; rows.push(`<div class="quest-row qcomplete">✅ ${q.title}</div>`); }
+      }
+      dom.questLogItems.innerHTML = rows.join("");
+    },
+  };
+
+  // =========================================================================
   // Wave system — escalating waves of living sweets + artifacts.
   //
   // Flow: a wave spawns -> fight until every sweet is cleared -> a rest period
@@ -2766,11 +4191,17 @@
     const interaction = new InteractionSystem();
 
     const state = {
-      scene, shadow: world.shadow,
-      score: 0, coins: 0, wave: 0, waveTotal: 0, over: false,
+      scene, shadow: world.shadow, world,
+      score: 0, coins: 0, wave: 0, waveTotal: 0, over: false, won: false,
       artifacts: [], monsters: [], bolts: [], coinsList: [],
       enemyBolts: [],   // hostile boss projectiles (Hazard)
       drops: [],        // rare gear dropped on the ground (ItemDrop)
+      fx: [],           // short-lived impact bursts (Burst)
+      resources: [],    // harvestable resource nodes (ResourceNode)
+      npcs: [],         // story NPCs (QuestGiver)
+      castle: null,     // the CastleSite build system
+      dragon: null,     // the final boss, once summoned
+      totalKills: 0,    // lifetime sweets felled (quest "hunt" progress)
       waveStats: { kills: 0, artifacts: 0, coins: 0 },
       merchant: null, blacksmith: null, boss: null,
     };
@@ -2791,7 +4222,22 @@
     Shop.init(state, player);
     Inventory.init(state, player);
     Anvil.init(state, player);
+    // Story / adventure systems.
+    Quests.init(state, player);
+    Dialogue.init(state, player);
+    Crafting.init(state, player);
+    CastleUI.init(state, player);
     updatePotionBar(player);
+    updateMaterialsHud(player);
+    updateRelicHud(player);
+    updateQuestTracker(Quests);
+
+    // Scatter the story layer: resource nodes, story NPCs, the castle site.
+    populateAdventure(scene, world, interaction, player, state);
+
+    // Day/night + weather systems drive the sky, sun, fog and rain.
+    DayNight.init(world, CONFIG.startTimeOfDay);
+    Weather.init(world, scene);
 
     // A few artifacts to find before the first wave even arrives.
     for (let i = 0; i < 3; i++) spawnArtifact(scene, world, interaction, player, state);
@@ -2809,9 +4255,20 @@
       if (paused) return;                             // pause menu freezes the sim
       if (state.over) { cosmetics(state, dt); return; }
 
-      // While a menu (shop / inventory / anvil) is open, freeze gameplay but
-      // keep the scene + NPC idle animations live.
-      if (uiPaused) { merchant.update(dt); blacksmith.update(dt); cosmetics(state, dt); return; }
+      // The day/night + weather systems keep running even while a menu is open
+      // or the run is over, so the world feels alive in the background.
+      DayNight.update(dt);
+      Weather.update(dt, player.position);
+
+      // While a menu (shop / inventory / anvil / dialogue / craft) is open,
+      // freeze gameplay but keep the scene + NPC idle animations live.
+      if (uiPaused) {
+        merchant.update(dt); blacksmith.update(dt);
+        for (const n of state.npcs) n.update(dt);
+        if (state.castle) state.castle.update(dt);
+        cosmetics(state, dt);
+        return;
+      }
 
       player.update(dt, camera);
       // Rigid follow: mutate the camera's pivot vector IN PLACE so the pivot
@@ -2857,6 +4314,12 @@
       updateCoinDrops(state, player, dt);
       updateMonsterCounter(state);
 
+      // Adventure layer: NPCs, harvest nodes, castle, location-reach objectives.
+      for (const n of state.npcs) n.update(dt);
+      for (const r of state.resources) r.update(dt);
+      if (state.castle) state.castle.update(dt);
+      checkLocations(state, player);
+
       interaction.update(player.position);
       if (Input.consumeInteract() && !player.busy) interaction.trigger();
 
@@ -2867,8 +4330,10 @@
   }
 
   function updateBolts(state, dt) {
+    const obstacles = state.world ? state.world.obstacles : null;
     for (let i = state.bolts.length - 1; i >= 0; i--) {
       const b = state.bolts[i];
+      const wasAbove = b.mesh.position.y > 0.16;
       b.update(dt);
       if (!b.dead) {
         // Hit-test against live monsters on the XZ plane (bolts fly at hand
@@ -2880,6 +4345,10 @@
           if (Math.hypot(dx, dz) <= b.radius + m.radius) {
             const killed = m.hit(b.damage);
             b.hitSet.add(m);
+            // Impact: a shower of shards + knockback along the bolt's heading,
+            // so hits feel like they connect with weight.
+            spawnImpact(state, m.position, b.color || "#ffe27a", { y: 1.0, count: killed ? 12 : 7, spread: killed ? 5 : 3 });
+            if (m.knockback) m.knockback(b.vel.x, b.vel.z, killed ? 1.5 : 4 + (b.knock || 0));
             Sfx.play(killed ? "kill" : "hit");
             if (killed) onMonsterDefeated(state, m);
             // Pierce upgrades let a bolt punch through several sweets.
@@ -2887,8 +4356,22 @@
             break;
           }
         }
+        // Environment impact: a bolt that flies into solid scenery splats on it.
+        if (!b.dead && obstacles) {
+          for (const o of obstacles) {
+            const dx = b.mesh.position.x - o.x, dz = b.mesh.position.z - o.z;
+            if (dx * dx + dz * dz <= o.r * o.r && b.mesh.position.y < 2.6) {
+              spawnImpact(state, b.mesh.position, b.color || "#cfe0ff", { y: 0, count: 5, spread: 2, up: 1.2 });
+              b.dead = true; break;
+            }
+          }
+        }
       }
-      if (b.dead) { b.dispose(); state.bolts.splice(i, 1); }
+      if (b.dead) {
+        // A puff where the bolt struck the ground (it dipped below hand height).
+        if (wasAbove && b.mesh.position.y <= 0.16) spawnImpact(state, b.mesh.position, b.color || "#cfe0ff", { y: 0.1, count: 4, spread: 1.6, up: 1.4, life: 0.4 });
+        b.dispose(); state.bolts.splice(i, 1);
+      }
     }
   }
 
@@ -2944,6 +4427,9 @@
       let diff = Math.abs(((ang - aim + Math.PI) % (Math.PI * 2)) - Math.PI);
       if (diff <= arc / 2) {
         const killed = m.hit(w.damage);
+        // Melee hits shove the sweet back along the swing + spray shards.
+        spawnImpact(state, m.position, w.color || "#ffe0c0", { y: 1.0, count: killed ? 12 : 6, spread: killed ? 5 : 3 });
+        if (m.knockback) m.knockback(dx, dz, killed ? 2 : 6);
         Sfx.play(killed ? "kill" : "hit");
         if (killed) onMonsterDefeated(state, m);
       }
@@ -2958,9 +4444,22 @@
       playerRef.health = Math.min(playerRef.maxHealth, playerRef.health + playerRef.lifesteal);
       updateHealthBar(playerRef.health);
     }
+    // The dragon is the climax: felling it wins the game.
+    if (m.isDragon) {
+      addScore(state, CONFIG.dragonScore);
+      spawnImpact(state, m.position, "#ff6a3a", { y: 3, count: 28, spread: 9, up: 6, life: 1.1 });
+      hideBossBar();
+      state.dragon = null;
+      Sfx.play("boss_death");
+      winGame(state);
+      return;
+    }
     if (m.isBoss) {
       addScore(state, CONFIG.bossScore);
       state.waveStats.kills++;
+      state.totalKills++;
+      Quests.onKill(playerRef, state);
+      spawnImpact(state, m.position, m.arch ? m.arch.color : "#ff5a6a", { y: 2.5, count: 20, spread: 7, up: 5, life: 0.9 });
       // A boss always pays out a generous purse of coins.
       let left = CONFIG.bossCoinDrop;
       while (left > 0) {
@@ -2992,8 +4491,27 @@
     }
     addScore(state, CONFIG.scorePerMonster);
     state.waveStats.kills++;
+    state.totalKills++;
+    // A candy-pop burst in the sweet's own colour.
+    spawnImpact(state, m.position, m.tint || "#ff8ad0", { y: 1.0, count: 10, spread: 4, up: 3 });
+    // A "bomber" sweet detonates on death — area damage + a shove to anything
+    // nearby (including the player if they're too close).
+    if (m.ability === "bomber") {
+      spawnImpact(state, m.position, "#ffd34e", { y: 0.8, count: 18, spread: 7, up: 4, life: 0.7 });
+      Sfx.play("boss_stomp");
+      const blast = 4.5;
+      for (const o of state.monsters) {
+        if (o === m || !o.alive || o.dying > 0) continue;
+        const ox = o.position.x - m.position.x, oz = o.position.z - m.position.z;
+        if (Math.hypot(ox, oz) <= blast && o.knockback) o.knockback(ox, oz, 9);
+      }
+      if (playerRef) {
+        const px = playerRef.position.x - m.position.x, pz = playerRef.position.z - m.position.z;
+        if (Math.hypot(px, pz) <= blast) damagePlayer(state, 14);
+      }
+    }
     maybeDropCoin(state, m.position);
-    toast(`Splat! +${CONFIG.scorePerMonster}`);
+    Quests.onKill(playerRef, state);
   }
 
   // Spin/float dropped rare loot; scoop it into the bag when the player nears.
@@ -3053,6 +4571,8 @@
         a.halo.scaling.setAll(1 + Math.sin(t * 3) * 0.12);
       }
     }
+    // Tick impact bursts (they animate in every state, even paused-for-menu).
+    updateFx(state, dt);
   }
 
   // =========================================================================
@@ -3084,6 +4604,48 @@
       : pct > 25
       ? "linear-gradient(90deg, #ffd34e, #ff9d5c)"
       : "linear-gradient(90deg, #ff5c7a, #ff3b3b)";
+  }
+
+  // ---- Materials pouch readout (top-left chip strip) ----
+  function updateMaterialsHud(player) {
+    if (!dom.materialsBar || !player) return;
+    const bits = [];
+    for (const id of MATERIAL_IDS) {
+      const n = player.materials[id] || 0;
+      if (n > 0) bits.push(`<span class="mat-chip">${MATERIALS[id].icon} ${n}</span>`);
+    }
+    dom.materialsBar.innerHTML = bits.join("");
+  }
+
+  // ---- Castle relics collected (small icon row in the HUD) ----
+  function updateRelicHud(player) {
+    if (!dom.relicBar || !player) return;
+    if (!player.relics.length) { dom.relicBar.innerHTML = ""; return; }
+    dom.relicBar.innerHTML = "🏰 " + player.relics.map((id) => `<span class="relic-chip" title="${RELICS[id].name}">${RELICS[id].icon}</span>`).join("");
+  }
+
+  // ---- The small "current quest" tracker (top-left, under the HUD chips) ----
+  function updateQuestTracker(q) {
+    if (!dom.questTracker) return;
+    const quest = q && q.tracked ? q.tracked() : null;
+    if (!quest) { dom.questTracker.classList.add("hidden"); dom.questTracker.innerHTML = ""; return; }
+    const done = q.isComplete(quest);
+    dom.questTracker.classList.remove("hidden");
+    dom.questTracker.innerHTML =
+      `<div class="qt-title">📜 ${quest.title}${done ? ' <span class="qt-done">✓ return to turn in</span>' : ""}</div>` +
+      `<div class="qt-obj">${q.objectiveText(quest)}</div>`;
+  }
+
+  // ---- Day/night clock + weather chips (top bar) ----
+  function updateClock(timeOfDay, phase) {
+    if (!dom.clock) return;
+    const h = Math.floor(timeOfDay * 24), m = Math.floor((timeOfDay * 24 - h) * 60);
+    const icon = phase === "night" ? "🌙" : phase === "dusk" ? "🌆" : phase === "dawn" ? "🌅" : "☀️";
+    dom.clock.innerHTML = `${icon} ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  }
+  function updateWeatherHud(label, icon) {
+    if (!dom.weather) return;
+    dom.weather.innerHTML = `${icon} ${label}`;
   }
 
   // ---- Potion belt (bottom corner): 3 stackable slots + active-buff pills ----
@@ -3164,6 +4726,20 @@
     setTimeout(() => dom.over.classList.remove("hidden"), 600);
   }
 
+  // The victory path: the castle is built and the dragon is slain. Freezes the
+  // run and shows the win screen with the final tally.
+  function winGame(state) {
+    if (state.won) return;
+    state.won = true; state.over = true;
+    dom.prompt.classList.add("hidden");
+    dom.wavePanel.classList.add("hidden");
+    hideBossBar();
+    if (dom.winScore) dom.winScore.textContent = state.score;
+    if (dom.winWave) dom.winWave.textContent = state.wave;
+    Sfx.play("artifact");
+    setTimeout(() => { if (dom.win) dom.win.classList.remove("hidden"); }, 800);
+  }
+
   // =========================================================================
   // Save / Load — serialize the whole run to a JSON file the player downloads,
   // and restore it from a file on any device.
@@ -3173,7 +4749,7 @@
   // monsters, the boss, artifacts and dropped coins, plus the wave clock) is
   // serialized explicitly so the run resumes exactly where it left off.
   // =========================================================================
-  const SAVE_VERSION = 3;
+  const SAVE_VERSION = 4;
   const PENDING_LOAD_KEY = "gg3d_pending_load"; // sessionStorage hand-off across reload
   const AUTOSTART_KEY = "gg3d_autostart";       // restart -> skip the start screen
 
@@ -3220,12 +4796,28 @@
         equipment: serializeEquipment(player),
         // The 3-slot potion belt.
         potions: player.potions.map((s) => (s ? { id: s.id, count: s.count } : null)),
+        // Adventure state: gathered materials + collected castle relics.
+        materials: Object.assign({}, player.materials),
+        relics: player.relics.slice(),
       },
+      // Story progression: quests, the castle build state, day/night + weather.
+      totalKills: state.totalKills,
+      won: !!state.won,
+      quests: {
+        active: Quests.active.slice(),
+        completed: Quests.completed.slice(),
+        acceptKills: Object.assign({}, Quests.acceptKills),
+        flags: Object.assign({}, Quests.flags),
+      },
+      castle: state.castle ? state.castle.built.slice() : [],
+      dragon: state.dragon ? { hp: round(state.dragon.hp), pos: xz(state.dragon.position) } : null,
+      time: round(DayNight.t),
+      weather: Weather.state,
       monsters: state.monsters
-        .filter((m) => m.alive && m.dying <= 0)
+        .filter((m) => m.alive && m.dying <= 0 && !m.isDragon)
         .map((m) => m.isBoss
           ? { boss: true, wave: m.wave, arch: m.archId, hp: round(m.hp), pos: xz(m.position) }
-          : { kind: m.kind, hp: m.hp, speed: round(m.speed), pos: xz(m.position) }),
+          : { kind: m.kind, hp: m.hp, speed: round(m.speed), ability: m.ability, pos: xz(m.position) }),
       artifacts: state.artifacts
         .filter((a) => a._it && a._it.enabled)
         .map((a) => ({ pos: xz(a.root.position), color: a._color })),
@@ -3280,7 +4872,8 @@
     state.coinsList.length = 0;
     if (state.enemyBolts) { for (const h of state.enemyBolts) h.dispose(); state.enemyBolts.length = 0; }
     if (state.drops) { for (const dr of state.drops) dr.dispose(); state.drops.length = 0; }
-    state.boss = null;
+    if (state.fx) { for (const f of state.fx) f.dispose(); state.fx.length = 0; }
+    state.boss = null; state.dragon = null;
     hideBossBar();
   }
 
@@ -3319,12 +4912,31 @@
       const s = savedPot[i];
       if (s && getDef(s.id) && s.count > 0) player.potions[i] = { id: s.id, count: Math.min(POTION_STACK_MAX, s.count | 0) };
     }
+    // Crafting materials + collected relics (default for legacy saves).
+    for (const id of MATERIAL_IDS) player.materials[id] = 0;
+    if (ps.materials) for (const k in ps.materials) if (k in player.materials) player.materials[k] = ps.materials[k] | 0;
+    player.relics = (ps.relics || []).filter((id) => RELICS[id]);
     player.buffs = [];
     recomputeStats(player);
     updatePotionBar(player);
+    updateMaterialsHud(player);
+    updateRelicHud(player);
     if (ps.health != null) { player.health = Math.min(player.maxHealth, ps.health); updateHealthBar(player.health); }
 
-    // Monsters + boss (the boss restores its exact archetype).
+    // Story progression: kills, quests, castle, day/night, weather, win flag.
+    state.totalKills = d.totalKills | 0;
+    state.won = !!d.won;
+    const q = d.quests || {};
+    Quests.active = (q.active || []).filter((id) => QUEST_BY_ID[id]);
+    Quests.completed = (q.completed || []).filter((id) => QUEST_BY_ID[id]);
+    Quests.acceptKills = Object.assign({}, q.acceptKills || {});
+    Quests.flags = Object.assign({}, q.flags || {});
+    updateQuestTracker(Quests);
+    if (state.castle) state.castle.restore(d.castle || []);
+    if (d.time != null) DayNight.set(d.time);
+    if (d.weather) Weather.setState(d.weather);
+
+    // Monsters + boss (the boss restores its exact archetype + ability).
     for (const md of d.monsters || []) {
       if (md.boss) {
         const boss = new Boss(sceneRef, world.shadow, new BABYLON.Vector3(md.pos[0], 0, md.pos[1]), md.wave, md.arch);
@@ -3335,9 +4947,17 @@
       } else {
         const m = new Monster(sceneRef, world.shadow,
           new BABYLON.Vector3(md.pos[0], 0, md.pos[1]), 1,
-          { kind: md.kind, hp: md.hp, speed: md.speed });
+          { kind: md.kind, hp: md.hp, speed: md.speed, ability: md.ability });
         state.monsters.push(m);
       }
+    }
+    // The dragon, if it had been summoned (castle complete).
+    if (d.dragon) {
+      const dragon = new Dragon(sceneRef, world.shadow, new BABYLON.Vector3(d.dragon.pos[0], 0, d.dragon.pos[1]), state);
+      dragon.hp = d.dragon.hp;
+      state.dragon = dragon;
+      state.monsters.push(dragon);
+      showBossBar(dragon);
     }
 
     // Artifacts + dropped coins + dropped rare loot.
@@ -3420,7 +5040,7 @@
   const Pause = {
     pendingAction: null, // "restart" | "exit" while the confirm dialog is up
 
-    canOpen() { return gameStarted && stateRef && !stateRef.over && !paused && !Shop.open && !Inventory.open && !Anvil.open; },
+    canOpen() { return gameStarted && stateRef && !stateRef.over && !paused && !Shop.open && !Inventory.open && !Anvil.open && !Dialogue.open && !Crafting.open && !CastleUI.open && !QuestLog.open; },
 
     open() {
       if (!this.canOpen()) return;
@@ -3780,6 +5400,18 @@
       if (dom.invClose) dom.invClose.addEventListener("click", () => Inventory.close());
       if (dom.invDone) dom.invDone.addEventListener("click", () => Inventory.close());
 
+      // Adventure overlays: dialogue, crafting, castle, quest log.
+      if (dom.dlgClose) dom.dlgClose.addEventListener("click", () => Dialogue.close());
+      if (dom.craftBtn) dom.craftBtn.addEventListener("click", () => Crafting.toggle());
+      if (dom.craftClose) dom.craftClose.addEventListener("click", () => Crafting.close());
+      if (dom.craftDone) dom.craftDone.addEventListener("click", () => Crafting.close());
+      if (dom.castleClose) dom.castleClose.addEventListener("click", () => CastleUI.close());
+      if (dom.castleDone) dom.castleDone.addEventListener("click", () => CastleUI.close());
+      if (dom.questBtn) dom.questBtn.addEventListener("click", () => QuestLog.toggle());
+      if (dom.questLogClose) dom.questLogClose.addEventListener("click", () => QuestLog.close());
+      if (dom.questLogDone) dom.questLogDone.addEventListener("click", () => QuestLog.close());
+      if (dom.winReplayBtn) dom.winReplayBtn.addEventListener("click", () => window.location.reload());
+
       // Music toggle (🔊 / 🔇).
       if (dom.musicBtn) dom.musicBtn.addEventListener("click", () => Music.toggle());
 
@@ -3806,14 +5438,25 @@
           e.preventDefault(); return;
         }
         // Inventory hotkey (only once playing, and not while another menu is up).
-        if ((e.code === "KeyI" || e.code === "KeyB") && gameStarted && !paused && !Shop.open && !Anvil.open) {
+        if ((e.code === "KeyI" || e.code === "KeyB") && gameStarted && !paused && !Shop.open && !Anvil.open && !Dialogue.open && !Crafting.open && !CastleUI.open) {
           Inventory.toggle(); e.preventDefault(); return;
+        }
+        // Crafting bench (C) and quest log (J) hotkeys.
+        if (e.code === "KeyC" && gameStarted && !paused && !Shop.open && !Anvil.open && !Inventory.open && !Dialogue.open && !CastleUI.open) {
+          Crafting.toggle(); e.preventDefault(); return;
+        }
+        if ((e.code === "KeyJ" || e.code === "KeyL") && gameStarted && !paused && !Shop.open && !Anvil.open && !Inventory.open && !Dialogue.open && !Crafting.open) {
+          QuestLog.toggle(); e.preventDefault(); return;
         }
         if (e.code === "KeyM") { Music.toggle(); return; }
         if (e.code !== "Escape") return;
         if (Shop.open) { Shop.closeShop(); return; }
         if (Anvil.open) { Anvil.close(); return; }
         if (Inventory.open) { Inventory.close(); return; }
+        if (Dialogue.open) { Dialogue.close(); return; }
+        if (Crafting.open) { Crafting.close(); return; }
+        if (CastleUI.open) { CastleUI.close(); return; }
+        if (QuestLog.open) { QuestLog.close(); return; }
         if (paused && Pause.pendingAction) { Pause.hideConfirm(); return; }
         Pause.toggle();
       });
@@ -3861,14 +5504,23 @@
       equipItem, unequipSlot, recomputeStats, TWO_HANDED, EQUIP_SLOTS,
       potionAdd, potionUse, POTION_SLOTS, enhanceItem, enhanceCost, enhanceMult,
       effectiveStats, featuredForWave, computeWeapon, Sfx, spawnArtifact,
+      // ---- Adventure systems ----
+      MATERIALS, MATERIAL_IDS, RELICS, CASTLE_PARTS, CRAFT_RECIPES, NPC_DATA, QUEST_BY_ID,
+      MONSTER_ABILITIES, RESOURCE_KINDS, abilitiesForWave,
+      Quests, Dialogue, Crafting, CastleUI, QuestLog, DayNight, Weather,
+      ResourceNode, QuestGiver, CastleSite, Dragon, Burst,
+      addMaterial, spendMaterials, hasMaterials, craftRecipe, addRelic, hasRelic,
+      grantReward, spawnImpact, winGame,
       get interaction() { return interactionRef; },
       get waves() { return waveSystem; },
       get player() { return playerRef; },
       get state() { return Shop.state; },
+      get world() { return worldRef; },
       startGame,
       serializeGame, applySave, validateSave, setSeed, rng, Pause, Music,
       get seed() { return worldSeed; },
       get paused() { return paused; },
+      get won() { return stateRef ? stateRef.won : false; },
     };
   }
 
@@ -3876,19 +5528,23 @@
    * ROADMAP SEAMS (inert, documented integration points):
    *   PuzzleSystem    - levers/plates are Interactables flipping state flags
    *                     that gate a door mesh; reuses InteractionSystem.
-   *   DialogueSystem  - the Merchant already registers as an Interactable and
-   *                     opens an HTML overlay; swap/extend it for a BABYLON.GUI
-   *                     dialogue panel (babylon.gui is loaded) for talking NPCs.
    *
-   * SHIPPED THIS RELEASE: a full GEAR system — weapons (wand/bow/staff/sword/
-   * axe/dagger, one- and two-handed), armour (helmet/breastplate/boots) and
-   * accessories (two rings + a necklace), carried in an INVENTORY and slotted
-   * into EQUIPMENT that recomputes the player's stats. Normal gear is bought
-   * from the Merchant; RARE gear drops from bosses; anything can be sold back.
-   * Four BOSS archetypes (charger/caster/summoner/stomper) with their own
-   * attacks roll in randomly every 5 waves and scale each cycle. Projectiles
-   * are gravity-bound + life-capped (Projectile / Hazard). Procedural Music.
-   * See ITEM_DB / Inventory / Shop / Boss / Projectile / Music above.
+   * SHIPPED THIS RELEASE — a full STORY/ADVENTURE layer on top of the wave game:
+   *   - Quests / QuestGiver / Dialogue: story NPCs offer hunt/gather/reach/talk
+   *     quest chains paying out coins, gear and the five castle RELICS.
+   *   - ResourceNode + materials + CRAFT_RECIPES + Crafting: gather (trees, rock,
+   *     crystal, herbs, fibers, water) and craft potions + gear at the bench.
+   *   - CastleSite + CastleUI: raise the castle from five relics; completing it
+   *     summons the Dragon final boss — slay it (winGame) to win.
+   *   - Monster ABILITIES (chaser/runner/brute/jumper/shooter/bomber) + knockback
+   *     + impact bursts (Burst / spawnImpact) on hits and ground/scenery splats.
+   *   - DayNight + Weather: a sun/sky/fog day cycle and clear/cloud/fog/rain/storm.
+   *   - World backdrop: a sky dome, surrounding sea, distant mountains, landmarks.
+   *   - Save/load extended to the whole adventure state (materials, relics, quests,
+   *     castle, day-time, weather).
+   * Earlier releases shipped the GEAR system (ITEM_DB / Inventory / Shop / Anvil),
+   * the six BOSS archetypes, gravity-bound Projectile/Hazard physics, the potion
+   * belt and procedural Music + Sfx. See those systems above.
    * ===========================================================================
    */
 })();
