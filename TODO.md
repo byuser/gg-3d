@@ -284,7 +284,14 @@ A task is **done** only when **all** of these are true:
   `test/harness.js`, `README.md`.
 
 ### Task 7 — Russian language support (selectable at start + in pause settings)
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-21 · Shipped full **English + Russian** localization: an i18n layer
+  (`LOCALES = { en, ru }` + `t(key, params)` with interpolation/plurals, persisted in
+  `localStorage`) drives all UI/dynamic strings, while the data tables keep English as the source
+  and a parallel `RU` object supplies Russian via per-field resolvers. Retrofitted **every**
+  user-facing string (start screen, HUD, toasts, prompts, all overlays + every data table). Added
+  EN/RU language selectors on the start screen + pause settings (live re-render, `<html lang>`),
+  and a new harness suite [28] (key-parity, interpolation, pluralization, data completeness,
+  locale persistence) plus a feature smoke check.
 - **Depends on:** none. **Recommended FIRST** so later tasks add bilingual
   strings as they go (see Golden Rule 9).
 - **Goal.** Full **English + Russian** localization, switchable from the **start
@@ -390,6 +397,18 @@ and note it; if it's expensive or irreversible, ask me first.
 
 ## 7. Changelog
 
+- 2026-06-21 · **Task 7 — Russian language support**: full **English + Russian** localization.
+  A new i18n layer — `LOCALES = { en, ru }` flat dictionaries + `t(key, params)` (with
+  `{placeholder}` interpolation, English fallback and a `plural()` helper for Russian one/few/many)
+  + a parallel `RU` object for the data tables (English stays the source; resolvers like
+  `tItemName`/`tZoneName`/`tQuestTitle` pick the locale and fall back to English). **Every**
+  user-facing string is routed through it (start screen, HUD, toasts, prompts, shop/inventory/
+  anvil/crafting/castle/quest-log/dialogue, and all data: zones, NPCs + dialogue, quests, items,
+  relics, castle parts, bosses, materials, weather/clock). Language selectors on the start screen
+  and in pause settings switch **live** (re-rendering visible UI, updating `<html lang>`) and the
+  choice persists in `localStorage`, applied before first paint. New harness suite [28]
+  (EN/RU key-parity, `t()` interpolation, Russian pluralization, data-translation completeness,
+  locale persistence round-trip). Headless-safe (localStorage/`querySelectorAll` feature-detected).
 - _(unreleased)_ Task 1 — RPG world + loadable zones: **shipped** (see git history
   `RPG zones (1–5/n)`), deployed to Pages.
 - 2026-06-21 · **Task 2 — Main story line with missions + side quests**: a structured,

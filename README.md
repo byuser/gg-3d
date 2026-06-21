@@ -13,6 +13,9 @@ Along the way: equip **weapons, armour and accessories**, brew **potions**, hunt
 monsters** and **lair bosses**, weather **rain and storms** under a rolling **day/night cycle**,
 and loot **gear** from a merchant, bosses and quests.
 
+Playable in **English and Russian** — switch language from the start screen or the pause
+settings; the choice applies instantly and is remembered across reloads.
+
 ## The story
 
 Meadowgate is besieged by living sweets. An old castle once warded the vale — help the
@@ -46,6 +49,27 @@ and gear without ever blocking the main line. Slay the dragon to **win**.
 | Travel to another land | walk into a path / bridge / cave portal | same |
 | Music on/off | `M` | 🔊 button (top-right) |
 | Pause / menu | `Esc` | ☰ button (top-right) |
+| Language (EN / RU) | start screen · pause settings | same |
+
+## Languages (English / Russian)
+
+The whole game is localized — **every** user-facing string (start screen, HUD, toasts,
+prompts, shop/inventory/anvil/crafting/quest-log/dialogue, plus all data: zone & NPC names,
+quest titles & stories, item names & descriptions, weather and clock) is resolved through a
+small i18n layer:
+
+- **`LOCALES = { en, ru }`** flat dictionaries + a `t(key, params)` helper (with `{placeholder}`
+  interpolation and English fallback) drive the UI/dynamic strings; a **key-parity** test keeps
+  `en` and `ru` in lock-step so no key can drift.
+- The **data tables** keep their English text as the source of truth; the parallel **`RU`**
+  object holds the Russian, read by per-field resolvers (`tItemName`, `tZoneName`, …) that fall
+  back to English. A **completeness** test walks the tables so no data string ships untranslated.
+- **Russian plurals** use the standard one/few/many rule (`plural()`); the locale persists in
+  `localStorage` and is applied **before first paint** and **live** on switch (no reload needed),
+  also updating `<html lang>`.
+
+Everything is feature-detected (`localStorage`, `querySelectorAll`), so the headless harness
+runs in English without a browser.
 
 ## How to play — the adventure
 
@@ -217,10 +241,12 @@ the **adventure systems**: **monster abilities** + **knockback** + **bomber** ex
 talk / **defeat-boss** / **build** / **defeat-dragon** — accept / progress / turn-in / rewards),
 the **day/night + weather** systems, **impact bursts**, the **castle → dragon → victory** path,
 the **RPG zones** suite (per-zone **location spawns**, monster **roaming**, timed **respawns**,
-**lair boss** spawn/clear/persist, streamed **zone travel**), and the new **main-story campaign**
+**lair boss** spawn/clear/persist, streamed **zone travel**), the **main-story campaign**
 suite: strict **mission ordering/unlocks**, the **guided tracker**, **main-vs-side** separation,
 **repeatable** side quests, the **finale** enablement, the UI render paths, and the **story-state
-save/load round-trip** — all without a browser:
+save/load round-trip**, and the new **i18n** suite: **EN/RU key-parity**, `t()`
+**interpolation**, **Russian pluralization**, **data-translation completeness**, locale-aware
+objective text, and the **locale-persistence round-trip** — all without a browser:
 
 ```bash
 node test/harness.js
@@ -354,4 +380,7 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 - [x] **Impact feedback**: knockback + shard bursts on hits, ground/scenery splats, bomber shockwaves
 - [x] Prettier character animation (swinging ponytails + feet, a forward lean and hip sway)
 - [x] Save/load extended to the full adventure state (materials, relics, quests, castle, time, weather)
+- [x] **Russian language support** — full **English + Russian** localization (UI + all data) via a
+      `LOCALES`/`t()` i18n layer, switchable on the start screen & in pause settings, applied live
+      and persisted (`localStorage`); EN/RU key-parity + data-completeness enforced by tests
 - [ ] Puzzles (levers, plates, gated doors)
