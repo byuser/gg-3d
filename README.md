@@ -116,6 +116,13 @@ runs in English without a browser.
   device (desktop → full, phones → lighter) so it stays smooth. Each land carries its own light
   **mood** (airy peaks, moody caverns) on top of the day/night + weather tint. *(Force a tier for
   testing with `?` → `window.__GG_QUALITY__ = "high" | "medium" | "low"`.)*
+- **Higher-fidelity models:** materials upgrade to **physically-based (PBR)** rendering — energy-
+  conserving, lit by a tiny **procedural sky probe** (image-based lighting, no asset files) so
+  candy reads glossy, gems + crystals glint, and metal blades sheen — with a **StandardMaterial
+  fallback** on weak GPUs. Meshes carry **rounder silhouettes** (layered, shaded tree canopies on
+  tapered trunks; craggier rocks; clustered crystal spires; Lily now has hands). It's all on the
+  same auto-detected **graphics tier** as the lighting (desktop → PBR + the IBL probe + the densest
+  meshes; phones stay on lighter geometry, low-end keeps Standard) so it stays smooth everywhere.
 - **Impactful hits:** bolts, arrows and melee swings now **knock sweets back** and throw a
   **shower of shards** on impact; bolts also **splat** on the ground and solid scenery. Bombers
   detonate in a shockwave that shoves everything nearby.
@@ -253,10 +260,14 @@ suite: strict **mission ordering/unlocks**, the **guided tracker**, **main-vs-si
 **repeatable** side quests, the **finale** enablement, the UI render paths, and the **story-state
 save/load round-trip**, the **i18n** suite: **EN/RU key-parity**, `t()`
 **interpolation**, **Russian pluralization**, **data-translation completeness**, locale-aware
-objective text, and the **locale-persistence round-trip**, and the new **lighting & shadows**
+objective text, and the **locale-persistence round-trip**, the **lighting & shadows**
 suite: the **quality-tier** decision (a pure function of device facts), **every zone building +
 tearing down its shadow generator** without leaking, the **feature-detected post-FX** setup
-(tone mapping / bloom / SSAO) and the **per-zone light mood** — all without a browser:
+(tone mapping / bloom / SSAO) and the **per-zone light mood**, and the new **higher-fidelity
+models** suite: the **model-fidelity tiers** (PBR / env / mesh-density gating), the **PBR ⇄
+StandardMaterial fallback**, the legacy **diffuse/specular aliases**, the procedural **IBL env
+probe**, and **every zone building + tearing down on the PBR + env tier** without throwing — all
+without a browser:
 
 ```bash
 node test/harness.js
@@ -338,6 +349,17 @@ node test/harness.js
   tier-gated **bloom** and **SSAO** onto the camera once; `applyZoneMood` nudges exposure/contrast
   per zone. Every engine-only feature is detected + `try`/caught, so weak GPUs and the headless
   harness simply run without the heavy parts. `DayNight`/`Weather` still own the sun/sky/fog tint.
+- **`mat` / `emat` / `stdMat` / `pbrMat` / `gloss` / `makeEnvironment`** — the model/material layer.
+  `mat`/`emat` return a **`PBRMaterial`** on capable tiers (energy-conserving, metallic/roughness)
+  and fall back to **`StandardMaterial`** on weak GPUs / headless; a small alias maps the legacy
+  `diffuseColor`/`specularColor` writes onto the PBR channels so every build + animation path is
+  untouched. `gloss` tightens roughness/metalness for candy sheen, gem facets and blades;
+  `makeEnvironment` builds a tiny **procedural cube** (no asset files) as an image-based-lighting
+  probe (`scene.environmentTexture`) for soft sky reflections. The mesh helpers
+  (`sphere`/`cyl`/`disc`/…) scale **segment density** with the tier, and the scenery builders add
+  layered tree canopies, craggier rocks and crystal clusters where the budget allows. Backdrop
+  materials that need StandardMaterial specifics (the unlit sky dome, the sea/river sheen) stay on
+  `stdMat`/`stdEmat`. All of it is feature-detected, tier-gated and disposed on zone teardown.
 - **`Burst` / `spawnImpact`** — pooled, self-disposing impact effects + monster **knockback** so
   hits land with weight (feature-detected so it stays headless-safe).
 
@@ -405,4 +427,8 @@ repo as a Pages artifact and publishes it. Enable Pages once in
       → PCF → blurred-exponential), **ACES tone mapping**, subtle **bloom** + optional **SSAO**, and
       a **per-zone light mood** — all gated by an auto-detected **graphics tier** (`Quality`) so it
       degrades cleanly on phones/weak GPUs and stays headless-safe
+- [x] **Higher-fidelity models** — **PBR materials** (metallic/roughness) lit by a procedural
+      **image-based-lighting** probe, glossy candy/gems/blades, and **rounder, layered** procedural
+      meshes (canopies, rocks, crystals, Lily's hands) — tier-gated (PBR + env + densest geometry on
+      desktop; lighter on phones; **StandardMaterial fallback** on weak GPUs) and disposed on teardown
 - [ ] Puzzles (levers, plates, gated doors)

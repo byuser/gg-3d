@@ -162,7 +162,17 @@ A task is **done** only when **all** of these are true:
   about it; drive UI from the data, not hard‑coded strings.
 
 ### Task 3 — Higher‑fidelity models (character, monsters, trees, stones, environment)
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-21 · Shipped a tier‑gated, feature‑detected model/material pass:
+  `mat`/`emat` now return **`PBRMaterial`** (metallic/roughness) on capable tiers with a
+  **`StandardMaterial` fallback** (a small alias maps the legacy `diffuseColor`/`specularColor`
+  writes onto PBR so every build/anim path is untouched); a tiny **procedural cube** env probe
+  (`makeEnvironment`, no asset files) gives image‑based sky reflections; `gloss()` adds candy
+  sheen / gem facets / blade sheen; mesh helpers scale **segment density** by tier and the scenery
+  gains layered, shaded tree canopies on tapered trunks, craggier rocks + clustered crystals, and
+  Lily gets hands. Per‑flower materials are now **shared** (the dense meadow dropped from ~280 to
+  ~55 materials). Phones stay on lighter geometry (≤ the old counts); only desktop "high" adds
+  triangles + PBR + the IBL probe. New harness suite [30] + a scene‑tracking browser‑path smoke
+  proving **leak‑free** teardown. No save‑schema change.
 - **Depends on:** best done **after Task 4** (lighting) so materials read well.
 - **Goal.** Make every model look noticeably **richer and prettier** within the
   mobile + static‑hosting budget. "Realistic" here = **stylized‑PBR / higher
@@ -404,6 +414,30 @@ and note it; if it's expensive or irreversible, ask me first.
 
 ## 7. Changelog
 
+- 2026-06-21 · **Task 3 — Higher‑fidelity models (character, monsters, trees, stones, environment)**:
+  a tier‑gated, fully feature‑detected model + material pass that builds on the Task 4 lighting.
+  The shared `mat`/`emat` helpers now return an **energy‑conserving `PBRMaterial`** (metallic 0 /
+  roughness‑driven) on the PBR tiers and fall back to the tuned **`StandardMaterial`** on weak GPUs
+  and the headless harness; a tiny alias maps the legacy `diffuseColor`/`specularColor` writes
+  (weapon recolour, NPC markers, water/sea shimmer) onto the PBR channels so **every existing
+  build/animation path is untouched**, and the unlit sky dome + sea/river sheen stay on a dedicated
+  `stdMat`/`stdEmat` path. `makeEnvironment` builds a ~6 KB **procedural gradient cube** (warm sky →
+  cool horizon → dark ground + a soft sun glow — **no asset files**) and installs it as
+  `scene.environmentTexture` for image‑based **sky reflections**, gated to the desktop tier and
+  `RawCubeTexture`‑feature‑detected. `gloss()` tightens roughness/metalness for **candy sheen, gem
+  facets and metal blades** (PBR) or a crisp specular (Standard). The mesh helpers
+  (`sphere`/`cyl`/`disc`/`capsule`) scale **segment/tessellation density** with the tier, and the
+  scenery gains **layered, shaded tree canopies on tapered trunks**, **craggier rocks** (icosphere
+  subdivisions + a satellite chunk on high), **clustered crystal spires**, and **hands** on Lily —
+  all gated by a per‑tier `foliage` budget so the dense forests/meadow keep their triangle budget
+  (the mobile tiers never exceed the old geometry; only desktop "high" adds triangles + PBR + the
+  IBL probe). Per‑flower materials are now **shared** (one stem + one head per palette colour), so
+  the 140‑flower meadow dropped from ~280 one‑off materials to ~55. New harness suite [30] covers
+  the model‑fidelity tier data, the **PBR ⇄ Standard fallback**, the diffuse/specular aliases, the
+  `gloss()` tweak, the env probe, and **every zone building + tearing down on the PBR + env tier**;
+  a throwaway scene‑tracking browser‑path smoke proved teardown is **leak‑free** (Δmesh/Δmat/Δnode
+  = 0 across all six zones) with 16–52 PBR materials per zone. No save‑schema change
+  (`SAVE_VERSION` untouched). `index.html` `?v=` bumped to 16.
 - 2026-06-21 · **Task 4 — More + more‑realistic shadows & lighting**: a tier‑gated, fully
   feature‑detected lighting pass. A new `Quality` module picks one graphics tier
   (high/medium/low) from device facts — `Quality.pick()` is a pure, unit‑tested function and
