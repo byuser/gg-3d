@@ -1,24 +1,25 @@
 /*
  * Good Game 3D
  * ---------------------------------------------------------------------------
- * A third-person browser action game built on Babylon.js.
+ * A third-person browser action-RPG built on Babylon.js.
  *
- * This release: run as Lily through a procedurally generated meadow, armed with
- * a glowing MAGIC WAND. Every minute a new WAVE of "living sweets" (lollipops,
- * gummy bears, cupcakes, donuts, candy canes) marches in — each wave bigger
- * than the last and dropping more ARTIFACTS. Blast the sweets with your wand
- * and grab the artifacts to rack up SCORE. The sweets hurt you on contact;
- * survive as long as you can.
+ * This release: run as Lily across an island split into several explorable
+ * LANDS — a home vale (the hub), wild lands and two boss LAIRS — connected by
+ * PORTALS (a path, a bridge, a cave mouth) that STREAM the world in and out so
+ * it never freezes. Each land has its own roaming MONSTERS that RESPAWN over
+ * time; take quests, gather & craft, raise a castle from five relics, then slay
+ * the DRAGON to win.
  *
  * The code is split into small systems so features slot in cleanly:
  *
  *   - Interactable / InteractionSystem  reusable "walk up + press E" contract.
  *   - Input                             keyboard + on-screen stick + cast button.
- *   - Player                            movement, animation, wand + casting, health.
- *   - Projectile / projectile pool      the wand's magic bolts.
- *   - Monster                           a "living sweet" with chase AI + pop FX.
- *   - WaveSystem                        timed escalating waves of sweets + artifacts.
- *   - buildWorld                        procedural environment + lighting.
+ *   - Player                            movement, animation, weapons, health.
+ *   - Projectile / Hazard               gravity-bound bolts (player + hostile).
+ *   - Monster                           a "living sweet" with roam + chase AI.
+ *   - ZONES / buildWorld(scene, zone)   themed, streamable per-zone worlds + portals.
+ *   - SpawnDirector                     per-zone location spawns + respawn + lair boss.
+ *   - ZoneManager                       faded, streamed travel between zones.
  */
 
 (() => {
@@ -72,28 +73,20 @@
     contactDamage: 12,       // damage per sweet "bite"
     biteCooldown: 0.8,       // seconds between bites from the same sweet
 
-    // Waves
-    firstWaveDelay: 5,       // seconds before wave 1
-    waveInterval: 60,        // max seconds to rest before the next wave auto-starts
-    baseMonsters: 4,         // monsters in wave 1
-    monstersPerWave: 3,      // extra monsters each subsequent wave
-    maxMonstersPerWave: 60,  // cap for performance
-    baseArtifacts: 3,        // artifacts dropped in wave 1
-    artifactsPerWave: 1,     // extra artifacts each subsequent wave
-    maxArtifactsPerWave: 14,
-
     // RPG spawning — resident monsters respawn this many seconds after the
     // zone's population drops below its cap (replaces the old wave timer).
     respawnDelay: 7,
 
-    // Difficulty scaling — sweets get faster and tougher each wave.
+    // Difficulty scaling — monster HP/speed grow with the ZONE level. (These
+    // keep their historical *PerWave names; "wave" now means the zone's level.)
     monsterBaseSpeed: 1.6,
     monsterSpeedPerWave: 0.12,
     monsterMaxSpeed: 6.0,
-    monsterHpPerWaves: 3,    // +1 HP every N waves
+    monsterHpPerWaves: 3,    // +1 HP every N zone levels
 
-    // Bosses — a giant "sweet king" storms in every few waves.
-    bossEveryWaves: 5,        // a boss appears on waves divisible by this
+    // Bosses. bossEveryWaves maps a zone's level to a boss "cycle" (deeper lairs
+    // hold tougher kings); bossBaseHp/bossHpPerCycle scale them up from there.
+    bossEveryWaves: 5,        // multiplier from zone level -> boss cycle
     bossBaseHp: 38,           // boss HP on its first appearance (wave 5)
     bossHpPerCycle: 26,       // +HP for each later boss (wave 10, 15, …)
     bossSpeed: 2.0,           // bosses are slower but relentless
@@ -860,22 +853,7 @@
     hud: document.getElementById("hud"),
     score: document.getElementById("score"),
     coins: document.getElementById("coins"),
-    wave: document.getElementById("wave"),
     monsters: document.getElementById("monsters"),
-    nextWave: document.getElementById("nextWave"),
-    wavePanel: document.getElementById("wavePanel"),
-    wavePanelTitle: document.getElementById("wavePanelTitle"),
-    wavePanelClose: document.getElementById("wavePanelClose"),
-    waveResults: document.getElementById("waveResults"),
-    resKills: document.getElementById("resKills"),
-    resArtifacts: document.getElementById("resArtifacts"),
-    resCoins: document.getElementById("resCoins"),
-    waveShopHint: document.getElementById("waveShopHint"),
-    nextWaveBtn: document.getElementById("nextWaveBtn"),
-    waveMini: document.getElementById("waveMini"),
-    miniNextBtn: document.getElementById("miniNextBtn"),
-    miniWaveNum: document.getElementById("miniWaveNum"),
-    miniCountdown: document.getElementById("miniCountdown"),
     shop: document.getElementById("shop"),
     shopClose: document.getElementById("shopClose"),
     shopDone: document.getElementById("shopDone"),
@@ -1004,14 +982,12 @@
     keys: Object.create(null),
     joy: { x: 0, y: 0, active: false },
     interactQueued: false,
-    nextWaveQueued: false,   // player asked to start the next wave early
     castHeld: false,         // fire is continuous while held (respecting cooldown)
 
     init() {
       window.addEventListener("keydown", (e) => {
         this.keys[e.code] = true;
         if (e.code === "KeyE") { this.interactQueued = true; e.preventDefault(); }
-        if (e.code === "Enter" || e.code === "KeyN") { this.nextWaveQueued = true; e.preventDefault(); }
         if (e.code === "Space" || e.code === "KeyF") { this.castHeld = true; e.preventDefault(); }
       });
       window.addEventListener("keyup", (e) => {
@@ -1066,7 +1042,6 @@
       return { x, z };
     },
     consumeInteract() { const v = this.interactQueued; this.interactQueued = false; return v; },
-    consumeNextWave() { const v = this.nextWaveQueued; this.nextWaveQueued = false; return v; },
     wantsCast() { return this.castHeld; },
   };
 
@@ -4437,14 +4412,6 @@
   };
 
   // =========================================================================
-  // Wave system — escalating waves of living sweets + artifacts.
-  //
-  // Flow: a wave spawns -> fight until every sweet is cleared -> a rest period
-  // begins where a "Next Wave" button (or Enter/N, or the touch button) starts
-  // the next wave early; otherwise it auto-starts after `waveInterval` seconds.
-  // Each wave brings more, faster, tougher sweets and more artifacts.
-  // =========================================================================
-  // =========================================================================
   // SpawnDirector — the RPG replacement for timed waves. Each ZONE has its own
   // resident monsters that spawn at fixed points, ROAM their patch (see
   // Monster._wander), and RESPAWN a while after they're felled, up to the
@@ -5374,23 +5341,6 @@
       d.player && Array.isArray(d.player.pos));
   }
 
-  // Tear down every live entity built by createScene so a save can be laid in.
-  function clearWorldEntities(state, interaction) {
-    for (const a of state.artifacts) { if (a._it) interaction.remove(a._it); a.root.dispose(); }
-    state.artifacts.length = 0;
-    for (const m of state.monsters) m.root.dispose();
-    state.monsters.length = 0;
-    for (const b of state.bolts) b.dispose();
-    state.bolts.length = 0;
-    for (const c of state.coinsList) c.dispose();
-    state.coinsList.length = 0;
-    if (state.enemyBolts) { for (const h of state.enemyBolts) h.dispose(); state.enemyBolts.length = 0; }
-    if (state.drops) { for (const dr of state.drops) dr.dispose(); state.drops.length = 0; }
-    if (state.fx) { for (const f of state.fx) f.dispose(); state.fx.length = 0; }
-    state.boss = null; state.dragon = null;
-    hideBossBar();
-  }
-
   // Rebuild a saved run on top of the freshly created (seeded) scene. The world
   // is regenerated from the seed; the player + progression are laid back on top,
   // then we STREAM to the saved zone (which rebuilds its scenery + residents)
@@ -6012,22 +5962,26 @@
    *   PuzzleSystem    - levers/plates are Interactables flipping state flags
    *                     that gate a door mesh; reuses InteractionSystem.
    *
-   * SHIPPED THIS RELEASE — a full STORY/ADVENTURE layer on top of the wave game:
-   *   - Quests / QuestGiver / Dialogue: story NPCs offer hunt/gather/reach/talk
-   *     quest chains paying out coins, gear and the five castle RELICS.
-   *   - ResourceNode + materials + CRAFT_RECIPES + Crafting: gather (trees, rock,
-   *     crystal, herbs, fibers, water) and craft potions + gear at the bench.
-   *   - CastleSite + CastleUI: raise the castle from five relics; completing it
-   *     summons the Dragon final boss — slay it (winGame) to win.
-   *   - Monster ABILITIES (chaser/runner/brute/jumper/shooter/bomber) + knockback
-   *     + impact bursts (Burst / spawnImpact) on hits and ground/scenery splats.
-   *   - DayNight + Weather: a sun/sky/fog day cycle and clear/cloud/fog/rain/storm.
-   *   - World backdrop: a sky dome, surrounding sea, distant mountains, landmarks.
-   *   - Save/load extended to the whole adventure state (materials, relics, quests,
-   *     castle, day-time, weather).
-   * Earlier releases shipped the GEAR system (ITEM_DB / Inventory / Shop / Anvil),
-   * the six BOSS archetypes, gravity-bound Projectile/Hazard physics, the potion
-   * belt and procedural Music + Sfx. See those systems above.
+   * SHIPPED THIS RELEASE — an RPG WORLD OF STREAMED ZONES replacing timed waves:
+   *   - ZONES + buildWorld(scene, zone): the map is a table of zones (a hub + wild
+   *     lands + boss lairs), each themed, with its own scenery spec, monster spawn
+   *     table and optional boss. buildWorld returns the world contract + portals
+   *     + a dispose() that streams the zone back out.
+   *   - ZoneManager: portal-driven travel — fade veil, tear down the old zone,
+   *     dispose its scenery, build + populate the new zone, place the player at the
+   *     return portal. Never shows a frozen frame (desktop or mobile).
+   *   - SpawnDirector: per-zone location spawns that ROAM (Monster._wander) and
+   *     RESPAWN after a delay up to the zone cap; boss-lair zones spawn a guardian
+   *     that stays cleared for the run (state.bossesCleared).
+   *   - setupZoneContent: hub gets merchant/blacksmith/NPCs/resources/castle/
+   *     artifacts; wild lands get themed resource nodes.
+   *   - Save/load is zone-aware (v5): seed + zone + cleared lairs + player +
+   *     progression; monsters regenerate from each zone's spawn table on load.
+   * Earlier releases shipped the STORY/ADVENTURE layer (Quests / QuestGiver /
+   * Dialogue, ResourceNode + Crafting, CastleSite + Dragon, DayNight + Weather),
+   * the GEAR system (ITEM_DB / Inventory / Shop / Anvil), the six BOSS archetypes,
+   * gravity-bound Projectile/Hazard physics, the potion belt, impact bursts and
+   * procedural Music + Sfx. See those systems above.
    * ===========================================================================
    */
 })();

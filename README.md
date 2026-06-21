@@ -1,12 +1,16 @@
 # Good Game 3D
 
-A third-person browser **action-RPG adventure**. Run as **Lily** across a green **island**
-ringed by sea and snow-capped mountains: take **quests** from villagers, **gather and craft**,
-fight varied **monsters** and **bosses**, and raise a **castle** from five hidden **relics**.
-Build it and the **Ancient Dragon** awakens — slay it to **win the game**.
+A third-person browser **action-RPG adventure**. Run as **Lily** across an island split into
+several **explorable lands** — the Meadowgate **vale**, the **Whisperwood**, the **Saltmarsh
+shore**, the **Frostpeak trail** and two hidden **boss lairs** (the Crystal **Caverns** and the
+Bramblewood **Thicket**). Each land has its **own monsters** that **roam** their patch and
+**respawn** over time; **travel** between lands by walking through a **path**, a **bridge** or a
+**cave mouth**, and the world **streams in and out** so it never freezes. Take **quests**,
+**gather and craft**, raise a **castle** from five hidden **relics** — build it and the
+**Ancient Dragon** awakens, so **slay it to win**.
 
-Along the way: equip **weapons, armour and accessories**, brew **potions**, survive escalating
-**waves of living sweets**, weather **rain and storms** under a rolling **day/night cycle**,
+Along the way: equip **weapons, armour and accessories**, brew **potions**, hunt **roaming
+monsters** and **lair bosses**, weather **rain and storms** under a rolling **day/night cycle**,
 and loot **gear** from a merchant, bosses and quests.
 
 ## The story
@@ -35,7 +39,7 @@ the castle and the **dragon** appears for the final battle. Defeat it and you **
 | Crafting bench | `C` | 🛠️ button (top-right) |
 | Quest log | `J` (or `L`) | 📜 button (top-right) |
 | Talk / collect / gather / shop / build (`E`) | `E` | action button (bottom-right) |
-| Start next wave | `Enter` / `N` | corner widget (top-right) |
+| Travel to another land | walk into a path / bridge / cave portal | same |
 | Music on/off | `M` | 🔊 button (top-right) |
 | Pause / menu | `Esc` | ☰ button (top-right) |
 
@@ -71,16 +75,24 @@ the castle and the **dragon** appears for the final battle. Defeat it and you **
   **shower of shards** on impact; bolts also **splat** on the ground and solid scenery. Bombers
   detonate in a shockwave that shoves everything nearby.
 
-## How to play — the waves
+## How to play — the wild lands & travel
 
-- **Waves:** each wave a swarm of **living sweets** marches in from the meadow's edge.
-  Clear them all and a **wave-results window** pops up — it shows your tally (sweets
-  defeated, artifacts, coins earned) and an **OK** button that just closes it. Close it
-  with **OK** (or the **×**) and it shrinks to a small **corner widget** (top-right) so
-  you can roam the map (and visit the merchant + blacksmith) with the view unblocked.
-  **Starting the next wave early is done only from that corner widget** (or `Enter`/`N`),
-  so you're never rushed; otherwise it auto-starts after 60 seconds. Every wave brings
-  **more sweets** (faster and tougher) and **more artifacts**.
+- **Lands & travel:** the world is split into **separate, themed lands** — the home
+  **Meadowgate Vale** (the hub), the **Whisperwood Deep**, the **Saltmarsh Strand**, the
+  **Frostpeak Trail**, and two boss lairs (the **Crystal Caverns** and the **Bramblewood
+  Thicket**). Each land glows with a **portal** at its edge — a **path**, a **bridge** or a
+  **cave mouth** — and **walking into one** streams you to the connected land. Travel is
+  hidden behind a quick **fade** (with the destination's name) so the world loads without
+  freezing, on desktop or mobile. Your current land is shown on the HUD **📍 location chip**.
+- **Roaming monsters & respawns:** every land has its **own monster types** that **spawn at
+  fixed points** and **wander** their patch until you get close, then give chase. Fell them
+  and the land **respawns** fresh ones after a short delay, up to a per-land cap — so there
+  are always foes to hunt, but you're never swarmed by an endless timer. Deeper lands hold
+  **tougher, faster** monsters with more dangerous abilities.
+- **The home hub:** the **Meadowgate Vale** is where the **merchant**, the **blacksmith**,
+  the **story NPCs**, the **resource nodes** and the **castle build site** live — they're
+  always there to visit between expeditions. The wild lands are pure **hunting grounds** (plus
+  a few themed resource nodes), so head out to fight and gather, then return to spend and build.
 - **Potions & the belt:** buy **health potions** (minor / standard / **greater**) and
   **elixirs** (Might, Swiftness) from the merchant. They go onto a **3-slot potion belt**
   in the **bottom-left corner** — each slot **stacks** one kind. Quaff one with `1`/`2`/`3`
@@ -106,34 +118,31 @@ the castle and the **dragon** appears for the final battle. Defeat it and you **
 - **Weapons:** ranged **wands**/**staves** (magic bolts), **bows** (arcing, piercing
   arrows) and melee **swords**, **axes** and **daggers** (a sweeping arc that can hit
   several sweets at once). Hold the attack key/button to fight.
-- **Bosses:** every **5th wave** a colossal **Sweet King** 👑 storms in — its **type is
-  random** and grows tougher each time. A **Charger** winds up and dashes at you; a
-  **Caster** lobs hostile candy bolts; a **Summoner** conjures swarms of extra sweets; a
-  **Stomper** is a slow tank that ground-pounds a damaging shockwave; a **Bomber** rains
-  a volley of high-arcing candy bombs you must keep moving to dodge; and a **Splitter**
-  sheds knots of minions while alive and **bursts into more on death**. Each telegraphs
-  its attacks (a flashing wind-up), has its own attack **sound**, a dedicated **health
-  bar**, scales up every cycle, and drops a guaranteed **rare item** plus a **purse of
-  coins**.
-- **Coins:** defeated sweets sometimes drop **golden coins** (and bosses a whole purse).
+- **Lair bosses:** the **Crystal Caverns** and the **Bramblewood Thicket** each guard a
+  colossal **Sweet King** 👑 in their depths — the **Cavern Gumlord** (a ground-pounding
+  **Stomper**) and the **Bramble Hydra** (a **Splitter** that sheds minions while alive and
+  **bursts into more on death**). Each telegraphs its attacks (a flashing wind-up), has its
+  own attack **sound** and a dedicated **health bar**, and drops a guaranteed **rare item**
+  plus a **purse of coins**. Fell a lair boss and it **stays cleared for the run**. (The
+  six boss **archetypes** — charger / caster / summoner / stomper / bomber / splitter — also
+  back the **dragon** finale and future lairs.)
+- **Coins:** defeated monsters sometimes drop **golden coins** (and bosses a whole purse).
   Walk near one and it's scooped up (coins even magnet toward you). Coins are the
   currency you spend at the merchant's shop.
-- **The merchant:** once a wave is cleared a **travelling merchant** 🧙 appears at the
-  central plaza and leaves when the next wave begins. Walk up and press **E** (or the
-  action button) to open the **shop**. Three tabs: **Buy** normal weapons, armour,
-  accessories and **potions**; **✨ Rare** — a **rotating selection of rare/epic/legendary
-  wares that changes every wave** (a premium, but no need to wait for a boss); or **Sell**
-  any spare gear from your bag (enhanced gear sells for more). Bosses still **drop**
+- **The merchant:** the **travelling merchant** 🧙 keeps a permanent stall in the home
+  **vale**. Walk up and press **E** (or the action button) to open the **shop**. Three tabs:
+  **Buy** normal weapons, armour, accessories and **potions**; **✨ Rare** — a **rotating
+  selection of rare/epic/legendary wares** (a premium, but no need to wait for a boss); or
+  **Sell** any spare gear from your bag (enhanced gear sells for more). Bosses still **drop**
   guaranteed rare loot too.
-- **Solid world:** trees, rocks, bushes, giant toadstools, lampposts and the river are
-  **solid** — you bump and slide around them instead of walking through. A winding
-  **river** crosses the meadow with **wooden bridges** at the crossings.
+- **Solid world:** trees, rocks, bushes, toadstools, crystals, cave pillars, lampposts and
+  the vale's river are **solid** — you bump and slide around them instead of walking through.
+  A winding **river** with **wooden bridges** crosses the home vale.
 - **Living sweets:** a dozen kinds — lollipops, gummy bears, cupcakes, donuts, candy
   canes, ice-cream cones, macarons, candy corn, chocolate bars, jelly beans,
-  marshmallows and pretzels.
-- **Monster counter:** the HUD shows how many sweets are left in the current wave
-  (`🍬 left / total`).
-- **Score:** **+25** per sweet defeated, **+50** per artifact collected. **Coins** are a
+  marshmallows and pretzels — each land drawing from its own palette.
+- **Monster counter:** the HUD shows how many monsters are currently roaming the land (`👹`).
+- **Score:** **+25** per monster defeated, **+50** per artifact collected. **Coins** are a
   separate currency spent at the merchant.
 - **Music:** a procedurally-synthesised soundtrack plays as you fight (no audio files —
   it's generated in-browser). Toggle it with `M` or the 🔊 button.
@@ -184,15 +193,16 @@ test/harness.js         # headless Node harness that exercises the gameplay logi
 ### Tests
 
 `test/harness.js` stubs Babylon + the DOM (with faithful vector math) so the real
-gameplay code can run in Node — verifying collision, the river barrier, wave spawning,
-the **boss archetypes** (caster bolts, summoned minions, scaling, rare drops), the
+gameplay code can run in Node — verifying collision, the river barrier, the
+**boss archetypes** (caster bolts, summoned minions, scaling, rare drops), the
 **gear economy** (buy / equip / dual-wield / sell), **projectile physics** (gravity arc
-+ finite life), the seeded RNG, the **save/load round-trip** (inventory + equipment) and
-the **pause menu** — plus the new **adventure systems**: **monster abilities** +
-**knockback** + **bomber** explosions, **gathering & crafting**, the **quest** flow (accept
-/ progress / turn-in / rewards), the **day/night + weather** systems, **impact bursts**, the
-**castle → dragon → victory** path, and the **save/load** round-trip of the full adventure
-state — all without a browser:
++ finite life), the seeded RNG, the **save/load round-trip** and the **pause menu** — plus
+the **adventure systems**: **monster abilities** + **knockback** + **bomber** explosions,
+**gathering & crafting**, the **quest** flow (accept / progress / turn-in / rewards), the
+**day/night + weather** systems, **impact bursts**, the **castle → dragon → victory** path,
+and the new **RPG zones** suite: per-zone **location spawns**, monster **roaming**, timed
+**respawns**, **lair boss** spawn/clear/persist, and the streamed **zone travel** (teardown
++ rebuild + player placement) — all without a browser:
 
 ```bash
 node test/harness.js
@@ -224,16 +234,26 @@ node test/harness.js
   the plaza merchant who runs the shop between waves.
 - **`Music`** — a tiny Web Audio synth that plays a looping procedural soundtrack (no
   audio assets), mutable from the HUD.
-- **`WaveSystem`** — the timer that spawns escalating waves, then shows the **results window**
-  (collapsible to a corner widget) and reveals the merchant once a wave is cleared.
-- **`buildWorld`** — lighting, ground, procedural scenery, a river + bridges, and a
-  circle-based **collision** system (`obstacles` + `moveActor`) that slides the player
-  around solid props and keeps them out of the water. Driven by a **seeded RNG** so a
-  saved world regenerates identically on load.
-- **Save/load (`serializeGame` / `applySave`)** — snapshots the whole run to JSON and
-  rebuilds it: re-seed + regenerate the world, then lay the live entities (player pose +
-  **inventory & equipment**, score, money, monsters, boss archetype, coins, rare drops,
-  artifacts, wave clock) back on top; stats are recomputed from the restored gear.
+- **`ZONES` / `buildWorld(scene, zone)`** — the world is a table of **zones** (a hub + wild
+  lands + boss lairs), each with its own theme, scenery spec, monster spawn table and
+  optional boss. `buildWorld` themes the terrain/lighting/backdrop, scatters the zone's
+  scenery (wind-swayed foliage, palms, crystals, cave pillars, snow), builds the edge
+  **portals**, and returns the world contract (`obstacles` + `moveActor` collision, lights,
+  `portals`) plus a `dispose()` that streams the zone back out.
+- **`ZoneManager`** — moves the player between zones. Stepping onto a portal triggers a
+  faded transition: tear down the old zone's entities, `dispose()` its scenery, build + theme
+  the new zone, lay its content, spawn its residents, and drop the player at the return
+  portal — all behind a black veil so it never shows a frozen frame.
+- **`SpawnDirector`** — the RPG replacement for timed waves: per-zone resident monsters spawn
+  at fixed points, **roam** (`Monster._wander`), and **respawn** after a delay up to the
+  zone's cap; boss-lair zones spawn their guardian in the depths.
+- **`setupZoneContent`** — lays the per-zone content on a freshly built world: the hub gets
+  the merchant, blacksmith, NPCs, resource nodes, castle and artifacts; the wild lands get
+  themed resource nodes.
+- **Save/load (`serializeGame` / `applySave`)** — snapshots the run to JSON and rebuilds it:
+  re-seed, restore the player (pose + **inventory & equipment**, materials, relics), score,
+  money, quests, castle, cleared lairs and time/weather, then **stream to the saved zone**
+  (its monsters regenerate from the spawn table). Stats are recomputed from the restored gear.
 - **`Pause`** — the in-game pause menu (Resume / Save / Restart / Exit) that freezes the
   simulation, with a confirmation guard on the destructive actions.
 - **`Quests` / `QuestGiver` / `Dialogue`** — the story spine: NPCs (`NPC_DATA`) offer quest
@@ -269,6 +289,13 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 
 ## Roadmap
 
+- [x] **RPG world of streamed zones** — the map is split into a hub + wild lands + boss lairs
+      (`ZONES` / `buildWorld(zone)` / `ZoneManager`), connected by **path / bridge / cave
+      portals** that load in/out behind a fade so it never freezes on desktop or mobile
+- [x] **Location-based monsters** that **roam** their patch and **respawn** over time
+      (`SpawnDirector`) — replacing the timed-wave model
+- [x] **Lair bosses** placed in distant lands (Crystal Caverns, Bramblewood Thicket) that
+      **stay cleared** for the run; save/load is **zone-aware**
 - [x] Third-person character, movement & camera (mobile + desktop)
 - [x] Collect artifacts for score
 - [x] Weapons (wand / bow / staff / sword / axe / dagger) with ranged + melee combat
@@ -276,14 +303,13 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 - [x] Gear system: armour (helmet/breastplate/boots), accessories (2 rings + necklace)
 - [x] Inventory + equipment (two hands; dual-wield or a two-handed weapon) with live stats
 - [x] Normal gear bought from the merchant; rare gear dropped by bosses; sell anything back
-- [x] Escalating waves of "living sweet" enemies (12 types, more/faster/tougher each wave)
-- [x] Player-paced waves with a Next Wave button + live monster counter
-- [x] Wave-results window (skip the wait) that collapses to a non-blocking corner widget
-- [x] Coins dropped by sweets, collected like artifacts, used as shop currency
-- [x] Boss fights — six archetypes (charger/caster/summoner/stomper/bomber/splitter), random every 5 waves, with telegraphs + per-attack sound
+- [x] 12 "living sweet" enemy types (now per-land roaming residents — _superseded the timed waves_)
+- [x] Live monster counter (now "monsters roaming this land")
+- [x] Coins dropped by monsters, collected like artifacts, used as shop currency
+- [x] Boss fights — six archetypes (charger/caster/summoner/stomper/bomber/splitter) with telegraphs + per-attack sound (now placed in **lairs** + backing the dragon)
 - [x] Potions + a 3-slot stacking potion belt (health potions & timed-buff elixirs)
 - [x] Blacksmith NPC — enhance gear for coins, scaling by rarity (common→rare→epic→legendary)
-- [x] Rotating "Featured" rare shop tab that refreshes every wave
+- [x] Rotating "Featured" rare shop tab
 - [x] Procedural background music **and sound effects** (Web Audio, no assets) with a mute toggle
 - [x] Solid scenery collision (trees, rocks, bushes, toadstools, lampposts)
 - [x] A larger map with a winding river + wooden bridges and richer scenery
@@ -293,7 +319,7 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 - [x] **Story mode**: collect coins + five relics, raise the castle, then beat the **dragon** to win
 - [x] **Quest-giving NPCs** with dialogue, story chains, and coin / gear / relic rewards
 - [x] **Crafting + gathering**: chop trees, mine rock/crystal, gather herbs/fibers, collect water → craft potions & gear
-- [x] **Monster abilities** (chaser / runner / brute / jumper / shooter / bomber) that unlock with the waves
+- [x] **Monster abilities** (chaser / runner / brute / jumper / shooter / bomber) that vary by land
 - [x] **Dragon** final boss (hover / dive / fire-breath) + a Victory screen
 - [x] **Day/night cycle** + **weather** (clear / cloudy / fog / rain / storm) driving sky, sun, fog and rain
 - [x] **Bigger world**: an island with a sky dome, surrounding sea, distant mountains and named landmarks
