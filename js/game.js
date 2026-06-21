@@ -908,6 +908,9 @@
     bossName: document.getElementById("bossName"),
     bossFill: document.getElementById("bossFill"),
     waveBanner: document.getElementById("waveBanner"),
+    location: document.getElementById("location"),
+    zoneFade: document.getElementById("zoneFade"),
+    zoneFadeLabel: document.getElementById("zoneFadeLabel"),
     prompt: document.getElementById("prompt"),
     toast: document.getElementById("toast"),
     over: document.getElementById("over"),
@@ -982,7 +985,8 @@
   let gameStarted = false;   // gameplay (waves, monsters) waits on the start screen
   let uiPaused = false;      // true while a blocking menu (the shop) is open
   let paused = false;        // true while the in-game pause menu is open
-  let waveSystem = null;     // the active WaveSystem (for the HUD buttons)
+  let waveSystem = null;     // the active SpawnDirector for the current zone
+  let zoneManager = null;    // streams zones in/out as the player travels
   let playerRef = null;      // the Player (so HUD helpers can read max health)
   // Live handles to the running game, captured in createScene so the save/load
   // and pause systems can read and rebuild the world.
@@ -1085,6 +1089,8 @@
       const i = this.items.indexOf(it); if (i >= 0) this.items.splice(i, 1);
       if (this.current === it) this.current = null;
     }
+    // Drop every registered interactable (used when streaming out a zone).
+    clear() { this.items.length = 0; this.current = null; if (dom.prompt) dom.prompt.classList.add("hidden"); }
     update(playerPos) {
       let best = null, bestDist = Infinity;
       for (const it of this.items) {
@@ -2557,6 +2563,9 @@
       interaction.register(this.it);
     }
 
+    // Tear down (everything is parented to root) when the hub streams out.
+    dispose() { try { this.root.dispose(); } catch (e) {} }
+
     _build(scene, shadow, color) {
       const robe = emat(scene, "npcRobe" + this.root.uniqueId, color, 0.1);
       const skin = emat(scene, "npcSkin" + this.root.uniqueId, "#ffd9b8", 0.08);
@@ -2696,6 +2705,10 @@
       this.built = (builtIds || []).filter((id) => CASTLE_PART_BY_ID[id]);
       for (const id of this.built) if (this.parts[id]) this.parts[id].setEnabled(true);
     }
+
+    // Tear down the build site (everything is parented to root) when the hub
+    // zone is streamed out.
+    dispose() { try { this.root.dispose(); } catch (e) {} }
 
     // Re-awaken the dragon after a zone rebuild if the castle is already
     // complete and the dragon hasn't been beaten (no banner — it's already up).
@@ -2868,6 +2881,12 @@
     const RADIUS = zone.radius;
     const SC = zone.scenery || {};
     const indoor = !!zone.indoor;
+
+    // Snapshot what already exists so the returned dispose() can tear down
+    // EXACTLY this zone's scenery on travel (leaving the player + camera intact).
+    const _bMesh = new Set(scene.meshes || []);
+    const _bTN = new Set(scene.transformNodes || []);
+    const _bMat = new Set(scene.materials || []);
 
     scene.clearColor = BABYLON.Color3.FromHexString(T.sky).toColor4(1);
     scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
@@ -3353,7 +3372,7 @@
     // A gentle shimmer (water + sea) and a bob for beacon/portal orbs, plus a
     // soft sway driven through the WIND animator so foliage feels alive.
     const windAmp = indoor ? 0.4 : 1.0;
-    scene.onBeforeRenderObservable.add(() => {
+    const _windObs = scene.onBeforeRenderObservable.add(() => {
       const t = performance.now() / 1000;
       if (water) {
         water.position.y = baseWaterY + Math.sin(t * 1.5) * 0.015;
@@ -3370,8 +3389,23 @@
       }
     });
 
+    // Everything this zone added — used by dispose() to stream the zone out
+    // without touching the persistent player/camera or later-spawned entities.
+    const _newMesh = (scene.meshes || []).filter((m) => !_bMesh.has(m));
+    const _newTN = (scene.transformNodes || []).filter((n) => !_bTN.has(n));
+    const _newMat = (scene.materials || []).filter((m) => !_bMat.has(m));
+    function dispose() {
+      try { scene.onBeforeRenderObservable.remove(_windObs); } catch (e) {}
+      for (const m of _newMesh) { try { m.dispose(); } catch (e) {} }
+      for (const n of _newTN) { try { n.dispose(); } catch (e) {} }
+      try { if (shadow && shadow.dispose) shadow.dispose(); } catch (e) {}
+      try { if (sun && sun.dispose) sun.dispose(); } catch (e) {}
+      try { if (hemi && hemi.dispose) hemi.dispose(); } catch (e) {}
+      for (const mt of _newMat) { try { if (mt && mt.dispose) mt.dispose(); } catch (e) {} }
+    }
+
     return { shadow, onRoad, obstacles, inRiver, moveActor, water, waterMat,
-             hemi, sun, sky, skyMat, seaMat, ground, portals, zone, radius: RADIUS };
+             hemi, sun, sky, skyMat, seaMat, ground, portals, zone, radius: RADIUS, dispose };
   }
 
   // =========================================================================
@@ -3417,6 +3451,9 @@
     update(dt) {
       this.t = (this.t + dt / CONFIG.dayLength) % 1;
       const w = this.world; if (!w) return;
+      // Indoor zones (caverns/thicket) keep their themed darkness — the sky/sun
+      // cycle doesn't reach underground — but the clock still advances.
+      if (w.zone && w.zone.indoor) { this.phase = this.phaseFor(this.t); updateClock(this.t, this.phase); return; }
       const k = this._lerp(this.t);
       this.amb = k.amb; this.skyColor = k.sky; this.fogColor = k.fog; this.sunColor = k.sun;
       // Sky dome + clear colour + fog colour.
@@ -3518,13 +3555,17 @@
         this.timer = CONFIG.weatherMinTime + rng() * (CONFIG.weatherMaxTime - CONFIG.weatherMinTime);
       }
       const st = this.STATES[this.state];
-      // Layer weather on top of the day/night base each frame.
-      if (sceneRef) sceneRef.fogDensity = 0.0019 * st.fog;
       const w = this.world;
-      if (st.dark > 0) {
+      // Layer weather on top of each zone's own fog base (denser underground).
+      const baseFog = (w && w.zone && w.zone.theme.fogDensity) || 0.0019;
+      const indoor = !!(w && w.zone && w.zone.indoor);
+      if (sceneRef) sceneRef.fogDensity = Math.min(0.06, baseFog * (indoor ? 1 : st.fog));
+      if (!indoor && st.dark > 0) {
         if (w && w.sun) w.sun.intensity *= (1 - st.dark);
         if (w && w.hemi) w.hemi.intensity *= (1 - st.dark * 0.7);
       }
+      // Rain doesn't fall underground — suppress it in indoor zones.
+      if (indoor && this.rainOn && this.rain) { try { this.rain.stop(); } catch (e) {} this.rainOn = false; }
       // Keep the rain cloud centred above the player.
       if (this.rainOn && this.rainEmitter && playerPos) this.rainEmitter.position.set(playerPos.x, 16, playerPos.z);
     },
@@ -4498,8 +4539,11 @@
 
     update(dt) {
       // Lair boss felled (onMonsterDefeated nulls state.boss) → remember it so it
-      // doesn't return during this visit.
-      if (this._spawnedBoss && !this.bossDefeated && !this.state.boss) this.bossDefeated = true;
+      // doesn't return this visit, and persist the clear across zone reloads.
+      if (this._spawnedBoss && !this.bossDefeated && !this.state.boss) {
+        this.bossDefeated = true;
+        if (this.state.bossesCleared) this.state.bossesCleared[this.zone.id] = true;
+      }
 
       if (this._ambient() < this.target) {
         this.respawnTimer -= dt;
@@ -4525,6 +4569,116 @@
     // Legacy no-ops — the wave window/widget are retired under the RPG model.
     minimize() {}
     restore() {}
+  }
+
+  // =========================================================================
+  // ZoneManager — streams zones in and out as the player crosses a PORTAL.
+  // Travel is hidden behind a fade veil so the (cheap, primitive-built) zone
+  // swap never shows a frozen frame: fade to black, tear the old zone down and
+  // build the new one while the screen is covered, then fade back in. The
+  // player + camera persist; everything else is rebuilt for the new zone.
+  // =========================================================================
+  class ZoneManager {
+    constructor(scene, player, interaction, state) {
+      this.scene = scene; this.player = player; this.interaction = interaction; this.state = state;
+      this.transitioning = false;
+      this.cooldown = 0;   // brief immunity after arrival so we don't bounce back
+    }
+
+    // Per-frame: has the player stepped onto a portal? If so, begin travel.
+    check(dt) {
+      if (this.transitioning) return;
+      if (this.cooldown > 0) { this.cooldown -= dt; return; }
+      const world = this.state.world; if (!world) return;
+      const p = this.player.position;
+      for (const portal of world.portals || []) {
+        const dx = p.x - portal.x, dz = p.z - portal.z;
+        if (dx * dx + dz * dz <= portal.r * portal.r) { this.travel(portal.to); return; }
+      }
+    }
+
+    travel(toId) {
+      const target = ZONE_BY_ID[toId];
+      if (!target || this.transitioning) return;
+      this.transitioning = true;
+      const fromId = this.state.world.zone.id;
+      fadeVeil(true, `${target.icon} ${target.name}`);
+      // Swap after the veil has painted (next macrotask) so the black screen is
+      // already up and the teardown/build hitch is never visible.
+      setTimeout(() => {
+        try { this._swap(fromId, toId, target); }
+        catch (e) { console.error(e); showFatal("Zone load failed: " + (e && e.message)); }
+        setTimeout(() => { fadeVeil(false); this.transitioning = false; this.cooldown = 1.2; }, 140);
+      }, 340);
+    }
+
+    _swap(fromId, toId, target) {
+      const state = this.state, scene = this.scene, interaction = this.interaction, player = this.player;
+      // Persist castle progress before the hub is torn down.
+      if (state.castle) state.castleBuilt = state.castle.built.slice();
+      // 1) Dispose every live entity, then 2) stream out the old world scenery.
+      teardownZone(state, interaction);
+      if (state.world && state.world.dispose) state.world.dispose();
+      // 3) Build + theme the new world; re-point the systems that hold a world.
+      const world = buildWorld(scene, target);
+      state.world = world; state.shadow = world.shadow; state.zoneId = toId;
+      player.world = world; worldRef = world;
+      DayNight.init(world, DayNight.t);   // re-point sky/sun/hemi to the new zone
+      Weather.world = world;               // keep the rain system; just re-aim it
+      // 4) Lay the new zone's content + seed its residents.
+      setupZoneContent(scene, world, interaction, player, state);
+      const waves = new SpawnDirector(scene, world, interaction, player, state);
+      if (state.bossesCleared && state.bossesCleared[toId]) waves.bossDefeated = true;
+      waveSystem = waves;
+      waves.populate();
+      // 5) Arrive at the portal that leads back the way we came.
+      placePlayerAtArrival(world, player, fromId);
+      // 6) Fire reach-objectives + refresh the HUD.
+      Quests.onReach(toId);
+      updateLocationHud(target);
+      updateMonsterCounter(state);
+      updateHealthBar(player.health);
+    }
+  }
+
+  // Dispose every live entity from the current zone (monsters, projectiles,
+  // pickups, NPCs, vendors, the castle) and clear the interaction registry so a
+  // fresh zone can be laid down. Leaves the player + camera + HUD intact.
+  function teardownZone(state, interaction) {
+    for (const m of state.monsters) { try { m.root.dispose(); } catch (e) {} }
+    state.monsters.length = 0;
+    for (const b of state.bolts) b.dispose(); state.bolts.length = 0;
+    for (const c of state.coinsList) c.dispose(); state.coinsList.length = 0;
+    if (state.enemyBolts) { for (const h of state.enemyBolts) h.dispose(); state.enemyBolts.length = 0; }
+    if (state.drops) { for (const d of state.drops) d.dispose(); state.drops.length = 0; }
+    if (state.fx) { for (const f of state.fx) f.dispose(); state.fx.length = 0; }
+    for (const a of state.artifacts) { try { if (a._it) interaction.remove(a._it); a.root.dispose(); } catch (e) {} }
+    state.artifacts.length = 0;
+    for (const r of state.resources) { try { r.dispose(); } catch (e) {} } state.resources.length = 0;
+    for (const n of state.npcs) { try { n.dispose(); } catch (e) {} } state.npcs.length = 0;
+    if (state.merchant && state.merchant.dispose) { try { state.merchant.dispose(); } catch (e) {} }
+    if (state.blacksmith && state.blacksmith.dispose) { try { state.blacksmith.dispose(); } catch (e) {} }
+    if (state.castle && state.castle.dispose) { try { state.castle.dispose(); } catch (e) {} }
+    state.merchant = null; state.blacksmith = null; state.castle = null;
+    state.boss = null; state.dragon = null;
+    if (interaction && interaction.clear) interaction.clear();
+    hideBossBar();
+  }
+
+  // Drop the player at the new zone's RETURN portal (the one leading back to the
+  // zone they came from), stepped a few metres inward so they don't re-trigger
+  // it. Falls back to just inside the fence if no matching portal exists.
+  function placePlayerAtArrival(world, player, fromId) {
+    let portal = (world.portals || []).find((p) => p.to === fromId);
+    if (!portal && world.portals && world.portals.length) portal = world.portals[0];
+    let x = 0, z = (world.radius || 60) - 14;
+    if (portal) {
+      const len = Math.hypot(portal.x, portal.z) || 1;
+      const inward = (len - 9) / len;           // 9m toward the centre
+      x = portal.x * inward; z = portal.z * inward;
+      player.facing = Math.atan2(-portal.x, -portal.z); // look into the zone
+    }
+    if (player.root) player.root.position.set(x, 0, z);
   }
 
   // =========================================================================
@@ -4596,6 +4750,10 @@
     const waves = new SpawnDirector(scene, world, interaction, player, state);
     waveSystem = waves;
     waves.populate();
+    updateLocationHud(world.zone);
+
+    // The zone streamer: moves the player between locations via portals.
+    zoneManager = new ZoneManager(scene, player, interaction, state);
 
     // Publish live handles for the save/load + pause systems.
     sceneRef = scene; worldRef = world; interactionRef = interaction;
@@ -4611,6 +4769,10 @@
       // or the run is over, so the world feels alive in the background.
       DayNight.update(dt);
       Weather.update(dt, player.position);
+
+      // Freeze gameplay during a zone transition (the fade veil is up); the
+      // sky/weather/cosmetics above keep ticking so the world still breathes.
+      if (zoneManager && zoneManager.transitioning) { cosmetics(state, dt); return; }
 
       // While a menu (shop / inventory / anvil / dialogue / craft) is open,
       // freeze gameplay but keep the scene + NPC idle animations live.
@@ -4631,7 +4793,11 @@
       // distance change while moving.) Zoom is now wheel / two-finger pinch only.
       camera.target.copyFromFloats(player.position.x, player.position.y + 1.4, player.position.z);
 
-      waves.update(dt);
+      // Stream to the next zone if the player has stepped onto a portal.
+      zoneManager.check(dt);
+      if (zoneManager.transitioning) { cosmetics(state, dt); return; }
+
+      waveSystem.update(dt);
       if (state.merchant) state.merchant.update(dt);
       if (state.blacksmith) state.blacksmith.update(dt);
       updateBuffs(player, dt);
@@ -4643,7 +4809,7 @@
         if (act && act.type === "ranged") {
           const w = act.weapon;
           for (const s of act.shots) {
-            state.bolts.push(new Projectile(scene, world.shadow, s.origin, s.dir, {
+            state.bolts.push(new Projectile(scene, state.world.shadow, s.origin, s.dir, {
               speed: w.boltSpeed, radius: w.boltRadius, damage: w.damage,
               pierce: w.pierce, color: w.color, haloColor: w.haloColor,
               gravity: w.gravity, shape: w.shape,
@@ -4941,11 +5107,26 @@
     if (dom.shopCoins) dom.shopCoins.textContent = state.coins;
   }
 
-  // Show how many sweets are still alive in the current wave (X left / total).
+  // Show how many monsters are roaming the current zone (alive, excluding the
+  // pop-on-death animation).
   function updateMonsterCounter(state) {
     if (!dom.monsters) return;
-    const left = state.monsters.length;
-    dom.monsters.textContent = `${left} / ${state.waveTotal}`;
+    let left = 0;
+    for (const m of state.monsters) if (m.alive && m.dying <= 0) left++;
+    dom.monsters.textContent = `${left}`;
+  }
+
+  // The HUD "current location" chip (set on load + every zone transition).
+  function updateLocationHud(zone) {
+    if (dom.location && zone) dom.location.textContent = `${zone.icon} ${zone.name}`;
+  }
+
+  // The full-screen fade veil that masks a zone transition (a black screen with
+  // the destination's name) so the teardown/build hitch is never visible.
+  function fadeVeil(on, label) {
+    if (!dom.zoneFade) return;
+    if (label != null && dom.zoneFadeLabel) dom.zoneFadeLabel.textContent = label;
+    dom.zoneFade.classList.toggle("show", !!on);
   }
 
   function updateHealthBar(hp) {
@@ -5862,9 +6043,13 @@
       MONSTER_ABILITIES, RESOURCE_KINDS, abilitiesForWave,
       Quests, Dialogue, Crafting, CastleUI, QuestLog, DayNight, Weather,
       ResourceNode, QuestGiver, CastleSite, Dragon, Burst,
+      // ---- RPG world / zones ----
+      ZONES, ZONE_BY_ID, HUB_ZONE, SpawnDirector, ZoneManager, buildWorld,
+      setupZoneContent, teardownZone,
       addMaterial, spendMaterials, hasMaterials, craftRecipe, addRelic, hasRelic,
       grantReward, spawnImpact, winGame,
       get interaction() { return interactionRef; },
+      get zoneManager() { return zoneManager; },
       get waves() { return waveSystem; },
       get player() { return playerRef; },
       get state() { return Shop.state; },
