@@ -502,6 +502,103 @@
   const QUEST_BY_ID = {};
   for (const n of NPC_DATA) for (const q of n.quests) { q.npc = n.id; QUEST_BY_ID[q.id] = q; }
 
+  // =========================================================================
+  // ZONES — the world is no longer one map driven by a wave timer. It is split
+  // into several explorable LOCATIONS, each with its own look, its own resident
+  // monster types that wander and RESPAWN over time, and (for the wild zones) a
+  // BOSS lurking in its depths. Zones are connected by PORTALS — a forest path,
+  // a wooden bridge, a cave mouth — and stream in/out as you travel so the game
+  // never holds more than one zone in memory and never freezes.
+  //
+  // The MEADOW is the home hub: it keeps the village, plaza, river, the merchant
+  // & blacksmith, the castle build site, the resource nodes and the story NPCs.
+  // The wild zones (forest, shore, peaks, caverns, thicket) are the new hunting
+  // grounds, two of which are boss lairs.
+  //
+  //   zone: { id, name, icon, home?, level, radius,
+  //           theme:{ sky, fog, fogDensity, ground, hemi, sun, sunDir },
+  //           scenery:{ trees, rocks, bushes, toadstools, flowers, crystals,
+  //                     palms, snow, pillars },
+  //           spawn:{ count, kinds:[…sweet kinds], abilities:[…], heal? },
+  //           boss?:{ archId, name, intro },
+  //           portals:[ { to, kind:'path'|'bridge'|'cave', angle } ] }
+  // The portal's world position is derived from `angle` + the zone radius; the
+  // matching return portal in the target zone is found by `to === thisZone`.
+  // =========================================================================
+  const ZONES = [
+    {
+      id: "meadow", name: "Meadowgate Vale", icon: "🏘️", home: true, level: 1, radius: 88,
+      theme: { sky: "#86c5ff", fog: "#a9d4ff", fogDensity: 0.006, ground: "#5fae4f",
+               hemi: "#4a6a3a", sun: "#fff4e0", sunDir: [-0.5, -1, -0.4] },
+      scenery: { trees: 60, rocks: 40, bushes: 34, toadstools: 22, flowers: 140 },
+      spawn: { count: 7, kinds: ["lollipop", "gummy", "cupcake", "macaron"], abilities: ["chaser", "runner"] },
+      portals: [
+        { to: "forest", kind: "path",   angle: -2.45 }, // toward Whisperwood (grove, NW)
+        { to: "shore",  kind: "bridge", angle: 0.71 },  // toward Saltmarsh (seaside, SE)
+        { to: "peaks",  kind: "path",   angle: 2.43 },  // toward Frostpeak (mountain, SW)
+      ],
+    },
+    {
+      id: "forest", name: "Whisperwood Deep", icon: "🌲", level: 3, radius: 64,
+      theme: { sky: "#3f6b4a", fog: "#2f5238", fogDensity: 0.018, ground: "#356b39",
+               hemi: "#24401f", sun: "#cfe6b0", sunDir: [-0.35, -1, -0.5] },
+      scenery: { trees: 120, rocks: 18, bushes: 50, toadstools: 40, flowers: 60 },
+      spawn: { count: 9, kinds: ["gummy", "jellybean", "marshmallow", "macaron"], abilities: ["chaser", "runner", "jumper", "brute"] },
+      portals: [
+        { to: "meadow",  kind: "path", angle: 0.69 },   // back to the vale
+        { to: "thicket", kind: "cave", angle: -1.9 },   // deeper, to the boss thicket
+      ],
+    },
+    {
+      id: "shore", name: "Saltmarsh Strand", icon: "🌊", level: 2, radius: 70,
+      theme: { sky: "#bfe6ff", fog: "#bfe0ef", fogDensity: 0.009, ground: "#cdbb84",
+               hemi: "#7a8a5a", sun: "#fff0d0", sunDir: [-0.6, -1, -0.2] },
+      scenery: { trees: 8, rocks: 26, bushes: 14, flowers: 30, palms: 22 },
+      spawn: { count: 8, kinds: ["icecream", "donut", "lollipop", "candycane"], abilities: ["chaser", "runner", "shooter"] },
+      portals: [
+        { to: "meadow", kind: "bridge", angle: -2.43 }, // back to the vale
+        { to: "caverns", kind: "cave",  angle: 0.3 },   // sea-cave to the crystal caverns
+      ],
+    },
+    {
+      id: "peaks", name: "Frostpeak Trail", icon: "⛰️", level: 4, radius: 66,
+      theme: { sky: "#cfe0f5", fog: "#dfe9f7", fogDensity: 0.014, ground: "#dde7f2",
+               hemi: "#8a99ad", sun: "#eef4ff", sunDir: [-0.4, -1, -0.45] },
+      scenery: { trees: 22, rocks: 60, bushes: 8, crystals: 16, snow: true },
+      spawn: { count: 9, kinds: ["candycane", "marshmallow", "chocbar", "pretzel"], abilities: ["chaser", "brute", "jumper", "shooter"] },
+      portals: [
+        { to: "meadow", kind: "path", angle: -0.7 },    // back to the vale
+      ],
+    },
+    {
+      id: "caverns", name: "Crystal Caverns", icon: "💎", level: 5, radius: 56,
+      theme: { sky: "#160d28", fog: "#1a1030", fogDensity: 0.03, ground: "#2a2140",
+               hemi: "#2a1f4a", sun: "#9a7aff", sunDir: [-0.2, -1, -0.3] },
+      scenery: { rocks: 70, crystals: 40, pillars: 18 },
+      spawn: { count: 7, kinds: ["chocbar", "jellybean", "candycorn", "pretzel"], abilities: ["brute", "shooter", "bomber"] },
+      boss: { archId: "stomper", name: "Cavern Gumlord",
+              intro: "A colossal candy golem rules the Crystal Caverns. Bring it down!" },
+      portals: [
+        { to: "shore", kind: "cave", angle: 2.9 },      // back out to the strand
+      ],
+    },
+    {
+      id: "thicket", name: "Bramblewood Thicket", icon: "🐉", level: 6, radius: 54,
+      theme: { sky: "#2a1c10", fog: "#21180e", fogDensity: 0.032, ground: "#2c3a1c",
+               hemi: "#1c2a12", sun: "#c8b070", sunDir: [-0.3, -1, -0.55] },
+      scenery: { trees: 90, rocks: 20, bushes: 60, toadstools: 30 },
+      spawn: { count: 8, kinds: ["gummy", "macaron", "jellybean", "marshmallow"], abilities: ["brute", "jumper", "shooter", "bomber"] },
+      boss: { archId: "splitter", name: "Bramble Hydra",
+              intro: "The Bramble Hydra coils in the deep thicket, splitting as it falls. End it!" },
+      portals: [
+        { to: "forest", kind: "cave", angle: 1.2 },     // back to the Whisperwood
+      ],
+    },
+  ];
+  const ZONE_BY_ID = {};
+  for (const z of ZONES) ZONE_BY_ID[z.id] = z;
+  const HUB_ZONE = "meadow";
+
   // A monotonically increasing id so inventory/equipment entries are distinct
   // even when two of the same item are owned.
   let _instSeq = 1;
@@ -1466,7 +1563,9 @@
 
   class Monster {
     // `restore` (optional) rebuilds a saved sweet exactly: { kind, hp, speed, ability }.
-    constructor(scene, shadow, pos, wave, restore) {
+    // `spec` (optional) constrains a fresh spawn to a zone's palette:
+    //   { kinds:[…sweet kinds], abilities:[…ability ids] }.
+    constructor(scene, shadow, pos, wave, restore, spec) {
       this.scene = scene;
       // Each sweet rolls a "Plants vs Zombies"-style ability: a chaser, a fast
       // runner, a tanky brute, a leaping jumper, a ranged shooter or a bomber
@@ -1479,14 +1578,15 @@
         this.hp = this.maxHp = restore.hp;
         this.speed = restore.speed;
       } else {
-        const pool = abilitiesForWave(wave);
+        const pool = (spec && spec.abilities && spec.abilities.length) ? spec.abilities : abilitiesForWave(wave);
         this.ability = pool[(rng() * pool.length) | 0];
-        const ab0 = MONSTER_ABILITIES[this.ability];
+        const ab0 = MONSTER_ABILITIES[this.ability] || MONSTER_ABILITIES.chaser;
         const baseHp = 1 + Math.floor((wave - 1) / CONFIG.monsterHpPerWaves); // sturdier in later waves
         this.hp = this.maxHp = Math.max(1, Math.round(baseHp * ab0.hp));
         const spd = CONFIG.monsterBaseSpeed + rng() * 0.7 + (wave - 1) * CONFIG.monsterSpeedPerWave;
         this.speed = Math.min(CONFIG.monsterMaxSpeed, spd) * ab0.speed;
-        this.kind = SWEETS[(rng() * SWEETS.length) | 0];
+        const kinds = (spec && spec.kinds && spec.kinds.length) ? spec.kinds : SWEETS;
+        this.kind = kinds[(rng() * kinds.length) | 0];
       }
       // Contact damage + body size are derived from the ability every time (they
       // aren't saved), so they're correct on both fresh spawns and restores.
@@ -1502,6 +1602,11 @@
       this.jumpT = 0;                               // >0 while mid-leap
       this.kx = 0; this.kz = 0;                     // knockback velocity (impact feedback)
       this._abScale = ab.scale || 1;
+      // RPG roaming: a home patch the sweet wanders, and the aggro radius at
+      // which it drops roaming to pursue the player. The spawner may tune these.
+      this.home = { x: pos.x, z: pos.z };
+      this.homeRange = 10; this.aggroRange = 16;
+      this.wanderTimer = rng() * 2.5; this._wt = null;
       this._build(scene, shadow, pos);
     }
 
@@ -1637,6 +1742,27 @@
       this.kx += (dx / d) * force; this.kz += (dz / d) * force;
     }
 
+    // Amble around the home patch at half pace, picking a fresh roaming target
+    // every few seconds. Used when the player is beyond the aggro radius.
+    _wander(dt) {
+      this.wanderTimer -= dt;
+      if (this.wanderTimer <= 0 || !this._wt) {
+        this.wanderTimer = 2 + rng() * 3;
+        const a = rng() * Math.PI * 2, r = rng() * (this.homeRange || 10);
+        this._wt = { x: this.home.x + Math.cos(a) * r, z: this.home.z + Math.sin(a) * r };
+      }
+      const dx = this._wt.x - this.root.position.x, dz = this._wt.z - this.root.position.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.4) {
+        const step = Math.min(this.speed * 0.5 * dt, d);   // amble at half pace
+        this.root.position.x += (dx / d) * step;
+        this.root.position.z += (dz / d) * step;
+        this.body.rotation.y = lerpAngle(this.body.rotation.y, Math.atan2(dx / d, dz / d), 0.1);
+      } else { this._wt = null; }
+      this.bob += dt * 3;
+      this.body.position.y = Math.abs(Math.sin(this.bob * (this.ability === "brute" ? 0.6 : 1))) * 0.12;
+    }
+
     // Move toward the player; return true if currently touching them. `state`
     // lets ranged "shooter" sweets launch hostile bolts into the world.
     update(dt, playerPos, state) {
@@ -1666,6 +1792,15 @@
       const to = playerPos.subtract(this.root.position); to.y = 0;
       const dist = to.length();
       const ab = MONSTER_ABILITIES[this.ability] || MONSTER_ABILITIES.chaser;
+
+      // ---- RPG roaming: beyond the aggro radius the sweet ambles around its
+      // home patch instead of beelining the player across the whole zone. ----
+      if (this.home && dist > this.aggroRange && this.jumpT <= 0) {
+        if (this.marker) this.marker.rotation.y += dt * 4;
+        this._wander(dt);
+        return false;
+      }
+
       if (dist > 0.001) this.body.rotation.y = lerpAngle(this.body.rotation.y, Math.atan2(to.x / dist, to.z / dist), 0.2);
       if (this.marker) this.marker.rotation.y += dt * 4;
 
@@ -2712,212 +2847,305 @@
   // =========================================================================
   // World — procedural environment.
   // =========================================================================
-  function buildWorld(scene) {
-    scene.clearColor = BABYLON.Color3.FromHexString("#86c5ff").toColor4(1);
+  function buildWorld(scene, zone) {
+    zone = zone || ZONE_BY_ID[HUB_ZONE];
+    const T = zone.theme;
+    const RADIUS = zone.radius;
+    const SC = zone.scenery || {};
+    const indoor = !!zone.indoor;
+
+    scene.clearColor = BABYLON.Color3.FromHexString(T.sky).toColor4(1);
     scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
-    scene.fogColor = BABYLON.Color3.FromHexString("#a9d4ff");
-    scene.fogDensity = 0.006;
+    scene.fogColor = BABYLON.Color3.FromHexString(T.fog);
+    scene.fogDensity = T.fogDensity;
 
     const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0.2, 1, 0.1), scene);
-    hemi.intensity = 1.0; hemi.groundColor = BABYLON.Color3.FromHexString("#4a6a3a");
-    const sun = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(-0.5, -1, -0.4), scene);
-    sun.position = new BABYLON.Vector3(60, 90, 60); sun.intensity = 1.0;
+    hemi.intensity = indoor ? 0.7 : 1.0; hemi.groundColor = BABYLON.Color3.FromHexString(T.hemi);
+    const sd = T.sunDir || [-0.5, -1, -0.4];
+    const sun = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(sd[0], sd[1], sd[2]), scene);
+    sun.position = new BABYLON.Vector3(-sd[0] * 120, 90, -sd[2] * 120); sun.intensity = 1.0;
+    sun.diffuse = BABYLON.Color3.FromHexString(T.sun);
 
+    // Richer, softer shadows (blurred exponential map) for every zone.
     const shadow = new BABYLON.ShadowGenerator(2048, sun);
     shadow.useBlurExponentialShadowMap = true; shadow.blurScale = 2;
 
-    // The world grew a lot — size the ground/roads to the new playable radius.
-    const GROUND = CONFIG.worldRadius * 2 + 60; // a generous skirt beyond the fence
+    const GROUND = RADIUS * 2 + 60; // a generous skirt beyond the fence
 
-    // Grass ground — the playable "island" that sits on the surrounding sea.
+    // Ground — themed per zone (grass / sand / snow / cavern floor).
     const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: GROUND, height: GROUND }, scene);
-    ground.material = mat(scene, "grass", "#5fae4f"); ground.receiveShadows = true;
+    ground.material = mat(scene, "grnd", T.ground); ground.receiveShadows = true;
 
-    // ---- BACKDROP: a sky dome, a surrounding SEA, distant MOUNTAINS and a sandy
-    // shoreline — so the playable meadow reads as a green island ringed by water
-    // and snow-capped peaks. All purely decorative (no collision). The day/night
-    // + weather systems tint the sky/sun/fog returned here. ----
-    const skyMat = emat(scene, "sky", "#86c5ff", 1.0);
+    // ---- BACKDROP: a sky dome, a surrounding SEA, distant MOUNTAINS and a
+    // shoreline skirt. All purely decorative (no collision). The day/night +
+    // weather systems tint the sky/sun/fog returned here. ----
+    const skyMat = emat(scene, "sky", T.sky, 1.0);
     skyMat.backFaceCulling = false; skyMat.disableLighting = true;
     const sky = BABYLON.MeshBuilder.CreateSphere("skyDome", { diameter: 900, segments: 16, sideOrientation: 1 }, scene);
     sky.material = skyMat; sky.infiniteDistance = true; sky.isPickable = false;
 
-    // The sea: a vast plane just below the island, lapping at its shores.
-    const seaMat = emat(scene, "sea", "#2c78c8", 0.16);
+    // The sea: a vast plane just below the zone, lapping at its shores (dark in
+    // the indoor cavern/thicket so it reads as a void rather than ocean).
+    const seaCol = indoor ? "#0a0814" : "#2c78c8";
+    const seaMat = emat(scene, "sea", seaCol, indoor ? 0.05 : 0.16);
     seaMat.specularColor = new BABYLON.Color3(0.4, 0.5, 0.6);
     const sea = BABYLON.MeshBuilder.CreateGround("sea", { width: 1600, height: 1600 }, scene);
     sea.material = seaMat; sea.position.y = -0.35; sea.isPickable = false;
 
-    // A sandy beach skirt around the island edge.
+    // A skirt around the edge — sandy outdoors, blended into the floor indoors.
     const beach = BABYLON.MeshBuilder.CreateGround("beach", { width: GROUND + 26, height: GROUND + 26 }, scene);
-    beach.material = mat(scene, "beachM", "#e6d2a0"); beach.position.y = -0.08; beach.receiveShadows = true; beach.isPickable = false;
+    beach.material = mat(scene, "beachM", indoor ? T.ground : "#e6d2a0");
+    beach.position.y = -0.08; beach.receiveShadows = true; beach.isPickable = false;
 
-    // Distant snow-capped mountains ringing the horizon, out across the sea.
-    const rockFar = mat(scene, "mtnRock", "#7c8696");
-    const snowFar = emat(scene, "mtnSnow", "#eef4ff", 0.05);
-    const mtnCount = 30;
-    for (let i = 0; i < mtnCount; i++) {
-      const a = (i / mtnCount) * Math.PI * 2 + rng() * 0.1;
-      const r = 165 + rng() * 90;
-      const h = 34 + rng() * 46;
-      const x = Math.cos(a) * r, z = Math.sin(a) * r;
-      const m = cone(scene, "mtn", 26 + rng() * 22, 0.5, h, rockFar);
-      m.position.set(x, h / 2 - 1, z); m.isPickable = false;
-      const cap = cone(scene, "mtnCap", (10 + rng() * 6), 0.2, h * 0.34, snowFar);
-      cap.position.set(x, h - h * 0.17 - 1, z); cap.isPickable = false;
+    // Distant snow-capped mountains ringing the horizon (outdoor zones only).
+    if (!indoor) {
+      const rockFar = mat(scene, "mtnRock", "#7c8696");
+      const snowFar = emat(scene, "mtnSnow", "#eef4ff", 0.05);
+      const mtnCount = 30;
+      for (let i = 0; i < mtnCount; i++) {
+        const a = (i / mtnCount) * Math.PI * 2 + rng() * 0.1;
+        const r = 165 + rng() * 90;
+        const h = 34 + rng() * 46;
+        const x = Math.cos(a) * r, z = Math.sin(a) * r;
+        const m = cone(scene, "mtn", 26 + rng() * 22, 0.5, h, rockFar);
+        m.position.set(x, h / 2 - 1, z); m.isPickable = false;
+        const cap = cone(scene, "mtnCap", (10 + rng() * 6), 0.2, h * 0.34, snowFar);
+        cap.position.set(x, h - h * 0.17 - 1, z); cap.isPickable = false;
+      }
     }
 
     // ---- Solid scenery is tracked here as {x,z,r} circles for collision. ----
     const obstacles = [];
     const addObstacle = (x, z, r) => obstacles.push({ x, z, r });
+    const portals = [];
 
-    // ---- A winding RIVER with wooden bridges. -------------------------------
-    // The river is a straight band at a fixed orientation. Crossing it is the
-    // local +X of the deck (crossN); flowing along it is local +Z (alongT).
-    const riverAngle = 0.5 + rng() * 0.7;
-    const ca = Math.cos(riverAngle), sa = Math.sin(riverAngle);
-    const crossN = { x: ca, z: -sa };            // perpendicular to the flow
-    const alongT = { x: sa, z: ca };             // direction of flow
-    const riverPerp = 30 + rng() * 6;    // offset of the river from centre
-    const riverHalf = 6.5;                        // half-width of the water
-    const bridgeHalf = 5;                         // half-length of each bridge gap
-    const bridges = [0, 52, -52];                 // crossing points along the flow
+    // Hub-only helpers default to no-ops so the wild zones share one code path.
+    let onRoad = () => false;
+    let inRiver = () => false;
+    let clearOfRiver = () => true;
+    let water = null, waterMat = null;
+    const FAR = RADIUS - 6;
+    let baseWaterY = 0;
+    const animated = []; // {orb, y} markers bobbed by the per-frame observable
 
-    const signedPerp = (x, z) => x * crossN.x + z * crossN.z;
-    const tangent = (x, z) => x * alongT.x + z * alongT.z;
-    const onBridge = (x, z) => {
-      const t = tangent(x, z);
-      for (const b of bridges) if (Math.abs(t - b) < bridgeHalf) return true;
-      return false;
-    };
-    // True if a point sits in open water (blocks movement); bridges are walkable.
-    const inRiver = (x, z) => Math.abs(signedPerp(x, z) - riverPerp) < riverHalf && !onBridge(x, z);
+    // =====================================================================
+    // HOME HUB (Meadowgate Vale): the village river + bridges, the crossroads
+    // and plaza, the lampposts and the named-landmark beacons. The wild zones
+    // skip all of this and get a themed wilderness instead.
+    // =====================================================================
+    if (zone.home) {
+      const riverAngle = 0.5 + rng() * 0.7;
+      const ca = Math.cos(riverAngle), sa = Math.sin(riverAngle);
+      const crossN = { x: ca, z: -sa };            // perpendicular to the flow
+      const alongT = { x: sa, z: ca };             // direction of flow
+      const riverPerp = 30 + rng() * 6;    // offset of the river from centre
+      const riverHalf = 6.5;                        // half-width of the water
+      const bridgeHalf = 5;                         // half-length of each bridge gap
+      const bridges = [0, 52, -52];                 // crossing points along the flow
 
-    // Water surface (a long translucent blue band) + darker muddy banks.
-    const riverCenter = { x: riverPerp * crossN.x, z: riverPerp * crossN.z };
-    const riverLen = GROUND;
-    const bank = BABYLON.MeshBuilder.CreateGround("bank", { width: riverHalf * 2 + 4, height: riverLen }, scene);
-    bank.rotation.y = riverAngle; bank.position.set(riverCenter.x, 0.015, riverCenter.z);
-    bank.material = mat(scene, "bank", "#5c4a32"); bank.receiveShadows = true;
-    const waterMat = emat(scene, "water", "#3aa0e0", 0.18);
-    waterMat.alpha = 0.82; waterMat.specularColor = new BABYLON.Color3(0.5, 0.6, 0.7);
-    const water = BABYLON.MeshBuilder.CreateGround("water", { width: riverHalf * 2, height: riverLen }, scene);
-    water.rotation.y = riverAngle; water.position.set(riverCenter.x, 0.05, riverCenter.z);
-    water.material = waterMat; water.isPickable = false;
+      const signedPerp = (x, z) => x * crossN.x + z * crossN.z;
+      const tangent = (x, z) => x * alongT.x + z * alongT.z;
+      const onBridge = (x, z) => {
+        const t = tangent(x, z);
+        for (const b of bridges) if (Math.abs(t - b) < bridgeHalf) return true;
+        return false;
+      };
+      // True if a point sits in open water (blocks movement); bridges are walkable.
+      inRiver = (x, z) => Math.abs(signedPerp(x, z) - riverPerp) < riverHalf && !onBridge(x, z);
+      clearOfRiver = (x, z) => Math.abs(signedPerp(x, z) - riverPerp) > riverHalf + 1.5;
 
-    // Lily pads floating on the water (purely decorative).
-    const padMat = mat(scene, "pad", "#2f8f4a");
-    for (let i = 0; i < 14; i++) {
-      const t = (rng() - 0.5) * riverLen * 0.8;
-      if (Math.abs((((t) % 52) + 52) % 52) < bridgeHalf + 1) continue; // not on a bridge
-      const off = (rng() - 0.5) * (riverHalf * 1.4);
-      const x = riverCenter.x + alongT.x * t + crossN.x * off;
-      const z = riverCenter.z + alongT.z * t + crossN.z * off;
-      const pad = disc(scene, "pad", 0.5 + rng() * 0.4, padMat);
-      pad.rotation.x = Math.PI / 2; pad.position.set(x, 0.08, z); pad.isPickable = false;
-    }
+      // Water surface (a long translucent blue band) + darker muddy banks.
+      const riverCenter = { x: riverPerp * crossN.x, z: riverPerp * crossN.z };
+      const riverLen = GROUND;
+      const bank = BABYLON.MeshBuilder.CreateGround("bank", { width: riverHalf * 2 + 4, height: riverLen }, scene);
+      bank.rotation.y = riverAngle; bank.position.set(riverCenter.x, 0.015, riverCenter.z);
+      bank.material = mat(scene, "bank", "#5c4a32"); bank.receiveShadows = true;
+      waterMat = emat(scene, "water", "#3aa0e0", 0.18);
+      waterMat.alpha = 0.82; waterMat.specularColor = new BABYLON.Color3(0.5, 0.6, 0.7);
+      water = BABYLON.MeshBuilder.CreateGround("water", { width: riverHalf * 2, height: riverLen }, scene);
+      water.rotation.y = riverAngle; water.position.set(riverCenter.x, 0.05, riverCenter.z);
+      water.material = waterMat; water.isPickable = false;
+      baseWaterY = water.position.y;
 
-    // Bridges — a wooden plank deck + rails at each crossing.
-    const plankMat = mat(scene, "plank", "#9a6a3a");
-    const railMat = mat(scene, "rail", "#7a5230");
-    for (const b of bridges) {
-      const cx = riverCenter.x + alongT.x * b;
-      const cz = riverCenter.z + alongT.z * b;
-      const deck = box(scene, "bridge", riverHalf * 2 + 5, 0.25, bridgeHalf * 2, plankMat);
-      deck.rotation.y = riverAngle; deck.position.set(cx, 0.12, cz); deck.receiveShadows = true;
-      shadow.addShadowCaster(deck);
-      for (const side of [-1, 1]) {
-        const rail = box(scene, "rail", riverHalf * 2 + 5, 0.5, 0.18, railMat);
-        rail.rotation.y = riverAngle;
-        rail.position.set(cx + alongT.x * (bridgeHalf - 0.2) * side, 0.5, cz + alongT.z * (bridgeHalf - 0.2) * side);
-        shadow.addShadowCaster(rail);
+      // Lily pads floating on the water (purely decorative).
+      const padMat = mat(scene, "pad", "#2f8f4a");
+      for (let i = 0; i < 14; i++) {
+        const t = (rng() - 0.5) * riverLen * 0.8;
+        if (Math.abs((((t) % 52) + 52) % 52) < bridgeHalf + 1) continue; // not on a bridge
+        const off = (rng() - 0.5) * (riverHalf * 1.4);
+        const x = riverCenter.x + alongT.x * t + crossN.x * off;
+        const z = riverCenter.z + alongT.z * t + crossN.z * off;
+        const pad = disc(scene, "pad", 0.5 + rng() * 0.4, padMat);
+        pad.rotation.x = Math.PI / 2; pad.position.set(x, 0.08, z); pad.isPickable = false;
       }
-    }
 
-    // ---- Roads: a randomly oriented crossroads of grey strips. ----
-    const roadMat = mat(scene, "road", "#6b6f78");
-    const roadEdge = mat(scene, "roadEdge", "#d9c47a");
-    const baseAngle = rng() * Math.PI;
-    const roadAngles = [baseAngle, baseAngle + Math.PI / 2];
-    for (const ang of roadAngles) {
-      const road = BABYLON.MeshBuilder.CreateGround("road", { width: 7, height: GROUND }, scene);
-      road.rotation.y = ang; road.position.y = 0.02; road.material = roadMat; road.receiveShadows = true;
-      for (const side of [-1, 1]) {
-        const edge = BABYLON.MeshBuilder.CreateGround("edge", { width: 0.35, height: GROUND }, scene);
-        edge.rotation.y = ang; edge.position.y = 0.03; edge.material = roadEdge;
-        edge.position.x = Math.cos(ang) * 3.3 * side;
-        edge.position.z = -Math.sin(ang) * 3.3 * side;
+      // Bridges — a wooden plank deck + rails at each crossing.
+      const plankMat = mat(scene, "plank", "#9a6a3a");
+      const railMat = mat(scene, "rail", "#7a5230");
+      for (const b of bridges) {
+        const cx = riverCenter.x + alongT.x * b;
+        const cz = riverCenter.z + alongT.z * b;
+        const deck = box(scene, "bridge", riverHalf * 2 + 5, 0.25, bridgeHalf * 2, plankMat);
+        deck.rotation.y = riverAngle; deck.position.set(cx, 0.12, cz); deck.receiveShadows = true;
+        shadow.addShadowCaster(deck);
+        for (const side of [-1, 1]) {
+          const rail = box(scene, "rail", riverHalf * 2 + 5, 0.5, 0.18, railMat);
+          rail.rotation.y = riverAngle;
+          rail.position.set(cx + alongT.x * (bridgeHalf - 0.2) * side, 0.5, cz + alongT.z * (bridgeHalf - 0.2) * side);
+          shadow.addShadowCaster(rail);
+        }
       }
-    }
 
-    // Central plaza.
-    const plaza = disc(scene, "plaza", 5, mat(scene, "plaza", "#caa46a"));
-    plaza.rotation.x = Math.PI / 2; plaza.position.y = 0.04; plaza.receiveShadows = true;
-
-    // Helper: are we on/near a road centerline? (keep trees off the roads)
-    const onRoad = (x, z) => {
+      // ---- Roads: a randomly oriented crossroads of grey strips. ----
+      const roadMat = mat(scene, "road", "#6b6f78");
+      const roadEdge = mat(scene, "roadEdge", "#d9c47a");
+      const baseAngle = rng() * Math.PI;
+      const roadAngles = [baseAngle, baseAngle + Math.PI / 2];
       for (const ang of roadAngles) {
-        const perp = Math.abs(x * Math.sin(ang) - z * Math.cos(ang));
-        if (perp < 5) return true;
+        const road = BABYLON.MeshBuilder.CreateGround("road", { width: 7, height: GROUND }, scene);
+        road.rotation.y = ang; road.position.y = 0.02; road.material = roadMat; road.receiveShadows = true;
+        for (const side of [-1, 1]) {
+          const edge = BABYLON.MeshBuilder.CreateGround("edge", { width: 0.35, height: GROUND }, scene);
+          edge.rotation.y = ang; edge.position.y = 0.03; edge.material = roadEdge;
+          edge.position.x = Math.cos(ang) * 3.3 * side;
+          edge.position.z = -Math.sin(ang) * 3.3 * side;
+        }
       }
-      return false;
-    };
 
-    // Find a valid scatter spot: away from spawn/roads/water, inside the fence.
+      // Central plaza.
+      const plaza = disc(scene, "plaza", 5, mat(scene, "plaza", "#caa46a"));
+      plaza.rotation.x = Math.PI / 2; plaza.position.y = 0.04; plaza.receiveShadows = true;
+
+      // Helper: are we on/near a road centerline? (keep trees off the roads)
+      onRoad = (x, z) => {
+        for (const ang of roadAngles) {
+          const perp = Math.abs(x * Math.sin(ang) - z * Math.cos(ang));
+          if (perp < 5) return true;
+        }
+        return false;
+      };
+
+      // ---- Lampposts marching along the roads (emissive, no extra GPU lights). ----
+      const poleMat = mat(scene, "pole", "#3a3f4a");
+      const lampMat = emat(scene, "lamp", "#ffe6a0", 0.9);
+      for (const ang of roadAngles) {
+        for (let d = -FAR + 8; d <= FAR - 8; d += 18) {
+          for (const side of [-1, 1]) {
+            const x = Math.cos(ang) * d + Math.sin(ang) * 4.4 * side;
+            const z = -Math.sin(ang) * d + Math.cos(ang) * 4.4 * side;
+            if (Math.hypot(x, z) > FAR || inRiver(x, z)) continue;
+            const pole = cyl(scene, "pole", 0.18, 0.22, 3.2, poleMat);
+            pole.position.set(x, 1.6, z); shadow.addShadowCaster(pole);
+            const lamp = sphere(scene, "lamp", 0.5, lampMat);
+            lamp.position.set(x, 3.35, z); lamp.isPickable = false;
+            addObstacle(x, z, 0.4);
+          }
+        }
+      }
+
+      // ---- Cattails / reeds hugging the riverbank (decorative). ----
+      const reedMat = mat(scene, "reed", "#3c8a3c");
+      const catMat = mat(scene, "cat", "#6b4a2a");
+      for (let i = 0; i < 40; i++) {
+        const t = (rng() - 0.5) * riverLen * 0.85;
+        const off = (riverHalf + 0.6 + rng() * 1.2) * (rng() < 0.5 ? 1 : -1);
+        const x = riverCenter.x + alongT.x * t + crossN.x * off;
+        const z = riverCenter.z + alongT.z * t + crossN.z * off;
+        if (Math.hypot(x, z) > FAR) continue;
+        const stem = cyl(scene, "reed", 0.05, 0.05, 1.1 + rng() * 0.6, reedMat);
+        stem.position.set(x, 0.6, z);
+        const head = capsule(scene, "cattail", 0.4, 0.09, catMat);
+        head.position.set(x, 1.25, z);
+      }
+
+      // ---- Location beacons: a glowing pillar + floating icon orb at every
+      // named landmark, so the story's places are easy to spot from afar. ----
+      for (const loc of LOCATIONS) {
+        const bm = emat(scene, "beacon_" + loc.id, loc.color, 0.9);
+        const plat = disc(scene, "locPlat_" + loc.id, 4.5, mat(scene, "locPlatM_" + loc.id, "#caa46a"));
+        plat.rotation.x = Math.PI / 2; plat.position.set(loc.x, 0.05, loc.z); plat.receiveShadows = true; plat.isPickable = false;
+        const pillar = cyl(scene, "locPillar_" + loc.id, 0.5, 0.7, 14, bm);
+        pillar.position.set(loc.x, 7, loc.z); pillar.material.alpha = 0.32; pillar.isPickable = false;
+        const orb = sphere(scene, "locOrb_" + loc.id, 1.0, bm);
+        orb.position.set(loc.x, 15, loc.z); orb.isPickable = false;
+        animated.push({ orb, y: 15 });
+      }
+    }
+
+    // Find a valid scatter spot: away from the centre, roads and water, inside
+    // the fence. Shared by every zone (hub helpers are no-ops in the wild).
     const place = (minR, maxR) => {
-      for (let tries = 0; tries < 16; tries++) {
+      for (let tries = 0; tries < 18; tries++) {
         const ang = rng() * Math.PI * 2;
         const r = minR + rng() * (maxR - minR);
         const x = Math.cos(ang) * r, z = Math.sin(ang) * r;
-        if (r > 6 && !onRoad(x, z) &&
-            Math.abs(signedPerp(x, z) - riverPerp) > riverHalf + 1.5) return { x, z };
+        if (r > minR - 0.001 && !onRoad(x, z) && clearOfRiver(x, z)) return { x, z };
       }
       return null;
     };
 
-    const FAR = CONFIG.worldRadius - 6;
+    // =====================================================================
+    // SCENERY — driven by the zone's spec so each location looks distinct:
+    // trees, rocks, bushes, toadstools, flowers, plus palms (shore), crystals
+    // (peaks/caverns) and cave pillars (caverns).
+    // =====================================================================
+    const trunkMat = mat(scene, "trunk", indoor ? "#3a2a1c" : "#7a5230");
+    const leafCols = indoor ? ["#27451f", "#1f3a18", "#2c5022"]
+      : (zone.id === "peaks") ? ["#cfe0d0", "#b8d8c4", "#9fc7b0"]
+      : (zone.id === "forest" || zone.id === "thicket") ? ["#2f8f3a", "#247a30", "#36a142"]
+      : ["#3f9d4a", "#46ad53", "#379142"];
+    const leafMats = leafCols.map((c, i) => mat(scene, "leaf" + i, c));
 
-    // ---- Lampposts marching along the roads (emissive, no extra GPU lights). ----
-    const poleMat = mat(scene, "pole", "#3a3f4a");
-    const lampMat = emat(scene, "lamp", "#ffe6a0", 0.9);
-    for (const ang of roadAngles) {
-      for (let d = -FAR + 8; d <= FAR - 8; d += 18) {
-        for (const side of [-1, 1]) {
-          const x = Math.cos(ang) * d + Math.sin(ang) * 4.4 * side;
-          const z = -Math.sin(ang) * d + Math.cos(ang) * 4.4 * side;
-          if (Math.hypot(x, z) > FAR || inRiver(x, z)) continue;
-          const pole = cyl(scene, "pole", 0.18, 0.22, 3.2, poleMat);
-          pole.position.set(x, 1.6, z); shadow.addShadowCaster(pole);
-          const lamp = sphere(scene, "lamp", 0.5, lampMat);
-          lamp.position.set(x, 3.35, z); lamp.isPickable = false;
-          addObstacle(x, z, 0.4);
-        }
-      }
-    }
-
-    // ---- Trees. ----
-    const trunkMat = mat(scene, "trunk", "#7a5230");
-    const leafMats = ["#3f9d4a", "#46ad53", "#379142"].map((c, i) => mat(scene, "leaf" + i, c));
-    const trees = 60 + ((rng() * 18) | 0);
-    for (let i = 0; i < trees; i++) {
-      const p = place(8, FAR); if (!p) continue;
+    // ---- Trees (swaying foliage hooks are tagged for the wind animator). ----
+    const swayers = []; // {mesh, baseRot, phase, amp}
+    const nTrees = SC.trees || 0;
+    for (let i = 0; i < nTrees; i++) {
+      const p = place(7, FAR); if (!p) continue;
       const h = 1.3 + rng() * 1.0;
       const trunk = cyl(scene, "trunk", 0.5, 0.6, h * 1.5, trunkMat);
       trunk.position.set(p.x, h * 0.75, p.z); shadow.addShadowCaster(trunk);
       const lm = leafMats[(rng() * leafMats.length) | 0];
+      const crown = new BABYLON.TransformNode("crown", scene);
+      crown.position.set(p.x, h * 1.5, p.z);
       const n = 2 + ((rng() * 2) | 0);
       for (let k = 0; k < n; k++) {
         const leaf = sphere(scene, "leaf", 1.9 + rng(), lm);
-        leaf.position.set(p.x + (rng() - 0.5), h * 1.5 + 0.6 + k * 0.6, p.z + (rng() - 0.5));
+        leaf.parent = crown;
+        leaf.position.set((rng() - 0.5), 0.6 + k * 0.6, (rng() - 0.5));
         leaf.scaling.y = 1.1; shadow.addShadowCaster(leaf);
       }
+      swayers.push({ mesh: crown, phase: rng() * Math.PI * 2, amp: 0.03 + rng() * 0.03 });
       addObstacle(p.x, p.z, 0.9);
     }
 
+    // ---- Palms (shore): a leaning trunk with a drooping frond crown. ----
+    const nPalms = SC.palms || 0;
+    if (nPalms) {
+      const palmTrunk = mat(scene, "palmTr", "#a07a44");
+      const frondMat = mat(scene, "frond", "#46a850");
+      for (let i = 0; i < nPalms; i++) {
+        const p = place(8, FAR); if (!p) continue;
+        const h = 3 + rng() * 1.6;
+        const tr = cyl(scene, "palm", 0.28, 0.42, h, palmTrunk);
+        tr.position.set(p.x, h / 2, p.z); tr.rotation.z = (rng() - 0.5) * 0.3; shadow.addShadowCaster(tr);
+        const crown = new BABYLON.TransformNode("palmCrown", scene);
+        crown.position.set(p.x, h, p.z);
+        for (let f = 0; f < 6; f++) {
+          const fr = box(scene, "pfrond", 2.4, 0.08, 0.5, frondMat);
+          fr.parent = crown; fr.rotation.y = (f / 6) * Math.PI * 2; fr.rotation.z = 0.5;
+          fr.position.set(Math.cos((f / 6) * Math.PI * 2) * 1.1, 0, Math.sin((f / 6) * Math.PI * 2) * 1.1);
+          shadow.addShadowCaster(fr);
+        }
+        swayers.push({ mesh: crown, phase: rng() * Math.PI * 2, amp: 0.05 + rng() * 0.04 });
+        addObstacle(p.x, p.z, 0.6);
+      }
+    }
+
     // ---- Rocks. ----
-    const rockMat = mat(scene, "rock", "#9aa0a6");
-    for (let i = 0; i < 40; i++) {
-      const p = place(7, FAR); if (!p) continue;
+    const rockMat = mat(scene, "rock", indoor ? "#4a4258" : (zone.id === "peaks" ? "#b9c4d2" : "#9aa0a6"));
+    const nRocks = SC.rocks || 0;
+    for (let i = 0; i < nRocks; i++) {
+      const p = place(6, FAR); if (!p) continue;
       const rad = 0.5 + rng() * 0.9;
       const rock = BABYLON.MeshBuilder.CreateIcoSphere("rock", { radius: rad, subdivisions: 1 }, scene);
       rock.material = rockMat; rock.position.set(p.x, rad * 0.6, p.z);
@@ -2926,56 +3154,85 @@
     }
 
     // ---- Bushes (clusters of leafy spheres). ----
-    for (let i = 0; i < 34; i++) {
-      const p = place(7, FAR); if (!p) continue;
+    const nBush = SC.bushes || 0;
+    for (let i = 0; i < nBush; i++) {
+      const p = place(6, FAR); if (!p) continue;
       const lm = leafMats[(rng() * leafMats.length) | 0];
       const lobes = 3 + ((rng() * 2) | 0);
+      const bush = new BABYLON.TransformNode("bushN", scene); bush.position.set(p.x, 0, p.z);
       for (let k = 0; k < lobes; k++) {
         const b = sphere(scene, "bush", 0.7 + rng() * 0.5, lm);
-        b.position.set(p.x + (rng() - 0.5) * 1.1, 0.45, p.z + (rng() - 0.5) * 1.1);
+        b.parent = bush; b.position.set((rng() - 0.5) * 1.1, 0.45, (rng() - 0.5) * 1.1);
         b.scaling.y = 0.85; shadow.addShadowCaster(b);
       }
+      swayers.push({ mesh: bush, phase: rng() * Math.PI * 2, amp: 0.02 + rng() * 0.02 });
       addObstacle(p.x, p.z, 0.85);
     }
 
     // ---- Giant toadstools (red cap + cream stalk). ----
-    const stalkMat = mat(scene, "stalk", "#f3e6c8");
-    const capMat = mat(scene, "cap", "#d83a3a");
-    const spotMat = mat(scene, "spot", "#fff2e0");
-    for (let i = 0; i < 22; i++) {
-      const p = place(7, FAR); if (!p) continue;
-      const h = 0.8 + rng() * 0.7;
-      const stalk = cyl(scene, "stalk", 0.4, 0.55, h, stalkMat);
-      stalk.position.set(p.x, h / 2, p.z); shadow.addShadowCaster(stalk);
-      const cap = sphere(scene, "cap", 1.3 + rng() * 0.5, capMat);
-      cap.position.set(p.x, h, p.z); cap.scaling.y = 0.6; shadow.addShadowCaster(cap);
-      for (let s = 0; s < 4; s++) {
-        const spot = disc(scene, "spot", 0.12 + rng() * 0.08, spotMat);
-        spot.rotation.x = Math.PI / 2;
-        spot.position.set(p.x + (rng() - 0.5) * 1.0, h + 0.36, p.z + (rng() - 0.5) * 1.0);
+    const nToad = SC.toadstools || 0;
+    if (nToad) {
+      const stalkMat = mat(scene, "stalk", "#f3e6c8");
+      const capMat = mat(scene, "cap", indoor ? "#7a3aa8" : "#d83a3a");
+      const spotMat = mat(scene, "spot", "#fff2e0");
+      for (let i = 0; i < nToad; i++) {
+        const p = place(6, FAR); if (!p) continue;
+        const h = 0.8 + rng() * 0.7;
+        const stalk = cyl(scene, "stalk", 0.4, 0.55, h, stalkMat);
+        stalk.position.set(p.x, h / 2, p.z); shadow.addShadowCaster(stalk);
+        const cap = sphere(scene, "cap", 1.3 + rng() * 0.5, capMat);
+        cap.position.set(p.x, h, p.z); cap.scaling.y = 0.6; shadow.addShadowCaster(cap);
+        for (let s = 0; s < 4; s++) {
+          const spot = disc(scene, "spot", 0.12 + rng() * 0.08, spotMat);
+          spot.rotation.x = Math.PI / 2;
+          spot.position.set(p.x + (rng() - 0.5) * 1.0, h + 0.36, p.z + (rng() - 0.5) * 1.0);
+        }
+        addObstacle(p.x, p.z, 0.5);
       }
-      addObstacle(p.x, p.z, 0.5);
     }
 
-    // ---- Cattails / reeds hugging the riverbank (decorative). ----
-    const reedMat = mat(scene, "reed", "#3c8a3c");
-    const catMat = mat(scene, "cat", "#6b4a2a");
-    for (let i = 0; i < 40; i++) {
-      const t = (rng() - 0.5) * riverLen * 0.85;
-      const off = (riverHalf + 0.6 + rng() * 1.2) * (rng() < 0.5 ? 1 : -1);
-      const x = riverCenter.x + alongT.x * t + crossN.x * off;
-      const z = riverCenter.z + alongT.z * t + crossN.z * off;
-      if (Math.hypot(x, z) > FAR) continue;
-      const stem = cyl(scene, "reed", 0.05, 0.05, 1.1 + rng() * 0.6, reedMat);
-      stem.position.set(x, 0.6, z);
-      const head = capsule(scene, "cattail", 0.4, 0.09, catMat);
-      head.position.set(x, 1.25, z);
+    // ---- Crystals (peaks + caverns): glowing faceted spires. ----
+    const nCryst = SC.crystals || 0;
+    if (nCryst) {
+      for (let i = 0; i < nCryst; i++) {
+        const p = place(6, FAR); if (!p) continue;
+        const col = ["#8fe0ff", "#b58cff", "#7affc6"][(rng() * 3) | 0];
+        const cm = emat(scene, "cryst" + i, col, 0.6);
+        const h = 1.4 + rng() * 2.2;
+        const cr = BABYLON.MeshBuilder.CreateCylinder("cryst", { diameterTop: 0, diameterBottom: 0.7 + rng() * 0.5, height: h, tessellation: 5 }, scene);
+        cr.material = cm; cr.position.set(p.x, h / 2, p.z); cr.rotation.y = rng() * Math.PI; shadow.addShadowCaster(cr);
+        addObstacle(p.x, p.z, 0.7);
+      }
+    }
+
+    // ---- Cave pillars (caverns): floor-to-ceiling stalagmite columns. ----
+    const nPill = SC.pillars || 0;
+    if (nPill) {
+      const pillMat = mat(scene, "pillar", "#3b3450");
+      for (let i = 0; i < nPill; i++) {
+        const p = place(8, FAR); if (!p) continue;
+        const h = 8 + rng() * 8;
+        const col = cyl(scene, "pillar", 0.8 + rng() * 0.6, 1.6 + rng() * 0.8, h, pillMat);
+        col.position.set(p.x, h / 2, p.z); shadow.addShadowCaster(col);
+        addObstacle(p.x, p.z, 1.3);
+      }
+    }
+
+    // ---- Snow drifts (peaks): pale mounds for a wintry floor. ----
+    if (SC.snow) {
+      const driftMat = emat(scene, "drift", "#f3f8ff", 0.06);
+      for (let i = 0; i < 40; i++) {
+        const p = place(5, FAR); if (!p) continue;
+        const d = sphere(scene, "drift", 1.4 + rng() * 2.4, driftMat);
+        d.position.set(p.x, 0.1, p.z); d.scaling.y = 0.16; d.isPickable = false;
+      }
     }
 
     // ---- Flowers + grass tufts (decorative ground cover). ----
-    const tuftMat = mat(scene, "tuft", "#69bd55");
-    for (let i = 0; i < 140; i++) {
-      const p = place(6, FAR); if (!p) continue;
+    const tuftMat = mat(scene, "tuft", indoor ? "#2c4a26" : "#69bd55");
+    const nFlow = SC.flowers || 0;
+    for (let i = 0; i < nFlow; i++) {
+      const p = place(5, FAR); if (!p) continue;
       if (rng() < 0.5) {
         const stem = cyl(scene, "stem", 0.04, 0.04, 0.4, mat(scene, "stem", "#3c8a3c"));
         stem.position.set(p.x, 0.2, p.z);
@@ -2987,12 +3244,66 @@
       }
     }
 
+    // =====================================================================
+    // PORTALS — a path / bridge / cave-mouth at the zone edge that streams you
+    // to the connected zone. Each is a walk-through trigger (no collision) with
+    // a glowing marker. The ZoneManager reads `portals` to detect crossings.
+    // =====================================================================
+    for (const def of zone.portals || []) {
+      const pr = RADIUS - 5;
+      const px = Math.cos(def.angle) * pr, pz = Math.sin(def.angle) * pr;
+      const tgt = ZONE_BY_ID[def.to];
+      const col = tgt ? tgt.theme.ground : "#ffd98a";
+      const glow = emat(scene, "portGlow" + def.to, col, 0.85);
+
+      const plat = disc(scene, "portPlat" + def.to, 3.6, mat(scene, "portPlatM" + def.to, "#d8c79a"));
+      plat.rotation.x = Math.PI / 2; plat.position.set(px, 0.07, pz); plat.receiveShadows = true; plat.isPickable = false;
+
+      // Face the gateway inward (toward the zone centre).
+      const face = Math.atan2(-px, -pz);
+      if (def.kind === "cave") {
+        // A dark cave mouth: a flattened dark dome flanked by boulders.
+        const mouth = sphere(scene, "caveMouth" + def.to, 6, mat(scene, "caveDark" + def.to, "#0c0a14"));
+        mouth.position.set(px, 0.2, pz); mouth.scaling.set(1, 1.1, 0.5); mouth.isPickable = false;
+        for (const s of [-1, 1]) {
+          const bo = BABYLON.MeshBuilder.CreateIcoSphere("caveRock" + def.to + s, { radius: 1.6, subdivisions: 1 }, scene);
+          bo.material = mat(scene, "caveRockM", "#5a5466");
+          bo.position.set(px + Math.cos(face) * 2.6 * s, 1.2, pz + Math.sin(face) * 2.6 * s);
+          shadow.addShadowCaster(bo);
+        }
+      } else if (def.kind === "bridge") {
+        // A short plank jetty leading off toward the next shore.
+        const deck = box(scene, "portBridge" + def.to, 3, 0.25, 6, mat(scene, "portPlank" + def.to, "#9a6a3a"));
+        deck.rotation.y = face;
+        deck.position.set(px + Math.sin(face) * 2.5, 0.16, pz + Math.cos(face) * 2.5);
+        deck.receiveShadows = true; shadow.addShadowCaster(deck);
+      } else {
+        // A path gateway: two posts + a lintel beam, like a trail-head arch.
+        const postMat = mat(scene, "portPost" + def.to, "#7a5230");
+        for (const s of [-1, 1]) {
+          const post = cyl(scene, "portPostM" + def.to + s, 0.3, 0.34, 4, postMat);
+          post.position.set(px + Math.cos(face) * 2.4 * s, 2, pz + Math.sin(face) * 2.4 * s);
+          shadow.addShadowCaster(post);
+        }
+        const beam = box(scene, "portBeam" + def.to, 5.4, 0.4, 0.4, postMat);
+        beam.rotation.y = face; beam.position.set(px, 4, pz); shadow.addShadowCaster(beam);
+      }
+
+      // A floating glow orb marks the gateway and is bobbed by the animator.
+      const orb = sphere(scene, "portOrb" + def.to, 1.0, glow);
+      orb.position.set(px, 3.2, pz); orb.isPickable = false;
+      animated.push({ orb, y: 3.2 });
+
+      portals.push({ to: def.to, kind: def.kind, x: px, z: pz, r: 3.6,
+                     name: tgt ? tgt.name : def.to, icon: tgt ? tgt.icon : "➡️" });
+    }
+
     // Resolve a desired move against the fence, solid scenery, and the river.
     // Slides along obstacles/banks instead of stopping the player dead.
     function moveActor(cur, desired, r) {
       let tx = desired.x, tz = desired.z;
 
-      // River barrier: if the straight move would enter the water, slide along
+      // River barrier (hub only): if the move would enter the water, slide along
       // the bank by trying each axis independently.
       if (inRiver(tx, tz) && !inRiver(cur.x, cur.z)) {
         if (!inRiver(desired.x, cur.z)) tz = cur.z;
@@ -3014,8 +3325,8 @@
         }
       }
 
-      // Keep inside the circular fence.
-      const fr = CONFIG.worldRadius - r;
+      // Keep inside the circular fence (sized to this zone).
+      const fr = RADIUS - r;
       const hyp = Math.hypot(tx, tz);
       if (hyp > fr) { tx = (tx / hyp) * fr; tz = (tz / hyp) * fr; }
 
@@ -3024,32 +3335,28 @@
       return new BABYLON.Vector3(tx, cur.y, tz);
     }
 
-    // ---- Location beacons: a glowing pillar + floating icon orb + platform at
-    // every named place, so the story's landmarks are easy to spot from afar. ----
-    const beacons = [];
-    for (const loc of LOCATIONS) {
-      const bm = emat(scene, "beacon_" + loc.id, loc.color, 0.9);
-      const plat = disc(scene, "locPlat_" + loc.id, 4.5, mat(scene, "locPlatM_" + loc.id, "#caa46a"));
-      plat.rotation.x = Math.PI / 2; plat.position.set(loc.x, 0.05, loc.z); plat.receiveShadows = true; plat.isPickable = false;
-      const pillar = cyl(scene, "locPillar_" + loc.id, 0.5, 0.7, 14, bm);
-      pillar.position.set(loc.x, 7, loc.z); pillar.material.alpha = 0.32; pillar.isPickable = false;
-      const orb = sphere(scene, "locOrb_" + loc.id, 1.0, bm);
-      orb.position.set(loc.x, 15, loc.z); orb.isPickable = false;
-      beacons.push({ orb, y: 15 });
-    }
-
-    // A gentle shimmer + bob so the river + sea read as living water.
-    const baseWaterY = water.position.y;
+    // A gentle shimmer (water + sea) and a bob for beacon/portal orbs, plus a
+    // soft sway driven through the WIND animator so foliage feels alive.
+    const windAmp = indoor ? 0.4 : 1.0;
     scene.onBeforeRenderObservable.add(() => {
       const t = performance.now() / 1000;
-      water.position.y = baseWaterY + Math.sin(t * 1.5) * 0.015;
-      waterMat.emissiveColor = BABYLON.Color3.FromHexString("#3aa0e0").scale(0.14 + Math.sin(t * 2) * 0.05);
-      seaMat.emissiveColor = BABYLON.Color3.FromHexString("#2c78c8").scale(0.12 + Math.sin(t * 0.8) * 0.04);
-      for (const b of beacons) b.orb.position.y = b.y + Math.sin(t * 1.5 + b.orb.uniqueId) * 0.4;
+      if (water) {
+        water.position.y = baseWaterY + Math.sin(t * 1.5) * 0.015;
+        waterMat.emissiveColor = BABYLON.Color3.FromHexString("#3aa0e0").scale(0.14 + Math.sin(t * 2) * 0.05);
+      }
+      seaMat.emissiveColor = BABYLON.Color3.FromHexString(seaCol).scale((indoor ? 0.05 : 0.12) + Math.sin(t * 0.8) * 0.03);
+      for (const b of animated) b.orb.position.y = b.y + Math.sin(t * 1.5 + b.orb.uniqueId) * 0.4;
+      // Wind: foliage crowns lean and rustle on two offset sine bands.
+      const gust = 1 + Math.sin(t * 0.5) * 0.5;
+      for (const s of swayers) {
+        const a = Math.sin(t * 1.6 + s.phase) * s.amp * windAmp * gust;
+        s.mesh.rotation.z = a;
+        s.mesh.rotation.x = Math.cos(t * 1.3 + s.phase) * s.amp * 0.6 * windAmp * gust;
+      }
     });
 
     return { shadow, onRoad, obstacles, inRiver, moveActor, water, waterMat,
-             hemi, sun, sky, skyMat, seaMat, ground };
+             hemi, sun, sky, skyMat, seaMat, ground, portals, zone, radius: RADIUS };
   }
 
   // =========================================================================
