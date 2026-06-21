@@ -46,42 +46,17 @@ headless‑safe** (feature‑detect every browser‑only API).
 
 ## 1. Golden rules (apply to EVERY task)
 
-These are non‑negotiable. A change that breaks one of these is not done.
+The repo-wide **Golden Rules** live in [`CLAUDE.md`](./CLAUDE.md) (auto-loaded by
+Claude Code) so they apply to every run from a single source of truth. **Read
+`CLAUDE.md` before starting any task.**
 
-1. **Engine stays Babylon.js.** No framework rewrite (this was researched and
-   decided). Load Babylon from the CDN `<script>` tags. **No build step / no
-   bundler / no npm runtime deps** — the site must deploy to GitHub Pages as‑is.
-2. **Runs everywhere.** Must work on **desktop and mobile browsers**. Prefer
-   **WebGL** features with graceful fallbacks; if you opt into WebGPU, keep an
-   automatic WebGL fallback. Never let a feature **freeze** the main thread
-   (chunk heavy work; hide unavoidable hitches behind the existing fade veil).
-3. **Headless tests must stay green.** `node test/harness.js` and
-   `node -c js/game.js` must pass. The harness stubs Babylon + DOM + Web Audio,
-   so **feature‑detect** everything browser‑only (`BABYLON.X && …`, `try/catch`,
-   `typeof window`, optional chaining). **Add new tests** for what you build.
-4. **Additive, single‑file style.** Keep the one IIFE in `js/game.js`. Add small,
-   self‑contained systems; don't rewrite working ones. Match the surrounding
-   code's naming, comment density, and idioms.
-5. **Determinism + persistence.** All randomness goes through the seeded `rng()`.
-   Any **new persistent state must be added to `serializeGame`/`applySave`** and
-   covered by the save/load test. Bump `SAVE_VERSION` only when the schema
-   changes, and keep older saves loading (default gracefully).
-6. **Performance & asset budget.** Prefer **procedural** content (meshes, audio).
-   If you must add asset files, keep them **small**, **lazy‑loaded**, with a
-   fallback, and committed to the repo (Pages has no other storage). Cap mesh /
-   particle / light counts; **dispose everything on zone teardown** (extend
-   `buildWorld`'s `dispose()` / `teardownZone` as needed). Target ~60 fps on a
-   mid‑range phone; never regress zone‑load smoothness.
-7. **Cache‑busting.** When you change `css/style.css` or `js/game.js`, bump the
-   `?v=` query in `index.html` for that file.
-8. **One task per run.** Do not scope‑creep into another backlog task. If you
-   discover a blocking dependency, note it in this file and stop.
-9. **Internationalization aware.** Once Task 7 (i18n) lands, **every new
-   user‑facing string must be added to all locales** via the i18n layer. Until
-   then, keep new user‑facing strings centralized and easy to extract.
-10. **Ask before large/irreversible ambiguity.** If a requirement is genuinely
-    your call and cheap to confirm, pick the sensible default and note it; if
-    it's expensive or irreversible, ask first.
+In short: Babylon.js only (no rewrite, no build step, static on GitHub Pages);
+works on desktop + mobile without freezing; the headless tests
+(`node test/harness.js`) must stay green and **feature-detect** all browser-only
+APIs; additive single-file style; determinism + save/load round-trip;
+procedural-first perf/asset budget with disposal on zone teardown; bump `?v=`
+cache-busters; one task per run; i18n-aware; ask before large/irreversible
+ambiguity.
 
 ---
 
@@ -101,6 +76,8 @@ A task is **done** only when **all** of these are true:
 - [ ] New persistent state is serialized/restored and round‑trips in a test.
 - [ ] `index.html` / `css/style.css` updated as needed and **`?v=` bumped**.
 - [ ] `README.md` updated (relevant section + roadmap checkbox).
+- [ ] The **CI `Tests` run is green** (`.github/workflows/ci.yml` runs
+      `node -c` + the harness on every push/PR — never merge red).
 - [ ] Work committed in logical chunks; branch merged to `master`
       (fast‑forward) and pushed; the **GitHub Pages deploy run for your commit
       finished with `conclusion: success`** (check it; fix any errors).
@@ -362,11 +339,11 @@ Paste this to start a run. Replace `<N>` with the task number, or write `next`.
 ```text
 You are continuing work on "Good Game 3D", a Babylon.js browser action-RPG in this repo.
 
-FIRST, read TODO.md in full. Then implement EXACTLY ONE task: Task <N>
+FIRST, read CLAUDE.md and TODO.md in full. Then implement EXACTLY ONE task: Task <N>
 (if I wrote "next", take the first task whose status is [ ] in TODO.md’s Recommended order).
 Do not start or touch any other task.
 
-Obey every rule in TODO.md "§1 Golden rules" and satisfy "§2 Definition of Done"
+Obey the Golden Rules in CLAUDE.md and satisfy "§2 Definition of Done" in TODO.md
 for that task. In particular:
 - Keep the engine Babylon.js (no framework rewrite). The game must stay a static
   site deployable to GitHub Pages (no build step) and run on desktop AND mobile,
@@ -384,9 +361,9 @@ Workflow:
 3. Verify: `node -c js/game.js`, `node test/harness.js` (all green), plus a
    feature-specific headless smoke check.
 4. Update index.html/css (bump the `?v=` cache-busters) and README.md as needed.
-5. Merge to `master` (fast-forward) and push; then confirm the GitHub Pages
-   deploy workflow run for YOUR commit finished with conclusion=success — check it
-   and fix any errors until it’s green.
+5. Merge to `master` (fast-forward) and push; then confirm BOTH the CI "Tests"
+   run AND the GitHub Pages deploy run for YOUR commit finished conclusion=success
+   — check them and fix any errors until green.
 6. Tick the task’s checkbox in TODO.md (add the date + a one-line note), commit, push.
 7. Report: what shipped, test results, deploy status, and any follow-ups.
 

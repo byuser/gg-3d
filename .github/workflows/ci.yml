@@ -1,0 +1,36 @@
+name: Tests
+
+# Enforce the headless test harness on every push + PR so a change can never
+# land (or deploy) with red tests. No dependencies to install — the harness is
+# pure Node (stubs Babylon + the DOM itself), so this is fast.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs for the same ref to save CI minutes.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harness:
+    name: Headless harness + syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Syntax check (node -c)
+        run: node -c js/game.js
+
+      - name: Run headless test harness
+        run: node test/harness.js

@@ -24,7 +24,7 @@ the castle and the **dragon** appears for the final battle. Defeat it and you **
 ▶️ **Play:** once GitHub Pages is enabled, the game is live at
 `https://<owner>.github.io/gg-3d/`
 
-![status](https://img.shields.io/badge/build-static%20site-blue) ![engine](https://img.shields.io/badge/engine-Babylon.js-orange)
+[![Tests](https://github.com/byuser/gg-3d/actions/workflows/ci.yml/badge.svg)](https://github.com/byuser/gg-3d/actions/workflows/ci.yml) ![status](https://img.shields.io/badge/build-static%20site-blue) ![engine](https://img.shields.io/badge/engine-Babylon.js-orange)
 
 ## Controls
 
