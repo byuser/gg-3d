@@ -976,5 +976,70 @@ ok(T.localGet(T.LOCALE_KEY) === "ru", "selecting a locale persists it to localSt
 T.applyLocale("en");
 ok(T.localGet(T.LOCALE_KEY) === "en" && I18N.locale === "en", "switching back persists English (and resets the run)");
 
+console.log("\n[29] lighting & shadows — quality tiers, shadow setup, post-FX, per-zone mood");
+const QT = T.Quality;
+ok(!!QT && typeof QT.pick === "function", "Quality tier module is exposed");
+// pick() is a PURE mapping from capability facts → tier (no real device needed).
+ok(QT.pick({ cores: 12, mem: 16 }) === "high", "beefy desktop → high tier");
+ok(QT.pick({}) === "high", "unknown device defaults to high");
+ok(QT.pick({ mobile: true, cores: 8, mem: 6 }) === "medium", "capable phone → medium tier");
+ok(QT.pick({ mobile: true, cores: 4, mem: 3 }) === "low", "weak phone → low tier");
+ok(QT.pick({ cores: 2, mem: 2 }) === "low", "ancient desktop → low tier");
+ok(QT.pick({ cores: 4, mem: 4 }) === "medium", "mid desktop → medium tier");
+ok(QT.pick({ forced: "low", cores: 32, mem: 64 }) === "low", "a forced tier overrides detection");
+ok(QT.pick({ forced: "bogus", cores: 32 }) === "high", "an invalid forced tier is ignored");
+// Every tier exposes a complete, sane settings block.
+let tiersOk = true;
+["high", "medium", "low"].forEach((tier) => {
+  const s = QT.TIERS[tier];
+  if (!(s && s.shadowMap >= 512 && s.shadowDarkness > 0 && s.shadowDarkness < 1 &&
+        s.exposure > 0 && s.contrast > 0 && s.shadowMaxZ > 0)) tiersOk = false;
+});
+ok(tiersOk, "every tier has a complete, sane settings block");
+ok(QT.TIERS.high.csm === true && QT.TIERS.low.csm === false, "cascaded shadows gate to the high tier");
+ok(QT.TIERS.high.ssao === true && QT.TIERS.medium.ssao === false && QT.TIERS.low.bloom === false,
+   "SSAO + bloom are tier-gated off on weak hardware");
+ok(QT.settings() === QT.TIERS[QT.tier], "settings() returns the active tier's block");
+
+// The live world built a working sun shadow generator (headless-safe).
+ok(T.world && T.world.shadow && typeof T.world.shadow.addShadowCaster === "function",
+   "the active zone exposes a sun shadow generator with addShadowCaster");
+
+// Build + tear down EVERY zone (indoor lairs included). The lighting / shadow /
+// per-zone-mood setup must run headless without throwing and dispose cleanly.
+const scene29 = T.state.scene;
+let lightErr = null;
+for (const z of T.ZONES) {
+  try {
+    const w = T.buildWorld(scene29, z);
+    if (!(w.shadow && typeof w.shadow.addShadowCaster === "function")) throw new Error("no shadow generator");
+    w.shadow.addShadowCaster(w.ground);   // exercise the caster registration path
+    T.applyZoneMood(scene29, z);          // per-zone mood is feature-detected / no-throw
+    w.dispose();                          // tears down lights + shadow + scenery
+  } catch (e) { lightErr = z.id + ": " + (e && e.message); break; }
+}
+ok(!lightErr, "every zone builds + tears down its lighting without throwing" + (lightErr ? " — " + lightErr : ""));
+
+// makeSunShadows is headless-safe for both outdoor + indoor zones, and honours
+// a per-zone shadow-darkness override.
+let shadowErr = null;
+try {
+  const sun = new BABYLON.DirectionalLight("t29", new Vec3(-0.5, -1, -0.4), scene29);
+  const sOut = T.makeSunShadows(scene29, sun, false, T.ZONE_BY_ID.meadow.theme);
+  const sIn = T.makeSunShadows(scene29, sun, true, T.ZONE_BY_ID.caverns.theme);
+  if (!(sOut.addShadowCaster && sIn.addShadowCaster)) shadowErr = "missing addShadowCaster";
+} catch (e) { shadowErr = e && e.message; }
+ok(!shadowErr, "makeSunShadows builds outdoor + indoor generators headless-safe" + (shadowErr ? " — " + shadowErr : ""));
+
+// Post-FX setup is feature-detected (no image processing / pipelines in Node).
+let fxErr = null, fxOut = null;
+try { fxOut = T.setupPostFX(scene29, null); } catch (e) { fxErr = e && e.message; }
+ok(!fxErr && fxOut && "pipeline" in fxOut && "ssao" in fxOut,
+   "setupPostFX runs headless-safe and returns post-process handles");
+
+// DayNight still resolves correctly after all the lighting rebuilds (no regression).
+T.DayNight.set(0.5); T.DayNight.update(0.01);
+ok(T.DayNight.phase === "day", "DayNight still resolves noon after the lighting rebuilds");
+
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED ✅" : failures + " CHECK(S) FAILED ❌"}`);
 process.exit(failures === 0 ? 0 : 1);
