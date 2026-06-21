@@ -627,7 +627,8 @@
   // grounds, two of which are boss lairs.
   //
   //   zone: { id, name, icon, home?, level, radius,
-  //           theme:{ sky, fog, fogDensity, ground, hemi, sun, sunDir },
+  //           theme:{ sky, fog, fogDensity, ground, hemi, sun, sunDir,
+  //                   expMul?, conMul?, shadowDark? },  // optional light mood
   //           scenery:{ trees, rocks, bushes, toadstools, flowers, crystals,
   //                     palms, snow, pillars },
   //           spawn:{ count, kinds:[…sweet kinds], abilities:[…], heal? },
@@ -652,7 +653,7 @@
     {
       id: "forest", name: "Whisperwood Deep", icon: "🌲", level: 3, radius: 64,
       theme: { sky: "#3f6b4a", fog: "#2f5238", fogDensity: 0.018, ground: "#356b39",
-               hemi: "#24401f", sun: "#cfe6b0", sunDir: [-0.35, -1, -0.5] },
+               hemi: "#24401f", sun: "#cfe6b0", sunDir: [-0.35, -1, -0.5], expMul: 0.97, conMul: 1.04 },
       scenery: { trees: 120, rocks: 18, bushes: 50, toadstools: 40, flowers: 60 },
       spawn: { count: 9, kinds: ["gummy", "jellybean", "marshmallow", "macaron"], abilities: ["chaser", "runner", "jumper", "brute"] },
       portals: [
@@ -663,7 +664,7 @@
     {
       id: "shore", name: "Saltmarsh Strand", icon: "🌊", level: 2, radius: 70,
       theme: { sky: "#bfe6ff", fog: "#bfe0ef", fogDensity: 0.009, ground: "#cdbb84",
-               hemi: "#7a8a5a", sun: "#fff0d0", sunDir: [-0.6, -1, -0.2] },
+               hemi: "#7a8a5a", sun: "#fff0d0", sunDir: [-0.6, -1, -0.2], expMul: 1.05 },
       scenery: { trees: 8, rocks: 26, bushes: 14, flowers: 30, palms: 22 },
       spawn: { count: 8, kinds: ["icecream", "donut", "lollipop", "candycane"], abilities: ["chaser", "runner", "shooter"] },
       portals: [
@@ -674,7 +675,7 @@
     {
       id: "peaks", name: "Frostpeak Trail", icon: "⛰️", level: 4, radius: 66,
       theme: { sky: "#cfe0f5", fog: "#dfe9f7", fogDensity: 0.014, ground: "#dde7f2",
-               hemi: "#8a99ad", sun: "#eef4ff", sunDir: [-0.4, -1, -0.45] },
+               hemi: "#8a99ad", sun: "#eef4ff", sunDir: [-0.4, -1, -0.45], expMul: 1.06, conMul: 1.05 },
       scenery: { trees: 22, rocks: 60, bushes: 8, crystals: 16, snow: true },
       spawn: { count: 9, kinds: ["candycane", "marshmallow", "chocbar", "pretzel"], abilities: ["chaser", "brute", "jumper", "shooter"] },
       portals: [
@@ -684,7 +685,7 @@
     {
       id: "caverns", name: "Crystal Caverns", icon: "💎", level: 5, radius: 56, indoor: true,
       theme: { sky: "#160d28", fog: "#1a1030", fogDensity: 0.03, ground: "#2a2140",
-               hemi: "#2a1f4a", sun: "#9a7aff", sunDir: [-0.2, -1, -0.3] },
+               hemi: "#2a1f4a", sun: "#9a7aff", sunDir: [-0.2, -1, -0.3], expMul: 0.9, conMul: 1.14, shadowDark: 0.5 },
       scenery: { rocks: 70, crystals: 40, pillars: 18 },
       spawn: { count: 7, kinds: ["chocbar", "jellybean", "candycorn", "pretzel"], abilities: ["brute", "shooter", "bomber"] },
       boss: { archId: "stomper", name: "Cavern Gumlord",
@@ -696,7 +697,7 @@
     {
       id: "thicket", name: "Bramblewood Thicket", icon: "🐉", level: 6, radius: 54, indoor: true,
       theme: { sky: "#2a1c10", fog: "#21180e", fogDensity: 0.032, ground: "#2c3a1c",
-               hemi: "#1c2a12", sun: "#c8b070", sunDir: [-0.3, -1, -0.55] },
+               hemi: "#1c2a12", sun: "#c8b070", sunDir: [-0.3, -1, -0.55], expMul: 0.93, conMul: 1.1, shadowDark: 0.48 },
       scenery: { trees: 90, rocks: 20, bushes: 60, toadstools: 30 },
       spawn: { count: 8, kinds: ["gummy", "macaron", "jellybean", "marshmallow"], abilities: ["brute", "jumper", "shooter", "bomber"] },
       boss: { archId: "splitter", name: "Bramble Hydra",
@@ -1873,6 +1874,7 @@
   // Live handles to the running game, captured in createScene so the save/load
   // and pause systems can read and rebuild the world.
   let sceneRef = null, worldRef = null, interactionRef = null, stateRef = null, cameraRef = null;
+  let postFX = null;             // session-level tone-mapping / bloom / SSAO handles
 
   // Coin pickup/magnet ranges live here (not in the frozen CONFIG) so the shop's
   // "Lodestone" upgrade can widen them at runtime.
@@ -3751,6 +3753,184 @@
   }
 
   // =========================================================================
+  // QUALITY TIER — one auto-detected graphics tier (high / medium / low) gates
+  // the heavier lighting work (cascaded / contact-hardening shadows, bloom and
+  // SSAO) so phones + weak GPUs stay smooth while desktops get the full
+  // treatment. `pick()` is a PURE function of capability facts so the headless
+  // harness can assert the mapping without a real device.
+  // =========================================================================
+  const Quality = {
+    tier: "high",
+    TIERS: {
+      high:   { shadowMap: 2048, shadowFilter: "contact", csm: true,  bloom: true,  ssao: true,
+                shadowDarkness: 0.34, exposure: 1.08, contrast: 1.12, bloomWeight: 0.20, shadowMaxZ: 220 },
+      medium: { shadowMap: 1024, shadowFilter: "pcf",     csm: false, bloom: true,  ssao: false,
+                shadowDarkness: 0.40, exposure: 1.02, contrast: 1.08, bloomWeight: 0.15, shadowMaxZ: 160 },
+      low:    { shadowMap: 1024, shadowFilter: "blur",    csm: false, bloom: false, ssao: false,
+                shadowDarkness: 0.46, exposure: 1.00, contrast: 1.04, bloomWeight: 0.00, shadowMaxZ: 120 },
+    },
+    settings() { return this.TIERS[this.tier] || this.TIERS.high; },
+
+    // Decide a tier from plain capability facts. Pure + deterministic.
+    pick(info) {
+      info = info || {};
+      if (info.forced && this.TIERS[info.forced]) return info.forced;
+      const cores = info.cores || 0, mem = info.mem || 0;
+      if (info.mobile) {
+        if ((mem && mem <= 3) || (cores && cores <= 4)) return "low";
+        return "medium";
+      }
+      if ((cores && cores <= 2) || (mem && mem <= 2)) return "low";
+      if ((cores && cores <= 4) || (mem && mem <= 4)) return "medium";
+      return "high";
+    },
+
+    // Sniff the device once at boot. Every browser-only read is feature-detected
+    // so the Node harness simply keeps the default tier. `window.__GG_QUALITY__`
+    // (high|medium|low) forces a tier for debugging / weak-GPU overrides.
+    detect() {
+      const info = {};
+      try {
+        if (typeof navigator !== "undefined") {
+          info.cores = navigator.hardwareConcurrency || 0;
+          info.mem = navigator.deviceMemory || 0;
+          const ua = navigator.userAgent || "";
+          const coarse = typeof window !== "undefined" && window.matchMedia &&
+            window.matchMedia("(pointer: coarse)").matches;
+          info.mobile = /Android|iPhone|iPad|iPod|IEMobile|Mobile|Silk|Kindle/i.test(ua) ||
+            (coarse && (navigator.maxTouchPoints || 0) > 1);
+        }
+        if (typeof window !== "undefined" && window.__GG_QUALITY__ && this.TIERS[window.__GG_QUALITY__]) {
+          info.forced = window.__GG_QUALITY__;
+        }
+      } catch (e) {}
+      this.tier = this.pick(info);
+      return this.tier;
+    },
+  };
+
+  // Pick a shadow-map filtering quality constant (guarded — the constants are
+  // undefined in the headless harness, where this simply no-ops).
+  function shadowFilterQuality(gen, level) {
+    const SG = BABYLON.ShadowGenerator; if (!SG) return;
+    const q = level === "high" ? SG.QUALITY_HIGH : level === "low" ? SG.QUALITY_LOW : SG.QUALITY_MEDIUM;
+    if (q != null) gen.filteringQuality = q;
+  }
+
+  // Build the directional sun's shadow generator for a zone, tuned to the active
+  // quality tier: a cascaded map with contact-hardening on capable desktops, PCF
+  // on the middle tier, and the cheap blurred-exponential map elsewhere (and on
+  // WebGL1). Bias / darkness are tuned so casters sit grounded with no acne, and
+  // every engine-specific feature is detected so the harness stays green.
+  function makeSunShadows(scene, sun, indoor, theme) {
+    const q = Quality.settings();
+    const eng = scene.getEngine && scene.getEngine();
+    const webgl2 = !!(eng && eng.webGLVersion >= 2);
+    const size = q.shadowMap;
+    let gen = null, isCSM = false;
+    if (q.csm && !indoor && BABYLON.CascadedShadowGenerator && webgl2) {
+      try {
+        gen = new BABYLON.CascadedShadowGenerator(size, sun);
+        gen.numCascades = 4; gen.lambda = 0.85; gen.stabilizeCascades = true;
+        gen.cascadeBlendPercentage = 0.06; gen.shadowMaxZ = q.shadowMaxZ;
+        gen.autoCalcDepthBounds = true; gen.depthClamp = true;
+        isCSM = true;
+      } catch (e) { gen = null; }
+    }
+    if (!gen) gen = new BABYLON.ShadowGenerator(size, sun);
+
+    // Filtering — crisp PCF / contact-hardening where supported, else cheap blur.
+    try {
+      if (q.shadowFilter === "contact" && webgl2 && "useContactHardeningShadow" in gen) {
+        gen.useContactHardeningShadow = true;
+        gen.contactHardeningLightSizeUVRatio = 0.04;
+        shadowFilterQuality(gen, "high");
+      } else if ((q.shadowFilter === "contact" || q.shadowFilter === "pcf") && webgl2) {
+        gen.usePercentageCloserFiltering = true;
+        shadowFilterQuality(gen, q.shadowFilter === "contact" ? "high" : "medium");
+      } else {
+        gen.useBlurExponentialShadowMap = true; gen.blurScale = 2;
+      }
+    } catch (e) {
+      try { gen.useBlurExponentialShadowMap = true; gen.blurScale = 2; } catch (e2) {}
+    }
+
+    // Grounded contact: tuned bias + a per-zone shadow darkness. (Babylon's
+    // `darkness` is the lit factor inside a shadow: lower = blacker/crisper; the
+    // indoor lairs lift theirs so shadows don't crush to black on a dark floor.)
+    try {
+      gen.bias = isCSM ? 0.0025 : 0.0016;
+      gen.normalBias = isCSM ? 0.020 : 0.012;
+      gen.frustumEdgeFalloff = 0.2;
+      const dark = (theme && theme.shadowDark != null) ? theme.shadowDark : q.shadowDarkness;
+      if (gen.setDarkness) gen.setDarkness(dark); else gen.darkness = dark;
+    } catch (e) {}
+    return gen;
+  }
+
+  // One-time camera post-processing: ACES tone mapping + exposure so every
+  // material sits in a coherent, filmic light, plus tier-gated bloom (emissive
+  // lamps / crystals / artifacts glow) and high-end SSAO (soft contact AO). All
+  // of it is feature-detected + try/caught, so unsupported GPUs and the headless
+  // harness just run without it. The scene + camera outlive every zone, so this
+  // is set up once; the returned handles are kept for the whole session.
+  function setupPostFX(scene, camera) {
+    const q = Quality.settings();
+    const out = { pipeline: null, ssao: null };
+
+    // Tone mapping lives on the scene image-processing config (applied in-shader
+    // on the low tier, routed through the bloom post-process when one is built).
+    try {
+      const ip = scene && scene.imageProcessingConfiguration;
+      const IPC = BABYLON.ImageProcessingConfiguration;
+      if (ip) {
+        ip.toneMappingEnabled = true;
+        if (IPC && IPC.TONEMAPPING_ACES != null) ip.toneMappingType = IPC.TONEMAPPING_ACES;
+        ip.exposure = q.exposure;
+        ip.contrast = q.contrast;
+      }
+    } catch (e) {}
+
+    // SSAO first (its combine must run before tone mapping) — high tier only.
+    try {
+      const S = BABYLON.SSAO2RenderingPipeline;
+      if (q.ssao && camera && S && S.IsSupported) {
+        const ssao = new S("ggSSAO", scene, { ssaoRatio: 0.6, blurRatio: 1 }, [camera]);
+        ssao.radius = 1.2; ssao.totalStrength = 0.8; ssao.base = 0.35;
+        ssao.samples = 16; ssao.maxZ = 110; ssao.expensiveBlur = false;
+        out.ssao = ssao;
+      }
+    } catch (e) { out.ssao = null; }
+
+    // Subtle bloom (+ FXAA) on the middle and high tiers.
+    try {
+      const DRP = BABYLON.DefaultRenderingPipeline;
+      if (q.bloom && camera && DRP) {
+        const p = new DRP("ggFX", true, scene, [camera]);
+        p.bloomEnabled = true; p.bloomThreshold = 0.88; p.bloomWeight = q.bloomWeight;
+        p.bloomKernel = 32; p.bloomScale = 0.5; p.fxaaEnabled = true;
+        out.pipeline = p;
+      }
+    } catch (e) { out.pipeline = null; }
+    return out;
+  }
+
+  // Per-zone light mood: each zone nudges the scene exposure / contrast so open
+  // lands read bright and airy while indoor lairs feel moody and contrasty. Kept
+  // in sync with DayNight / Weather, which still own the sun / sky / fog tinting.
+  function applyZoneMood(scene, zone) {
+    try {
+      const ip = scene && scene.imageProcessingConfiguration; if (!ip) return;
+      const q = Quality.settings(), th = (zone && zone.theme) || {};
+      const indoor = !!(zone && zone.indoor);
+      const expMul = th.expMul != null ? th.expMul : (indoor ? 0.92 : 1);
+      const conMul = th.conMul != null ? th.conMul : (indoor ? 1.06 : 1);
+      ip.exposure = q.exposure * expMul;
+      ip.contrast = q.contrast * conMul;
+    } catch (e) {}
+  }
+
+  // =========================================================================
   // World — procedural environment.
   // =========================================================================
   function buildWorld(scene, zone) {
@@ -3777,10 +3957,14 @@
     const sun = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(sd[0], sd[1], sd[2]), scene);
     sun.position = new BABYLON.Vector3(-sd[0] * 120, 90, -sd[2] * 120); sun.intensity = 1.0;
     sun.diffuse = BABYLON.Color3.FromHexString(T.sun);
+    // Tighten the shadow frustum to the playable area so the map keeps its
+    // resolution where it matters (auto-extends follow the registered casters).
+    sun.autoUpdateExtends = true; sun.autoCalcShadowZBounds = true;
+    sun.shadowMinZ = 1; sun.shadowMaxZ = Quality.settings().shadowMaxZ;
 
-    // Richer, softer shadows (blurred exponential map) for every zone.
-    const shadow = new BABYLON.ShadowGenerator(2048, sun);
-    shadow.useBlurExponentialShadowMap = true; shadow.blurScale = 2;
+    // Sun shadows — quality-tiered (cascaded / contact-hardening on capable GPUs,
+    // cheap blurred-exponential elsewhere), grounded and tuned per zone.
+    const shadow = makeSunShadows(scene, sun, indoor, T);
 
     const GROUND = RADIUS * 2 + 60; // a generous skirt beyond the fence
 
@@ -5725,6 +5909,7 @@
       player.world = world; worldRef = world;
       DayNight.init(world, DayNight.t);   // re-point sky/sun/hemi to the new zone
       Weather.world = world;               // keep the rain system; just re-aim it
+      applyZoneMood(scene, target);        // re-tune exposure/contrast for the mood
       // 4) Lay the new zone's content + seed its residents.
       setupZoneContent(scene, world, interaction, player, state);
       const waves = new SpawnDirector(scene, world, interaction, player, state);
@@ -5786,6 +5971,7 @@
   // =========================================================================
   function createScene() {
     const scene = new BABYLON.Scene(engine);
+    Quality.detect();   // choose a graphics tier before the first zone is built
 
     const camera = new BABYLON.ArcRotateCamera("cam", -Math.PI / 2, 1.05, 12, new BABYLON.Vector3(0, 1.4, 12), scene);
     camera.lowerRadiusLimit = 6; camera.upperRadiusLimit = 18;
@@ -5795,6 +5981,10 @@
     camera.inputs.removeByType("ArcRotateCameraKeyboardMoveInput");
 
     const world = buildWorld(scene);
+    // Camera post-processing (ACES tone mapping + tier-gated bloom / SSAO) is set
+    // up once; the per-zone mood then tunes exposure / contrast for this zone.
+    postFX = setupPostFX(scene, camera);
+    applyZoneMood(scene, world.zone);
     const player = new Player(scene, world.shadow);
     player.world = world;          // enable scenery/river collision
     playerRef = player;            // HUD helpers read max health from here
@@ -7131,6 +7321,8 @@
       // ---- RPG world / zones ----
       ZONES, ZONE_BY_ID, HUB_ZONE, SpawnDirector, ZoneManager, buildWorld,
       setupZoneContent, teardownZone,
+      // ---- Lighting / shadows / quality tier (Task 4) ----
+      Quality, makeSunShadows, setupPostFX, applyZoneMood,
       addMaterial, spendMaterials, hasMaterials, craftRecipe, addRelic, hasRelic,
       grantReward, spawnImpact, winGame,
       get interaction() { return interactionRef; },
