@@ -343,7 +343,7 @@ pl.health = 33;
 pl.materials.wood = 5; st.bossesCleared = { caverns: true }; st.totalKills = 17;
 
 const save = T.serializeGame();
-ok(save && save.v === 5, "serializeGame produced a versioned save");
+ok(save && save.v === 6, "serializeGame produced a versioned save");
 ok(T.validateSave(save), "save passes structural validation");
 ok(save.zone === st.zoneId, "current zone captured");
 ok(save.bossesCleared && save.bossesCleared.caverns === true, "cleared lair captured");
@@ -584,33 +584,68 @@ treeNode.harvest();
 ok(cp.materials.wood > 0, "harvesting a tree node yielded wood");
 ok(treeNode.respawn > 0 && treeNode.it.enabled === false, "harvested node depletes + enters respawn cooldown");
 
-console.log("\n[21] quests — accept, progress, turn in, rewards");
-const Q = T.Quests;
-Q.active = []; Q.completed = []; Q.acceptKills = {}; Q.flags = {};
-T.state.totalKills = 0; T.player.relics = [];
-ok(Q.nextForNpc("mayor") && Q.nextForNpc("mayor").id === "mayor_1", "an NPC offers its first quest");
-ok(Q.accept("mayor_1") && Q.isActive("mayor_1"), "accepted a hunt quest");
-ok(!Q.isComplete(T.QUEST_BY_ID["mayor_1"]), "quest starts incomplete");
+console.log("\n[21] quests — every objective type: accept, progress, turn in, reward");
+const Q = T.Quests, Story = T.Story;
+// Shared reset for the campaign tests (also used by [27]). Clears all quest +
+// story state and the world flags objectives read from.
+function resetStory() {
+  Q.active = []; Q.completed = []; Q.acceptKills = {}; Q.reached = {}; Q.talked = {};
+  Story.introSeen = false; Story.beats = {}; Story.sideTurnIns = {};
+  T.state.totalKills = 0; T.player.relics = [];
+  T.state.bossesCleared = {}; T.state.won = false;
+  if (T.state.castle) T.state.castle.built = [];
+  T.state.castleBuilt = [];
+  for (const id of T.MATERIAL_IDS) T.player.materials[id] = 0;
+}
+resetStory();
+const def = (id) => T.QUEST_BY_ID[id];
+// hunt
+ok(Q.accept("m_cull") && Q.isActive("m_cull"), "accepted a hunt mission");
+ok(!Q.isComplete(def("m_cull")), "hunt mission starts incomplete");
 T.state.totalKills += 5; Q.onKill();
-ok(Q.isComplete(T.QUEST_BY_ID["mayor_1"]), "hunt quest completes after enough kills");
-const qCoins0 = T.state.coins;
-ok(Q.turnIn("mayor_1"), "turned the quest in");
-ok(Q.isDone("mayor_1") && T.state.coins > qCoins0, "turn-in marks done + pays the reward");
-ok(Q.nextForNpc("mayor").id === "mayor_2", "the next quest unlocks after the previous is done");
-Q.accept("mayor_2"); Q.onReach("ruins");
-ok(Q.isComplete(T.QUEST_BY_ID["mayor_2"]), "a 'reach' objective is satisfied by visiting the place");
+ok(Q.isComplete(def("m_cull")), "hunt completes after enough kills");
+const c0 = T.state.coins;
+ok(Q.turnIn("m_cull") && Q.isDone("m_cull") && T.state.coins > c0, "hunt turn-in marks done + pays reward");
+ok(!Q.turnIn("m_cull"), "a completed mission can't be turned in twice (reward paid once)");
+// reach (awards a relic)
+ok(Q.accept("m_cornerstone"), "accepted a reach mission");
+Q.onReach("ruins");
+ok(Q.isComplete(def("m_cornerstone")), "reach objective satisfied by visiting the place");
 const relics0 = T.player.relics.length;
-Q.turnIn("mayor_2");
-ok(T.player.relics.includes("relic_foundation") && T.player.relics.length === relics0 + 1, "reach quest awarded a castle relic");
-Q.accept("mayor_3"); T.player.materials.stone = 8;
-ok(Q.isComplete(T.QUEST_BY_ID["mayor_3"]), "a 'gather' objective reads the player's materials");
-const stone0 = T.player.materials.stone;
-Q.turnIn("mayor_3");
+Q.turnIn("m_cornerstone");
+ok(T.player.relics.includes("relic_foundation") && T.player.relics.length === relics0 + 1, "reach mission awarded a castle relic");
+// build (reads the live castle build state)
+ok(Q.accept("m_foundation"), "accepted a build mission");
+ok(!Q.isComplete(def("m_foundation")), "build mission incomplete before the part is raised");
+T.state.castle.built = ["foundation"]; Q.onBuild("foundation");
+ok(Q.isComplete(def("m_foundation")), "build objective reads the raised castle part");
+ok(Q.turnIn("m_foundation"), "build mission turned in");
+// gather (consumes mats, awards a relic)
+ok(Q.accept("m_stone"), "accepted a gather mission");
+T.player.materials.stone = 8; Q.onGather();
+ok(Q.isComplete(def("m_stone")), "gather objective reads the player's materials");
+const stone0 = T.player.materials.stone, relW = T.player.relics.length;
+Q.turnIn("m_stone");
 ok(T.player.materials.stone === stone0 - 8, "gather turn-in consumed the required materials");
-Q.accept("hermit_1");
-ok(!Q.isComplete(T.QUEST_BY_ID["hermit_1"]), "a 'talk' quest starts incomplete");
+ok(T.player.relics.includes("relic_walls") && T.player.relics.length === relW + 1, "gather mission awarded a relic");
+// defeat_boss (reads cleared lairs)
+ok(Q.accept("m_caverns"), "accepted a defeat-boss mission");
+ok(!Q.isComplete(def("m_caverns")), "defeat-boss incomplete before the lair is cleared");
+T.state.bossesCleared.caverns = true; Q.onBossCleared("caverns");
+ok(Q.isComplete(def("m_caverns")), "defeat-boss objective reads the cleared lair");
+Q.turnIn("m_caverns");
+ok(T.player.relics.includes("relic_towers"), "defeat-boss mission awarded the Tower Crystal");
+// talk
+ok(Q.accept("m_word"), "accepted a talk mission");
+ok(!Q.isComplete(def("m_word")), "talk mission starts incomplete");
 Q.onTalk("mayor");
-ok(Q.isComplete(T.QUEST_BY_ID["hermit_1"]), "talking to the target completes the talk quest");
+ok(Q.isComplete(def("m_word")), "talking to the target completes the talk mission");
+Q.turnIn("m_word");
+// defeat_dragon (the finale objective resolves on victory)
+ok(!Q.isComplete(def("m_dragon")), "finale objective incomplete before the dragon falls");
+T.state.won = true;
+ok(Q.isComplete(def("m_dragon")), "finale objective resolves when the dragon is slain");
+T.state.won = false;
 
 console.log("\n[22] day/night cycle + weather");
 ok(typeof T.DayNight.t === "number", "the day/night clock exists");
@@ -638,21 +673,23 @@ const ap2 = T.player;
 for (const id of T.MATERIAL_IDS) ap2.materials[id] = 0;
 ap2.materials.wood = 7; ap2.materials.crystal = 2;
 ap2.relics = ["relic_walls"];
-T.Quests.active = ["herb_1"]; T.Quests.completed = ["mayor_1"];
-T.Quests.acceptKills = { herb_1: 3 }; T.Quests.flags = {};
+T.Quests.active = ["m_water"]; T.Quests.completed = ["m_cull", "m_cornerstone", "m_foundation"];
+T.Quests.acceptKills = { m_water: 3 }; T.Quests.reached = { ruins: true }; T.Quests.talked = {};
 T.state.totalKills = 12;
 T.DayNight.set(0.42); T.Weather.setState("fog");
 if (T.state.castle) T.state.castle.built = ["foundation"];
 const advSave = T.serializeGame();
 ok(advSave.player.materials.wood === 7 && advSave.player.relics[0] === "relic_walls", "materials + relics serialized");
-ok(advSave.quests.active[0] === "herb_1" && advSave.quests.completed[0] === "mayor_1", "quest state serialized");
+ok(advSave.quests.active[0] === "m_water" && advSave.quests.completed.includes("m_foundation"), "quest state serialized");
+ok(advSave.quests.reached && advSave.quests.reached.ruins === true, "reach/talk objective sets serialized");
 ok(advSave.castle[0] === "foundation" && advSave.weather === "fog", "castle progress + weather serialized");
 ok(advSave.totalKills === 12, "lifetime kill counter serialized");
 for (const id of T.MATERIAL_IDS) ap2.materials[id] = 0;
-ap2.relics = []; T.Quests.active = []; T.Quests.completed = [];
+ap2.relics = []; T.Quests.active = []; T.Quests.completed = []; T.Quests.reached = {};
 T.applySave(advSave);
 ok(ap2.materials.wood === 7 && ap2.relics.includes("relic_walls"), "materials + relics restored");
-ok(T.Quests.active.includes("herb_1") && T.Quests.isDone("mayor_1"), "quest state restored");
+ok(T.Quests.active.includes("m_water") && T.Quests.isDone("m_foundation"), "quest state restored");
+ok(T.Quests.reached.ruins === true, "reach objective set restored");
 ok(T.state.castle && T.state.castle.isBuilt("foundation"), "castle build state restored");
 
 console.log("\n[25] building the castle summons the dragon → victory");
@@ -661,6 +698,14 @@ ok(!!site, "the castle build site exists");
 T.player.relics = T.CASTLE_PARTS.map((p) => p.relic);
 T.state.coins = 100000; T.state.won = false; T.state.over = false; T.state.dragon = null;
 T.state.monsters.length = 0; site.built = [];
+// Integration: a live "build" mission is advanced by the REAL CastleSite.build
+// → Quests.onBuild hook (not just a simulated event).
+T.Quests.active = ["m_foundation"]; T.Quests.completed = [];
+ok(!T.Quests.isComplete(T.QUEST_BY_ID["m_foundation"]), "build mission incomplete before the part is raised");
+site.build(T.CASTLE_PARTS[0]);
+ok(T.Quests.isComplete(T.QUEST_BY_ID["m_foundation"]), "raising the part via CastleSite.build advances the build mission");
+T.Quests.active = [];
+T.player.relics = T.CASTLE_PARTS.map((p) => p.relic); T.state.coins = 100000; site.built = [];
 let builtAll = true;
 for (const part of T.CASTLE_PARTS) if (!site.build(part)) builtAll = false;
 ok(builtAll && site.built.length === T.CASTLE_PARTS.length, "all five castle parts built (relic + coins, in order)");
@@ -707,10 +752,16 @@ zm._swap("forest", "caverns", T.ZONE_BY_ID.caverns);
 ok(T.world.zone.id === "caverns" && T.world.zone.indoor, "streamed into the Crystal Caverns (indoor lair)");
 ok(T.state.boss && T.state.boss.isLairBoss, "the lair boss spawned in the depths");
 ok(T.state.boss.name === "Cavern Gumlord", "lair boss uses its custom name");
+// Integration: a live "defeat the lair boss" mission is advanced by the REAL
+// SpawnDirector clear → Quests.onBossCleared hook.
+T.Quests.active = ["m_caverns"]; T.Quests.completed = [];
+ok(!T.Quests.isComplete(T.QUEST_BY_ID["m_caverns"]), "defeat-boss mission incomplete before the lair is cleared");
 // Simulate the weapon-kill cleanup path (onMonsterDefeated nulls state.boss).
 T.state.boss.alive = false; T.state.boss = null;
 T.waves.update(0.05);
 ok(T.state.bossesCleared.caverns === true, "felled lair boss recorded as cleared");
+ok(T.Quests.isComplete(T.QUEST_BY_ID["m_caverns"]), "clearing the lair advances the defeat-boss mission");
+T.Quests.active = [];
 // Re-entering the lair this run must not respawn the boss.
 zm._swap("caverns", "shore", T.ZONE_BY_ID.shore);
 zm._swap("shore", "caverns", T.ZONE_BY_ID.caverns);
@@ -721,6 +772,135 @@ ok(T.world.zone.id === "meadow" && !!T.state.merchant && !!T.state.castle, "retu
 T.state.over = false;
 step(5);
 ok(isFinite(T.player.position.x), "simulation keeps running after repeated travel");
+
+console.log("\n[27] main story campaign — ordering, guidance, side quests, finale, save");
+// Satisfy a mission's objective (mirrors the gameplay events the engine reads).
+function satisfy(m) {
+  const o = m.obj;
+  if (o.type === "hunt") { T.state.totalKills += o.count; T.Quests.onKill(); }
+  else if (o.type === "gather") { T.player.materials[o.target] = (T.player.materials[o.target] || 0) + o.count; T.Quests.onGather(); }
+  else if (o.type === "reach") T.Quests.onReach(o.target);
+  else if (o.type === "talk") T.Quests.onTalk(o.target);
+  else if (o.type === "defeat_boss") { T.state.bossesCleared[o.target] = true; T.Quests.onBossCleared(o.target); }
+  else if (o.type === "build") { T.state.castle.built = T.state.castle.built.concat([o.target]); T.Quests.onBuild(o.target); }
+  else if (o.type === "defeat_dragon") T.state.won = true;
+}
+
+// --- Structure sanity ---
+resetStory();
+ok(T.STORY.chapters.length === 5 && T.MAIN_IDS.length === T.MISSIONS.length, `campaign: ${T.STORY.chapters.length} chapters, ${T.MAIN_IDS.length} main missions`);
+const objTypes = new Set(T.MISSIONS.map((m) => m.obj.type));
+ok(["hunt", "gather", "reach", "talk", "defeat_boss", "build", "defeat_dragon"].every((t) => objTypes.has(t)), "main line exercises every objective type");
+const mainRelics = T.MISSIONS.filter((m) => m.reward && m.reward.relic).map((m) => m.reward.relic);
+ok(["relic_foundation", "relic_walls", "relic_towers", "relic_gate", "relic_keep"].every((r) => mainRelics.includes(r)), "every castle relic is earned on the main line");
+const mainBuilds = T.MISSIONS.filter((m) => m.obj.type === "build").map((m) => m.obj.target);
+ok(["foundation", "walls", "towers", "gate", "keep"].every((p) => mainBuilds.includes(p)), "every castle part is built on the main line");
+ok(T.SIDE_QUESTS.length >= 4 && T.SIDE_QUESTS.every((s) => T.NPC_DATA.some((n) => n.id === s.npc)), `${T.SIDE_QUESTS.length} side quests, all from real NPCs`);
+
+// --- Ordering / unlock flow: a follower can complete the whole line in order ---
+resetStory();
+ok(Story.currentMission().id === T.MAIN_IDS[0], "the first mission is current at the start");
+ok(Story.offerMain("mayor") && Story.offerMain("mayor").id === "m_cull", "the giver of the current mission offers it");
+ok(!Story.offerMain("fisher"), "an NPC who isn't the current giver offers no main mission");
+ok(!Story.mainUnlocked("m_cornerstone"), "a later mission is locked until its predecessor resolves");
+let order = [], guard = 0, lockBreak = false;
+while (!Story.isComplete() && guard++ < 60) {
+  const m = Story.currentMission();
+  if (!Story.mainUnlocked(m.id)) { lockBreak = true; break; }
+  order.push(m.id);
+  if (m.npc) { Q.accept(m.id); satisfy(m); Q.turnIn(m.id); } else { satisfy(m); }
+}
+ok(!lockBreak && order.join(",") === T.MAIN_IDS.join(","), "missions resolve in exact campaign order (each unlocks the next)");
+ok(Story.isComplete(), "the full main line completes by following the objectives");
+ok(["relic_foundation", "relic_walls", "relic_towers", "relic_gate", "relic_keep"].every((r) => T.player.relics.includes(r)),
+  "following the main line earns all five castle relics (the campaign is winnable end-to-end)");
+
+// --- Guided tracker (no guesswork) ---
+resetStory();
+let g = Story.guidance();
+ok(g && g.state === "accept" && /Mayor Plum/.test(g.text), "fresh start: tracker says which NPC to see");
+ok(g.chapterIndex === 1 && /Vale Besieged/.test(g.chapterTitle), "tracker shows the current chapter");
+Q.accept("m_cull");
+g = Story.guidance();
+ok(g.state === "do" && /Defeat sweets/.test(g.text), "after accepting: tracker shows the live objective");
+T.state.totalKills += 5; Q.onKill();
+g = Story.guidance();
+ok(g.state === "turnin" && /turn in/.test(g.text), "when complete: tracker says return to the giver");
+
+// --- Main vs side separation; side quests never block the main line ---
+resetStory();
+const curBefore = Story.currentMissionId();
+ok(T.QUEST_BY_ID["sq_pests"].line === "side" && T.QUEST_BY_ID["m_cull"].line === "main", "quests are tagged main vs side");
+ok(Story.offerSide("mayor") && Story.offerSide("mayor").id === "sq_pests", "an NPC offers a side quest");
+ok(Q.accept("sq_pests") && Q.isActive("sq_pests"), "accepted a side quest independently");
+ok(Story.currentMissionId() === curBefore && !Q.isActive("m_cull"), "accepting a side quest doesn't touch the main line");
+T.state.totalKills += 8; Q.onKill();
+ok(Q.isComplete(T.QUEST_BY_ID["sq_pests"]), "side quest tracks its own progress");
+const coinsS = T.state.coins;
+ok(Q.turnIn("sq_pests") && T.state.coins > coinsS, "side quest turns in for its reward");
+ok(!Q.isDone("m_cull") && Story.currentMissionId() === curBefore, "the main line is unchanged by the side quest");
+
+// --- Repeatable vs one-shot side quests ---
+ok(T.QUEST_BY_ID["sq_pests"].repeatable && !Q.isDone("sq_pests"), "a repeatable bounty isn't permanently completed");
+ok(Story.sideTurnIns["sq_pests"] === 1, "repeatable turn-ins are tallied");
+ok(Story.offerSide("mayor") && Story.offerSide("mayor").id === "sq_pests", "a repeatable bounty can be taken again");
+Q.accept("sq_supplies"); T.player.materials.herb = 8; Q.onGather(); Q.turnIn("sq_supplies");
+ok(Q.isDone("sq_supplies"), "a one-shot side quest is marked done");
+ok(!Story.offerSide("herbalist"), "a one-shot side quest isn't offered again");
+
+// --- Finishing the last main mission enables the finale ---
+resetStory();
+for (const id of T.MAIN_IDS) {
+  if (id === "m_dragon") break;
+  const m = T.QUEST_BY_ID[id];
+  Q.accept(id); satisfy(m); Q.turnIn(id);
+}
+ok(Story.currentMissionId() === "m_dragon", "finishing the keep makes the finale (the dragon) current");
+ok(T.QUEST_BY_ID["m_dragon"].obj.type === "defeat_dragon" && !T.QUEST_BY_ID["m_dragon"].npc, "the finale is the giver-less dragon fight");
+ok(/Dragon/.test(Story.guidance().text), "the tracker now points at the dragon");
+satisfy(T.QUEST_BY_ID["m_dragon"]);
+ok(Story.isComplete() && Story.guidance() === null, "slaying the dragon completes the campaign");
+
+// --- Intro beat shows once, then closes ---
+resetStory();
+T.Dialogue.close();
+ok(Story.introSeen === false, "intro unseen on a fresh campaign");
+Story.maybeShowIntro();
+ok(Story.introSeen === true && T.Dialogue.open && T.Dialogue.beat, "maybeShowIntro shows the opening beat");
+const wasOpen = T.Dialogue.open;
+Story.maybeShowIntro();
+ok(Story.introSeen === true && T.Dialogue.open === wasOpen, "the intro shows only once (idempotent)");
+T.Dialogue.close();
+ok(!T.Dialogue.open, "the beat overlay closes cleanly");
+
+// --- UI render paths are headless-safe (dialogue, chaptered quest log, beat) ---
+resetStory();
+const giver = (T.state.npcs || []).find((n) => n.data && n.data.id === "mayor");
+let renderThrew = false;
+try {
+  Q.accept("m_cull"); Q.accept("sq_pests");          // an active main + side quest
+  T.QuestLog.openLog(); T.QuestLog.render(); T.QuestLog.close();
+  if (giver) { T.Dialogue.talk(giver); T.Dialogue.render(); T.Dialogue.close(); }
+  Story.showIntro(); T.Dialogue.close();             // narrated story beat
+} catch (e) { renderThrew = true; console.log("   render error:", e && e.stack); }
+ok(!!giver, "the hub seeded a Mayor Plum quest-giver to talk to");
+ok(!renderThrew, "dialogue / quest-log / intro-beat render paths run headless without throwing");
+
+// --- Story state save/load round-trip ---
+resetStory();
+Story.introSeen = true; Story.beats = { ch2: true, ch3: true }; Story.sideTurnIns = { sq_pests: 2 };
+Q.completed = ["m_cull", "m_cornerstone"]; Q.reached = { ruins: true }; Q.talked = { mayor: true };
+const chBefore = Story.currentChapterId();
+const sSave = T.serializeGame();
+ok(sSave.v === 6 && sSave.story, "save is v6 with a story block");
+ok(sSave.story.intro === true && sSave.story.beats.includes("ch2"), "story flags serialized");
+ok(sSave.story.sideTurnIns.sq_pests === 2, "repeatable side tallies serialized");
+Story.introSeen = false; Story.beats = {}; Story.sideTurnIns = {};
+Q.completed = []; Q.reached = {}; Q.talked = {};
+T.applySave(sSave);
+ok(Story.introSeen === true && Story.beats.ch2 && Story.sideTurnIns.sq_pests === 2, "story flags restored");
+ok(T.Quests.reached.ruins && T.Quests.talked.mayor, "reach/talk objective sets restored");
+ok(Story.currentChapterId() === chBefore, "current chapter round-trips (derived from restored missions)");
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED ✅" : failures + " CHECK(S) FAILED ❌"}`);
 process.exit(failures === 0 ? 0 : 1);

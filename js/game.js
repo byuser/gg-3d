@@ -444,60 +444,174 @@
   const LOCATION_BY_ID = {};
   for (const l of LOCATIONS) LOCATION_BY_ID[l.id] = l;
 
-  // ---- Story NPCs. Each stands at a location, has a little story, and offers a
-  // short chain of quests. Quest objectives: hunt (kill sweets), gather (collect
-  // a material), reach (visit a location), talk (speak to another NPC). Rewards
-  // mix coins, gear and the castle relics, so questing is how the castle rises.
-  //   quest: { id, title, story, obj:{type,target,count}, reward:{coins,item,relic,mats} }
+  // ---- Story NPCs. Each stands at a landmark, has an intro line, and serves as
+  // a GIVER for the campaign's missions + side quests (defined below). Identity
+  // lives here only; the quests themselves live in the declarative STORY /
+  // SIDE_QUESTS tables so the main line, the UI and the tests can all reason
+  // about them as data.
+  //   npc: { id, name, icon, loc(landmark id), intro }
   // =========================================================================
   const NPC_DATA = [
-    {
-      id: "mayor", name: "Mayor Plum", icon: "🎩", loc: "village",
-      intro: "Meadowgate is besieged by living sweets! They say a castle once warded this vale. Help us raise it again, hero.",
-      quests: [
-        { id: "mayor_1", title: "A Taste of Battle", story: "Cull the sweets prowling our fields.", obj: { type: "hunt", count: 5 }, reward: { coins: 30, mats: { wood: 3, water: 2 } } },
-        { id: "mayor_2", title: "The Cornerstone", story: "The Foundation Stone lies in the Sunken Ruins. Bring it and we can begin.", obj: { type: "reach", target: "ruins" }, reward: { coins: 40, relic: "relic_foundation" } },
-        { id: "mayor_3", title: "Stones for the Walls", story: "Walls need good stone. Mine some from the hills.", obj: { type: "gather", target: "stone", count: 8 }, reward: { coins: 50, relic: "relic_walls" } },
-      ],
-    },
-    {
-      id: "herbalist", name: "Sage Willow", icon: "👩‍🌾", loc: "grove",
-      intro: "The Whisperwood gives freely to those who listen. Gather with me, and I'll share old secrets.",
-      quests: [
-        { id: "herb_1", title: "Green Hands", story: "Gather herbs from the grove for my poultices.", obj: { type: "gather", target: "herb", count: 6 }, reward: { coins: 25, item: "health_potion", mats: { crystal: 1 } } },
-        { id: "herb_2", title: "Thin the Swarm", story: "The deeper wood crawls with sweets. Thin them for me.", obj: { type: "hunt", count: 10 }, reward: { coins: 45, item: "ring_swift" } },
-      ],
-    },
-    {
-      id: "fisher", name: "Old Brin", icon: "🎣", loc: "seaside",
-      intro: "Hah! A landlubber at my shore. The sea keeps the Tower Crystal — earn it, and it's yours.",
-      quests: [
-        { id: "fish_1", title: "Fresh Water", story: "Fetch clean water from the river for my nets.", obj: { type: "gather", target: "water", count: 6 }, reward: { coins: 30, mats: { fiber: 4 } } },
-        { id: "fish_2", title: "Crystal Tide", story: "Defeat the sweets washing up on my shore, and the Tower Crystal is yours.", obj: { type: "hunt", count: 12 }, reward: { coins: 60, relic: "relic_towers" } },
-      ],
-    },
-    {
-      id: "smith2", name: "Forgemother Tova", icon: "⚒️", loc: "mountain",
-      intro: "Frostpeak iron is the finest there is. Prove your arm and I'll forge you the Gate Key.",
-      quests: [
-        { id: "smith_1", title: "Ore for the Forge", story: "Bring me crystal from the high rocks.", obj: { type: "gather", target: "crystal", count: 3 }, reward: { coins: 50, item: "iron_helm" } },
-        { id: "smith_2", title: "The Golden Gate", story: "Slay the sweets haunting the pass and claim the Gate Key.", obj: { type: "hunt", count: 14 }, reward: { coins: 80, relic: "relic_gate" } },
-      ],
-    },
-    {
-      id: "hermit", name: "The Hermit", icon: "🧙", loc: "ruins",
-      intro: "You seek the Dragon Sigil? Few are ready. Speak with the Mayor first, then return to me.",
-      quests: [
-        { id: "hermit_1", title: "Word from the Vale", story: "Speak to Mayor Plum, then come back to me.", obj: { type: "talk", target: "mayor" }, reward: { coins: 30, mats: { crystal: 2 } } },
-        { id: "hermit_2", title: "The Dragon's Seal", story: "Defeat 18 sweets to prove your worth and earn the Dragon Sigil.", obj: { type: "hunt", count: 18 }, reward: { coins: 120, relic: "relic_keep" } },
-      ],
-    },
+    { id: "mayor",     name: "Mayor Plum",       icon: "🎩", loc: "village",
+      intro: "Meadowgate is besieged by living sweets! They say a castle once warded this vale. Help us raise it again, hero." },
+    { id: "herbalist", name: "Sage Willow",      icon: "👩‍🌾", loc: "grove",
+      intro: "The Whisperwood gives freely to those who listen. Gather with me, and I'll share old secrets." },
+    { id: "fisher",    name: "Old Brin",         icon: "🎣", loc: "seaside",
+      intro: "Hah! A landlubber at my shore. The sea keeps a Tower Crystal — earn it, and it's yours." },
+    { id: "smith2",    name: "Forgemother Tova", icon: "⚒️", loc: "mountain",
+      intro: "Frostpeak iron is the finest there is. Prove your arm and I'll forge you the Gate Key." },
+    { id: "hermit",    name: "The Hermit",       icon: "🧙", loc: "ruins",
+      intro: "You seek the Dragon Sigil? Few are ready. Speak with the Mayor first, then return to me." },
   ];
   const NPC_BY_ID = {};
   for (const n of NPC_DATA) NPC_BY_ID[n.id] = n;
-  // Flatten every quest for quick lookup by id.
+
+  // =========================================================================
+  // STORY — the structured main campaign. An ORDERED list of chapters, each a
+  // run of ordered MISSIONS that march the player across the lands to raise the
+  // castle and slay the dragon. Missions unlock strictly in order (the next one
+  // opens once the previous is turned in), so a new player can follow the whole
+  // main line purely by following the objective tracker — no guesswork. Every
+  // mission reuses the quest objective engine (Quests): hunt / gather / reach /
+  // talk, plus the campaign objectives `defeat_boss <zone>`, `build <castle
+  // part>` and the finale `defeat_dragon`. SIDE_QUESTS are an optional pool
+  // (some repeatable bounties), clearly separated from the main line in the log
+  // and never blocking it.
+  //   mission: { id, chapter, npc(giver | null for the finale), title, story,
+  //              obj:{type,target?,count?}, reward:{coins,item,relic,mats}, where? }
+  // =========================================================================
+  const STORY = {
+    title: "The Castle of Meadowgate",
+    intro: {
+      title: "📜 The Tale of Meadowgate",
+      text: "Long ago a great castle warded this vale — until it crumbled and the lands filled with living sweets. " +
+            "You are Lily, the hero Meadowgate prayed for. Gather the five lost relics, raise the castle anew, and " +
+            "face the Ancient Dragon that sleeps beneath the keep. " +
+            "Follow the glowing ❗ folk and your quest tracker — each task leads to the next. The vale is in your hands.",
+    },
+    ending: {
+      title: "🏰 Dawn Over the Vale",
+      text: "The Ancient Dragon is slain and the castle stands crowned against the dawn. The sweets scatter to the wilds, " +
+            "the folk of Meadowgate throw open their doors, and your name is sung from grove to shore. The vale is saved — well done, hero.",
+    },
+    chapters: [
+      { id: "ch1", title: "The Vale Besieged", blurb: "Answer Meadowgate's call and lay the castle's first stone." },
+      { id: "ch2", title: "Stone & Steel",     blurb: "Steel the militia and raise the curtain walls." },
+      { id: "ch3", title: "The Crystal Tide",  blurb: "Brave the sea-caves for the Tower Crystal." },
+      { id: "ch4", title: "The Golden Gate",   blurb: "Forge the Gate Key in Frostpeak's fire." },
+      { id: "ch5", title: "The Dragon's Seal", blurb: "Claim the Dragon Sigil, crown the keep, and end the beast." },
+    ],
+  };
+
+  // The ordered main missions (flattened; array order === campaign order).
+  const MISSIONS = [
+    // ── Chapter 1 — The Vale Besieged ───────────────────────────────────────
+    { id: "m_cull", chapter: "ch1", npc: "mayor", title: "A Taste of Battle",
+      story: "Cull the sweets prowling our fields and show the vale there's hope.",
+      obj: { type: "hunt", count: 5 }, where: "Meadowgate Vale",
+      reward: { coins: 30, mats: { wood: 3, water: 2 } } },
+    { id: "m_cornerstone", chapter: "ch1", npc: "mayor", title: "The Cornerstone",
+      story: "The Foundation Stone lies in the Sunken Ruins to the east. Seek it out.",
+      obj: { type: "reach", target: "ruins" },
+      reward: { coins: 40, relic: "relic_foundation" } },
+    { id: "m_foundation", chapter: "ch1", npc: "mayor", title: "Lay the Cornerstone",
+      story: "Carry the Foundation Stone to Castle Hill and lay our cornerstone.",
+      obj: { type: "build", target: "foundation" },
+      reward: { coins: 30, mats: { stone: 2 } } },
+    // ── Chapter 2 — Stone & Steel ───────────────────────────────────────────
+    { id: "m_poultice", chapter: "ch2", npc: "herbalist", title: "Green Hands",
+      story: "Gather herbs from the grove so I can brew poultices for the militia.",
+      obj: { type: "gather", target: "herb", count: 6 }, where: "Whisperwood Grove",
+      reward: { coins: 25, item: "health_potion", mats: { crystal: 1 } } },
+    { id: "m_stone", chapter: "ch2", npc: "smith2", title: "Stones for the Walls",
+      story: "Walls need good stone. Mine some from the hills and high rocks.",
+      obj: { type: "gather", target: "stone", count: 8 }, where: "Frostpeak & the hills",
+      reward: { coins: 50, relic: "relic_walls" } },
+    { id: "m_walls", chapter: "ch2", npc: "mayor", title: "Raise the Ramparts",
+      story: "With the Rampart Runes in hand, raise our curtain walls.",
+      obj: { type: "build", target: "walls" },
+      reward: { coins: 40, item: "iron_helm" } },
+    // ── Chapter 3 — The Crystal Tide ────────────────────────────────────────
+    { id: "m_water", chapter: "ch3", npc: "fisher", title: "Fresh Water",
+      story: "Fetch clean water from the river for my nets, and I'll tell you of the deep caves.",
+      obj: { type: "gather", target: "water", count: 6 }, where: "the river & Saltmarsh",
+      reward: { coins: 30, mats: { fiber: 4 } } },
+    { id: "m_caverns", chapter: "ch3", npc: "fisher", title: "The Deep Below",
+      story: "A candy golem hoards the Tower Crystal in the Crystal Caverns, through the sea-cave past my shore. End it!",
+      obj: { type: "defeat_boss", target: "caverns" }, where: "Crystal Caverns (via Saltmarsh)",
+      reward: { coins: 70, relic: "relic_towers" } },
+    { id: "m_towers", chapter: "ch3", npc: "mayor", title: "Conjure the Spires",
+      story: "Sing the Tower Crystal into the castle's corner spires.",
+      obj: { type: "build", target: "towers" },
+      reward: { coins: 50 } },
+    // ── Chapter 4 — The Golden Gate ─────────────────────────────────────────
+    { id: "m_ore", chapter: "ch4", npc: "smith2", title: "Ore for the Forge",
+      story: "Bring me crystal from the high rocks to fire the forge.",
+      obj: { type: "gather", target: "crystal", count: 3 }, where: "Frostpeak Trail",
+      reward: { coins: 50, item: "iron_sword" } },
+    { id: "m_gatekey", chapter: "ch4", npc: "smith2", title: "The Golden Gate",
+      story: "Slay the sweets haunting the frostpeak pass and claim the forged Gate Key.",
+      obj: { type: "hunt", count: 14 }, where: "Frostpeak Trail",
+      reward: { coins: 80, relic: "relic_gate" } },
+    { id: "m_gate", chapter: "ch4", npc: "mayor", title: "Hang the Golden Gate",
+      story: "Hang the golden gate and seal our walls.",
+      obj: { type: "build", target: "gate" },
+      reward: { coins: 60 } },
+    // ── Chapter 5 — The Dragon's Seal ───────────────────────────────────────
+    { id: "m_word", chapter: "ch5", npc: "hermit", title: "Word from the Vale",
+      story: "Speak with Mayor Plum that he vouches for you, then return to me.",
+      obj: { type: "talk", target: "mayor" },
+      reward: { coins: 30, mats: { crystal: 2 } } },
+    { id: "m_thicket", chapter: "ch5", npc: "hermit", title: "The Bramble Heart",
+      story: "The Bramble Hydra coils in the deep thicket beyond the Whisperwood. Cut out its heart and the Dragon Sigil is yours.",
+      obj: { type: "defeat_boss", target: "thicket" }, where: "Bramblewood Thicket (via Whisperwood)",
+      reward: { coins: 120, relic: "relic_keep" } },
+    { id: "m_keep", chapter: "ch5", npc: "mayor", title: "Crown the Keep",
+      story: "Set the Dragon Sigil and crown the keep — though it will surely wake the beast below.",
+      obj: { type: "build", target: "keep" },
+      reward: { coins: 80 } },
+    { id: "m_dragon", chapter: "ch5", npc: null, title: "Slay the Ancient Dragon",
+      story: "The Ancient Dragon is awake. Face it before the new-raised castle and end the long siege.",
+      obj: { type: "defeat_dragon" }, where: "Castle Hill",
+      reward: {} },
+  ];
+
+  // Optional side quests — bounties + errands from the same NPCs, kept clearly
+  // apart from the main line. `repeatable` bounties can be taken again after
+  // each turn-in for steady coin; the rest are one-shot.
+  const SIDE_QUESTS = [
+    { id: "sq_pests", npc: "mayor", title: "Pest Control", repeatable: true,
+      story: "Sweets keep wandering into the plaza. Thin them out — there's coin in it, as often as you like.",
+      obj: { type: "hunt", count: 8 }, reward: { coins: 45 } },
+    { id: "sq_supplies", npc: "herbalist", title: "Healer's Stock",
+      story: "Stock my shelves with herbs and I'll spare you a tonic.",
+      obj: { type: "gather", target: "herb", count: 8 }, reward: { coins: 30, item: "health_potion" } },
+    { id: "sq_nets", npc: "fisher", title: "Mend the Nets",
+      story: "My nets are in tatters. Bring fiber and I'll cut you in.",
+      obj: { type: "gather", target: "fiber", count: 6 }, reward: { coins: 28, item: "elixir_swift" } },
+    { id: "sq_forgefuel", npc: "smith2", title: "Forgefuel",
+      story: "The forge hungers for crystal. Feed it and take this blade.",
+      obj: { type: "gather", target: "crystal", count: 4 }, reward: { coins: 55, item: "iron_sword" } },
+    { id: "sq_relics", npc: "hermit", title: "Trials of the Lost",
+      story: "Prove your steel against the wild swarm and earn an old charm of mine.",
+      obj: { type: "hunt", count: 15 }, reward: { coins: 90, item: "ring_swift" } },
+    { id: "sq_wilds", npc: "smith2", title: "Cull the Wilds", repeatable: true,
+      story: "There's a standing bounty on the wild sweets — bring me a tally any time.",
+      obj: { type: "hunt", count: 12 }, reward: { coins: 60 } },
+  ];
+
+  // Normalise + index every quest (main + side) so the engine, UI and tests can
+  // treat them uniformly by id.
+  for (const m of MISSIONS) m.line = "main";
+  for (const s of SIDE_QUESTS) s.line = "side";
   const QUEST_BY_ID = {};
-  for (const n of NPC_DATA) for (const q of n.quests) { q.npc = n.id; QUEST_BY_ID[q.id] = q; }
+  for (const q of MISSIONS) QUEST_BY_ID[q.id] = q;
+  for (const q of SIDE_QUESTS) QUEST_BY_ID[q.id] = q;
+  const MAIN_IDS = MISSIONS.map((m) => m.id);                 // campaign order
+  const MAIN_INDEX = {}; MAIN_IDS.forEach((id, i) => { MAIN_INDEX[id] = i; });
+  const SIDE_IDS = SIDE_QUESTS.map((s) => s.id);
+  const CHAPTER_BY_ID = {}; for (const c of STORY.chapters) CHAPTER_BY_ID[c.id] = c;
+  const missionsOfChapter = (chId) => MISSIONS.filter((m) => m.chapter === chId);
 
   // =========================================================================
   // ZONES — the world is no longer one map driven by a wave timer. It is split
@@ -929,6 +1043,7 @@
     win: document.getElementById("win"),
     winScore: document.getElementById("winScore"),
     winWave: document.getElementById("winWave"),
+    winStory: document.getElementById("winStory"),
     winReplayBtn: document.getElementById("winReplayBtn"),
     // ---- NPC dialogue overlay ----
     dialogue: document.getElementById("dialogue"),
@@ -2559,15 +2674,9 @@
       glow.parent = this.root; glow.diffuse = BABYLON.Color3.FromHexString(color); glow.intensity = 0.35; glow.range = 6;
     }
 
-    // Returns the NPC's status for the marker + interaction prompt.
-    status() {
-      const id = this.data.id;
-      const active = Quests.activeForNpc(id);
-      if (active && Quests.isComplete(QUEST_BY_ID[active])) return "turnin";
-      if (active) return "active";
-      if (Quests.nextForNpc(id)) return "new";
-      return "done";
-    }
+    // Returns the NPC's status for the marker + interaction prompt (delegates to
+    // the campaign so the main-line giver lights up in the right order).
+    status() { return Story.npcStatus(this.data.id); }
 
     update(dt) {
       this.bob += dt;
@@ -2671,6 +2780,7 @@
       spawnImpact(this.state, this.root.position, "#ffd34e", { y: 4, count: 16, spread: 6, up: 4 });
       Sfx.play("enhance");
       toast(`🏰 ${part.name} raised!`);
+      Quests.onBuild(part.id); // advance any "build this part" mission
       if (this.built.length >= CASTLE_PARTS.length) this._complete();
       return true;
     }
@@ -4104,91 +4214,104 @@
   };
 
   // =========================================================================
-  // Quests — the story spine. Story NPCs (NPC_DATA) each offer a short chain of
-  // quests with objectives (hunt sweets / gather a material / reach a place /
-  // talk to someone) and rewards (coins, gear, and the five castle relics).
-  // Progress is computed live: hunts off the lifetime kill counter snapshotted
-  // at accept time, gathers off the player's current material stock, and reach/
-  // talk off one-shot flags. Completing the relic quests is how the castle rises.
+  // Quests — the per-quest objective ENGINE shared by the main-story missions
+  // and the side quests (the campaign ORDER + chapters live in `Story`, below).
+  // A quest is accepted from its giver NPC, tracked live, then turned in for a
+  // reward. Objective types: hunt (lifetime kills snapshotted at accept), gather
+  // (current material stock), reach (a landmark/zone visited), talk (an NPC
+  // spoken to), defeat_boss (a lair cleared this run), build (a castle part
+  // raised) and the finale defeat_dragon (the dragon slain → victory). Progress
+  // is computed live off persistent state so it's robust to the order the player
+  // does things in. Completing the relic + build missions is how the castle rises.
   // =========================================================================
   const Quests = {
     state: null, player: null,
     active: [],            // accepted, not-yet-turned-in quest ids
-    completed: [],         // turned-in quest ids
+    completed: [],         // turned-in one-shot quest ids (main + non-repeatable side)
     acceptKills: {},       // totalKills snapshot when a hunt quest was accepted
-    flags: {},             // reach/talk objective flags, keyed by quest id
+    reached: {},           // landmark/zone ids the player has visited (reach objectives)
+    talked: {},            // NPC ids the player has spoken to (talk objectives)
 
     init(state, player) {
       this.state = state; this.player = player;
-      this.active = []; this.completed = []; this.acceptKills = {}; this.flags = {};
+      this.active = []; this.completed = []; this.acceptKills = {};
+      this.reached = {}; this.talked = {};
     },
 
     isActive(id) { return this.active.includes(id); },
     isDone(id) { return this.completed.includes(id); },
-    activeForNpc(npcId) { return this.active.find((id) => QUEST_BY_ID[id] && QUEST_BY_ID[id].npc === npcId); },
-
-    // The next quest an NPC can offer: the first in their list that's neither
-    // done nor active, gated so their chain unlocks one quest at a time.
-    nextForNpc(npcId) {
-      const npc = NPC_BY_ID[npcId]; if (!npc) return null;
-      for (let i = 0; i < npc.quests.length; i++) {
-        const q = npc.quests[i];
-        if (this.isDone(q.id) || this.isActive(q.id)) continue;
-        if (i > 0 && !this.isDone(npc.quests[i - 1].id)) return null; // previous not done yet
-        return q;
-      }
-      return null;
-    },
+    // Active quests (main + side) for a giver, and the first one ready to hand in.
+    activeIdsForNpc(npcId) { return this.active.filter((id) => QUEST_BY_ID[id] && QUEST_BY_ID[id].npc === npcId); },
+    completeActiveForNpc(npcId) { return this.activeIdsForNpc(npcId).find((id) => this.isComplete(QUEST_BY_ID[id])); },
 
     accept(id) {
       const q = QUEST_BY_ID[id];
-      if (!q || this.isActive(id) || this.isDone(id)) return false;
+      if (!q || this.isActive(id) || (q.line !== "side" && this.isDone(id))) return false;
+      if (q.line === "side" && this.isDone(id) && !q.repeatable) return false;
       this.active.push(id);
       this.acceptKills[id] = this.state.totalKills;
-      this.flags[id] = false;
       Sfx.play("buy");
-      toast(`📜 Quest: ${q.title}`);
+      toast(`📜 ${q.line === "main" ? "Mission" : "Side quest"}: ${q.title}`);
       updateQuestTracker(this);
       return true;
     },
 
+    // Is a castle part (or "castle"/"all" for every part) raised? Reads the live
+    // build site in the hub, or the persisted snapshot when out in the wilds.
+    _built(part) {
+      const s = this.state;
+      const built = s.castle ? s.castle.built : (s.castleBuilt || []);
+      if (part === "castle" || part === "all") return built.length >= CASTLE_PARTS.length;
+      return built.indexOf(part) >= 0;
+    },
+
     // Live { have, need } progress for a quest's objective.
     progress(q) {
-      const o = q.obj;
-      if (o.type === "hunt") return { have: Math.min(o.count, Math.max(0, this.state.totalKills - (this.acceptKills[q.id] || 0))), need: o.count };
+      const o = q.obj, s = this.state;
+      if (o.type === "hunt") return { have: Math.min(o.count, Math.max(0, s.totalKills - (this.acceptKills[q.id] || 0))), need: o.count };
       if (o.type === "gather") return { have: Math.min(o.count, this.player.materials[o.target] || 0), need: o.count };
-      if (o.type === "reach" || o.type === "talk") return { have: this.flags[q.id] ? 1 : 0, need: 1 };
+      if (o.type === "reach") return { have: this.reached[o.target] ? 1 : 0, need: 1 };
+      if (o.type === "talk") return { have: this.talked[o.target] ? 1 : 0, need: 1 };
+      if (o.type === "defeat_boss") return { have: (s.bossesCleared && s.bossesCleared[o.target]) ? 1 : 0, need: 1 };
+      if (o.type === "build") return { have: this._built(o.target) ? 1 : 0, need: 1 };
+      if (o.type === "defeat_dragon") return { have: s.won ? 1 : 0, need: 1 };
       return { have: 0, need: 1 };
     },
     isComplete(q) { const p = this.progress(q); return p.have >= p.need; },
 
-    // A one-line objective description for the dialogue + HUD tracker.
+    // A one-line objective description for the dialogue, log + HUD tracker.
     objectiveText(q) {
-      const o = q.obj, p = this.progress(q);
+      const o = q.obj, p = this.progress(q), done = p.have >= p.need;
       if (o.type === "hunt") return `Defeat sweets — ${p.have}/${p.need}`;
-      if (o.type === "gather") { const m = MATERIALS[o.target] || {}; return `Gather ${m.icon || ""} ${o.target} — ${p.have}/${p.need}`; }
-      if (o.type === "reach") { const l = LOCATION_BY_ID[o.target] || {}; return `Reach ${l.name || o.target}` + (p.have ? " ✓" : ""); }
-      if (o.type === "talk") { const n = NPC_BY_ID[o.target] || {}; return `Speak with ${n.name || o.target}` + (p.have ? " ✓" : ""); }
+      if (o.type === "gather") { const m = MATERIALS[o.target] || {}; return `Gather ${m.icon || ""} ${m.label || o.target} — ${p.have}/${p.need}`; }
+      if (o.type === "reach") { const l = LOCATION_BY_ID[o.target] || ZONE_BY_ID[o.target] || {}; return `Reach ${l.name || o.target}` + (done ? " ✓" : ""); }
+      if (o.type === "talk") { const n = NPC_BY_ID[o.target] || {}; return `Speak with ${n.icon || ""} ${n.name || o.target}` + (done ? " ✓" : ""); }
+      if (o.type === "defeat_boss") { const z = ZONE_BY_ID[o.target] || {}; const bn = z.boss ? z.boss.name : "the lair boss"; return `Defeat 👑 ${bn} in ${z.name || o.target}` + (done ? " ✓" : ""); }
+      if (o.type === "build") { const part = CASTLE_PART_BY_ID[o.target]; return `Raise the ${part ? part.name : o.target} at 🏰 Castle Hill` + (done ? " ✓" : ""); }
+      if (o.type === "defeat_dragon") return `Slay the 🐉 Ancient Dragon` + (done ? " ✓" : "");
       return "";
     },
 
     // Turn a completed quest in: consume gathered mats, pay the reward, advance.
+    // Repeatable side quests don't lock — they tally and can be taken again.
     turnIn(id) {
       const q = QUEST_BY_ID[id];
       if (!q || !this.isActive(id) || !this.isComplete(q)) return false;
       if (q.obj.type === "gather") spendMaterials(this.player, { [q.obj.target]: q.obj.count });
       this.active.splice(this.active.indexOf(id), 1);
-      this.completed.push(id);
+      if (q.line === "side" && q.repeatable) Story.sideTurnIns[id] = (Story.sideTurnIns[id] || 0) + 1;
+      else this.completed.push(id);
       grantReward(this.player, this.state, q.reward);
       Sfx.play("artifact");
       const r = q.reward || {};
       const bits = [];
       if (r.coins) bits.push(`🪙 ${r.coins}`);
-      if (r.item) bits.push(`${getDef(r.item).icon} ${getDef(r.item).name}`);
-      if (r.relic) bits.push(`${RELICS[r.relic].icon} ${RELICS[r.relic].name}`);
+      if (r.item && getDef(r.item)) bits.push(`${getDef(r.item).icon} ${getDef(r.item).name}`);
+      if (r.relic && RELICS[r.relic]) bits.push(`${RELICS[r.relic].icon} ${RELICS[r.relic].name}`);
       toast(`✅ ${q.title} complete! ${bits.join(" · ")}`);
       updateQuestTracker(this);
       if (Inventory.open) Inventory.render();
+      Story.afterTurnIn(q);
       return true;
     },
 
@@ -4197,27 +4320,145 @@
     onGather() { updateQuestTracker(this); },
     onCraft() { updateQuestTracker(this); },
     onReach(locId) {
-      for (const id of this.active) {
-        const q = QUEST_BY_ID[id];
-        if (q && q.obj.type === "reach" && q.obj.target === locId && !this.flags[id]) {
-          this.flags[id] = true; toast(`📍 Reached ${(LOCATION_BY_ID[locId] || {}).name || locId}`);
+      if (!this.reached[locId]) {
+        this.reached[locId] = true;
+        // Announce only when an active reach mission was just satisfied.
+        if (this.active.some((id) => { const q = QUEST_BY_ID[id]; return q && q.obj.type === "reach" && q.obj.target === locId; })) {
+          toast(`📍 Reached ${(LOCATION_BY_ID[locId] || ZONE_BY_ID[locId] || {}).name || locId}`);
         }
       }
       updateQuestTracker(this);
     },
-    onTalk(npcId) {
-      for (const id of this.active) {
-        const q = QUEST_BY_ID[id];
-        if (q && q.obj.type === "talk" && q.obj.target === npcId && !this.flags[id]) this.flags[id] = true;
-      }
-      updateQuestTracker(this);
+    onTalk(npcId) { this.talked[npcId] = true; updateQuestTracker(this); },
+    onBossCleared(zoneId) { updateQuestTracker(this); },
+    onBuild() { updateQuestTracker(this); },
+
+    // The quest shown in the small HUD tracker when there's no live main step
+    // (first active side quest, complete ones first).
+    tracked() {
+      const ids = this.active.filter((id) => QUEST_BY_ID[id] && QUEST_BY_ID[id].line === "side");
+      const done = ids.filter((id) => this.isComplete(QUEST_BY_ID[id]));
+      const id = done[0] || ids[0];
+      return id ? QUEST_BY_ID[id] : null;
+    },
+  };
+
+  // =========================================================================
+  // Story — the campaign META over the quest engine: the ORDERED main line,
+  // chapter structure, the single "current step" that drives the guided HUD
+  // tracker, which quest each NPC may offer next (main mission gated by global
+  // order; side quests offered freely), and the intro / chapter / ending beats.
+  // It owns only campaign-flow state (intro seen, chapter beats shown, repeatable
+  // side-quest tallies); per-quest progress lives in `Quests`. Everything is
+  // derived from the declarative STORY / MISSIONS tables so it stays testable.
+  // =========================================================================
+  const Story = {
+    state: null, player: null,
+    introSeen: false,
+    beats: {},          // chapterId -> chapter-begin beat already shown
+    sideTurnIns: {},    // repeatable side-quest id -> times turned in
+
+    init(state, player) {
+      this.state = state; this.player = player;
+      this.introSeen = false; this.beats = {}; this.sideTurnIns = {};
     },
 
-    // The quest shown in the small HUD tracker (first active, complete ones first).
-    tracked() {
-      const done = this.active.filter((id) => this.isComplete(QUEST_BY_ID[id]));
-      const id = done[0] || this.active[0];
-      return id ? QUEST_BY_ID[id] : null;
+    // A main mission counts as resolved when turned in — or, for the giver-less
+    // finale, when the dragon is down (victory).
+    resolved(id) {
+      const q = QUEST_BY_ID[id];
+      if (q && q.obj.type === "defeat_dragon") return !!(this.state && this.state.won);
+      return Quests.isDone(id);
+    },
+    mainUnlocked(id) { const i = MAIN_INDEX[id]; return i === 0 || this.resolved(MAIN_IDS[i - 1]); },
+
+    currentMissionId() { for (const id of MAIN_IDS) if (!this.resolved(id)) return id; return null; },
+    currentMission() { const id = this.currentMissionId(); return id ? QUEST_BY_ID[id] : null; },
+    isComplete() { return this.currentMissionId() === null; },
+
+    currentChapterId() {
+      const m = this.currentMission();
+      return m ? m.chapter : STORY.chapters[STORY.chapters.length - 1].id;
+    },
+    chapterIndex(chId) { return STORY.chapters.findIndex((c) => c.id === chId) + 1; },
+    chapterProgress(chId) {
+      const ms = missionsOfChapter(chId);
+      return { done: ms.filter((m) => this.resolved(m.id)).length, total: ms.length };
+    },
+
+    // ---- What an NPC may offer right now ----
+    offerMain(npcId) {
+      const m = this.currentMission();
+      return (m && m.npc === npcId && this.mainUnlocked(m.id) && !Quests.isActive(m.id)) ? m : null;
+    },
+    offerSide(npcId) {
+      for (const id of SIDE_IDS) {
+        const q = QUEST_BY_ID[id];
+        if (q.npc !== npcId || Quests.isActive(id)) continue;
+        if (Quests.isDone(id) && !q.repeatable) continue;
+        return q;
+      }
+      return null;
+    },
+    offer(npcId) { return this.offerMain(npcId) || this.offerSide(npcId); },
+
+    // The marker/prompt status for a giver NPC.
+    npcStatus(npcId) {
+      if (Quests.completeActiveForNpc(npcId)) return "turnin";
+      if (this.offer(npcId)) return "new";
+      if (Quests.activeIdsForNpc(npcId).length) return "active";
+      return "done";
+    },
+
+    // ---- Presentation helpers ----
+    giverLabel(npcId) { const n = NPC_BY_ID[npcId] || {}; return `${n.icon || ""} ${n.name || npcId}`; },
+    npcPlace(npcId) { const n = NPC_BY_ID[npcId]; const l = n && LOCATION_BY_ID[n.loc]; return l ? l.name : "Meadowgate"; },
+    _whereSuffix(m) { return m.where ? ` · ${m.where}` : ""; },
+
+    // The one guided step shown in the HUD tracker — always the live main line.
+    guidance() {
+      const m = this.currentMission();
+      if (!m) return null; // campaign complete
+      const ch = CHAPTER_BY_ID[m.chapter] || {};
+      const base = { chapterTitle: ch.title || "", chapterIndex: this.chapterIndex(m.chapter), mission: m };
+      if (!m.npc) // the finale: no giver, just face the dragon
+        return Object.assign(base, { state: "do", text: Quests.objectiveText(m) + this._whereSuffix(m) });
+      if (Quests.isActive(m.id)) {
+        if (Quests.isComplete(m))
+          return Object.assign(base, { state: "turnin", text: `Return to ${this.giverLabel(m.npc)} to turn in` });
+        return Object.assign(base, { state: "do", text: Quests.objectiveText(m) + this._whereSuffix(m) });
+      }
+      return Object.assign(base, { state: "accept", text: `Speak with ${this.giverLabel(m.npc)} at ${this.npcPlace(m.npc)}` });
+    },
+
+    // ---- Beats ----
+    showIntro() {
+      Dialogue.showBeat({ name: STORY.intro.title, html: `<p>${STORY.intro.text}</p>`, button: "Begin the adventure ▶" });
+    },
+    maybeShowIntro() { if (this.introSeen) return; this.introSeen = true; this.showIntro(); },
+
+    // Fired after a turn-in: announce a freshly-begun chapter once.
+    afterTurnIn(q) {
+      if (!q || q.line !== "main") return;
+      const cur = this.currentMission();
+      if (cur && cur.chapter !== q.chapter && !this.beats[cur.chapter]) {
+        this.beats[cur.chapter] = true;
+        const ch = CHAPTER_BY_ID[cur.chapter];
+        if (ch) toast(`📖 Chapter ${this.chapterIndex(ch.id)}: ${ch.title}`);
+      }
+    },
+    onWin() { this.beats.__ending = true; },
+
+    // ---- Save / restore (campaign-flow state; per-quest state is in Quests) ----
+    serialize() {
+      return { intro: this.introSeen, beats: Object.keys(this.beats), sideTurnIns: Object.assign({}, this.sideTurnIns) };
+    },
+    restore(d) {
+      d = d || {};
+      this.introSeen = !!d.intro;
+      this.beats = {}; for (const k of (d.beats || [])) this.beats[k] = true;
+      this.sideTurnIns = {};
+      if (d.sideTurnIns) for (const k in d.sideTurnIns) if (QUEST_BY_ID[k]) this.sideTurnIns[k] = d.sideTurnIns[k] | 0;
     },
   };
 
@@ -4244,55 +4485,95 @@
   }
 
   // =========================================================================
-  // Dialogue — the NPC conversation overlay. Greets the player, offers the
-  // NPC's next quest (Accept), reports progress on an active quest, or lets you
-  // turn a completed quest in for its reward.
+  // Dialogue — the NPC conversation overlay. Lists every quest this NPC is
+  // involved in: active main missions + side quests (with live progress and a
+  // Turn-in when ready), plus anything they can offer right now (the current
+  // main mission if they're its giver, and their next side quest). The same
+  // overlay doubles as the narrator for story BEATS (intro / chapter / ending)
+  // via showBeat().
   // =========================================================================
   const Dialogue = {
-    open: false, npc: null, player: null, state: null,
+    open: false, beat: false, npc: null, player: null, state: null,
     init(state, player) { this.state = state; this.player = player; },
 
     talk(npc) {
       closeOtherMenus(this);
-      this.npc = npc; this.open = true; uiPaused = true;
+      this.beat = false; this.npc = npc; this.open = true; uiPaused = true;
       dom.dialogue.classList.remove("hidden");
       Quests.onTalk(npc.data.id);          // satisfies "talk to X" objectives
       this.render();
     },
     close() {
       if (!this.open) return;
-      this.open = false; uiPaused = false; this.npc = null;
+      this.open = false; this.beat = false; uiPaused = false; this.npc = null;
       dom.dialogue.classList.add("hidden");
+    },
+
+    // Narrated story beat (no NPC) — reuses the dialogue overlay.
+    showBeat({ name, html, button }) {
+      closeOtherMenus(this);
+      this.beat = true; this.npc = null; this.open = true; uiPaused = true;
+      dom.dialogue.classList.remove("hidden");
+      dom.dlgName.textContent = name || "📜";
+      dom.dlgText.innerHTML = html || "";
+      dom.dlgActions.innerHTML = "";
+      const b = document.createElement("button");
+      b.className = "start-btn"; b.textContent = button || "Continue ▶";
+      b.addEventListener("click", () => this.close());
+      dom.dlgActions.appendChild(b);
     },
 
     render() {
       if (!this.open || !this.npc) return;
-      const npc = this.npc.data;
+      const npc = this.npc.data, id = npc.id;
       dom.dlgName.textContent = `${npc.icon} ${npc.name}`;
       dom.dlgActions.innerHTML = "";
       const addBtn = (label, cls, fn) => {
         const b = document.createElement("button"); b.className = "start-btn " + cls; b.textContent = label;
         b.addEventListener("click", fn); dom.dlgActions.appendChild(b);
       };
-      const activeId = Quests.activeForNpc(npc.id);
-      const next = Quests.nextForNpc(npc.id);
-      if (activeId && Quests.isComplete(QUEST_BY_ID[activeId])) {
-        const q = QUEST_BY_ID[activeId];
-        dom.dlgText.innerHTML = `<p>"${q.title}" — done, and done well!</p><p class="dlg-reward">Reward: ${rewardText(q.reward)}</p>`;
-        addBtn("Turn in ✅", "", () => { Quests.turnIn(activeId); this.render(); });
-      } else if (activeId) {
-        const q = QUEST_BY_ID[activeId];
-        dom.dlgText.innerHTML = `<p>"${q.story}"</p><p class="dlg-obj">${Quests.objectiveText(q)}</p>`;
-        addBtn("Onward", "secondary-btn", () => this.close());
-      } else if (next) {
-        dom.dlgText.innerHTML = `<p>${npc.intro}</p><p class="dlg-quest">📜 <b>${next.title}</b> — ${next.story}</p>` +
-          `<p class="dlg-obj">${Quests.objectiveText(next)}</p><p class="dlg-reward">Reward: ${rewardText(next.reward)}</p>`;
-        addBtn("Accept 📜", "", () => { Quests.accept(next.id); this.render(); });
-        addBtn("Maybe later", "secondary-btn", () => this.close());
-      } else {
-        dom.dlgText.innerHTML = `<p>Thank you, hero. The vale is in your debt. Raise that castle!</p>`;
-        addBtn("Farewell", "secondary-btn", () => this.close());
+      // Active quests from this NPC (main missions first), plus what they offer.
+      const activeIds = Quests.activeIdsForNpc(id)
+        .sort((a, b) => (QUEST_BY_ID[a].line === "main" ? 0 : 1) - (QUEST_BY_ID[b].line === "main" ? 0 : 1));
+      const mainOffer = Story.offerMain(id);
+      const sideOffer = Story.offerSide(id);
+      const anyComplete = activeIds.some((qid) => Quests.isComplete(QUEST_BY_ID[qid]));
+
+      // Greeting line — context-aware.
+      let greet;
+      if (anyComplete) greet = "Back already? Let's settle up.";
+      else if (activeIds.length) greet = "Still on the job? Luck go with you.";
+      else if (mainOffer || sideOffer) greet = npc.intro;
+      else greet = "Thank you, hero — the vale owes you much.";
+      const lines = [`<p>${greet}</p>`];
+
+      const tag = (q) => (q.line === "main" ? "📜 Mission" : "🔸 Side quest");
+      for (const qid of activeIds) {
+        const q = QUEST_BY_ID[qid], done = Quests.isComplete(q);
+        lines.push(`<p class="dlg-quest">${tag(q)}: <b>${q.title}</b></p>` +
+          `<p class="dlg-obj">${Quests.objectiveText(q)}${done ? " — ready to turn in!" : ""}</p>`);
       }
+      if (mainOffer) {
+        lines.push(`<p class="dlg-quest">📜 New mission: <b>${mainOffer.title}</b></p>` +
+          `<p>"${mainOffer.story}"</p><p class="dlg-obj">${Quests.objectiveText(mainOffer)}</p>` +
+          `<p class="dlg-reward">Reward: ${rewardText(mainOffer.reward)}</p>`);
+      }
+      if (sideOffer) {
+        const reps = Story.sideTurnIns[sideOffer.id] || 0;
+        lines.push(`<p class="dlg-quest">🔸 Side quest: <b>${sideOffer.title}</b>${sideOffer.repeatable ? " (repeatable)" : ""}${reps ? ` · done ×${reps}` : ""}</p>` +
+          `<p>"${sideOffer.story}"</p><p class="dlg-obj">${Quests.objectiveText(sideOffer)}</p>` +
+          `<p class="dlg-reward">Reward: ${rewardText(sideOffer.reward)}</p>`);
+      }
+      dom.dlgText.innerHTML = lines.join("");
+
+      // Buttons: turn-ins first (most useful), then accepts, then close.
+      for (const qid of activeIds) {
+        if (Quests.isComplete(QUEST_BY_ID[qid]))
+          addBtn(`Turn in: ${QUEST_BY_ID[qid].title} ✅`, "", () => { Quests.turnIn(qid); this.render(); });
+      }
+      if (mainOffer) addBtn(`Accept: ${mainOffer.title} 📜`, "", () => { Quests.accept(mainOffer.id); this.render(); });
+      if (sideOffer) addBtn(`Accept: ${sideOffer.title} 🔸`, "secondary-btn", () => { Quests.accept(sideOffer.id); this.render(); });
+      addBtn(activeIds.length || mainOffer || sideOffer ? "Close" : "Farewell", "secondary-btn", () => this.close());
     },
   };
 
@@ -4386,26 +4667,77 @@
   };
 
   // =========================================================================
-  // QuestLog — a simple journal of active + completed quests (opened from HUD).
+  // QuestLog — the chaptered journal (opened from the HUD). The MAIN STORY is
+  // shown as ordered chapters with the current chapter expanded into its
+  // missions + the live guided step; SIDE QUESTS are listed in their own clearly
+  // separated section so the two never blur together.
   // =========================================================================
   const QuestLog = {
     open: false,
     toggle() { if (this.open) this.close(); else this.openLog(); },
     openLog() { closeOtherMenus(this); this.open = true; uiPaused = true; dom.questLog.classList.remove("hidden"); this.render(); },
     close() { if (!this.open) return; this.open = false; uiPaused = false; dom.questLog.classList.add("hidden"); },
+
+    // One row for a main-story mission, styled by its status.
+    _missionRow(m) {
+      const resolved = Story.resolved(m.id);
+      const active = Quests.isActive(m.id);
+      const complete = active && Quests.isComplete(m);
+      const isCurrent = Story.currentMissionId() === m.id;
+      let cls = "", icon, body = "";
+      if (resolved) { icon = "✅"; cls = "mdone"; }
+      else if (active) {
+        icon = complete ? "✓" : "📜"; cls = complete ? "mcurrent" : "";
+        body = `<div class="qm-obj">${Quests.objectiveText(m)}${complete && m.npc ? ` — return to ${Story.giverLabel(m.npc)}` : ""}</div>`;
+      } else if (isCurrent) {
+        icon = "❗"; cls = "mcurrent";
+        body = `<div class="qm-obj">${m.npc ? `Speak with ${Story.giverLabel(m.npc)} at ${Story.npcPlace(m.npc)}` : Quests.objectiveText(m)}</div>`;
+      } else { icon = "🔒"; cls = "mlocked"; }
+      return `<div class="quest-mission ${cls}"><span class="qm-title">${icon} ${m.title}</span>${body}</div>`;
+    },
+
     render() {
       if (!this.open) return;
       const rows = [];
-      if (Quests.active.length === 0) rows.push(`<div class="shop-empty">No active quests. Seek out the ❗ NPCs across the land.</div>`);
-      for (const id of Quests.active) {
-        const q = QUEST_BY_ID[id]; const done = Quests.isComplete(q);
-        const npc = NPC_BY_ID[q.npc];
-        rows.push(`<div class="quest-row ${done ? "qdone" : ""}"><div class="qr-title">📜 ${q.title} ${done ? "✓" : ""}</div>` +
-          `<div class="qr-obj">${Quests.objectiveText(q)}</div><div class="qr-from">from ${npc.icon} ${npc.name} · reward ${rewardText(q.reward)}</div></div>`);
+      const g = Story.guidance();
+      const curChId = Story.currentChapterId();
+
+      // ---- Main story ----
+      rows.push(`<div class="quest-sec">📜 Main Story</div>`);
+      rows.push(g
+        ? `<div class="quest-now"><b>Chapter ${g.chapterIndex}: ${g.chapterTitle}</b><br>${g.text}</div>`
+        : `<div class="quest-now cdone">The castle stands and the Ancient Dragon is slain — the vale is saved! 🏰🐉</div>`);
+      for (const ch of STORY.chapters) {
+        const prog = Story.chapterProgress(ch.id);
+        const allDone = prog.done >= prog.total;
+        const isCurrent = ch.id === curChId && !Story.isComplete();
+        const icon = allDone ? "✅" : isCurrent ? "▶" : "🔒";
+        const state = allDone ? "cdone" : isCurrent ? "current" : "clocked";
+        rows.push(`<div class="quest-chap ${state}">${icon} Chapter ${Story.chapterIndex(ch.id)}: ${ch.title} <span class="cprog">${prog.done}/${prog.total}</span></div>`);
+        if (isCurrent) {
+          rows.push(`<div class="chap-blurb">${ch.blurb}</div>`);
+          for (const m of missionsOfChapter(ch.id)) rows.push(this._missionRow(m));
+        }
       }
-      if (Quests.completed.length) {
-        rows.push(`<div class="quest-sep">Completed (${Quests.completed.length})</div>`);
-        for (const id of Quests.completed) { const q = QUEST_BY_ID[id]; rows.push(`<div class="quest-row qcomplete">✅ ${q.title}</div>`); }
+
+      // ---- Side quests (clearly separated) ----
+      const sideActive = Quests.active.filter((id) => QUEST_BY_ID[id] && QUEST_BY_ID[id].line === "side");
+      const sideDone = SIDE_IDS.filter((id) => Quests.isDone(id) || Story.sideTurnIns[id]);
+      rows.push(`<div class="quest-sec">🔸 Side Quests</div>`);
+      if (!sideActive.length && !sideDone.length)
+        rows.push(`<div class="shop-empty">None yet — visit the ❗ folk for optional bounties &amp; errands.</div>`);
+      for (const id of sideActive) {
+        const q = QUEST_BY_ID[id], done = Quests.isComplete(q), npc = NPC_BY_ID[q.npc] || {};
+        rows.push(`<div class="quest-row ${done ? "qdone" : ""}"><div class="qr-title">🔸 ${q.title} ${done ? "✓" : ""}</div>` +
+          `<div class="qr-obj">${Quests.objectiveText(q)}</div>` +
+          `<div class="qr-from">from ${npc.icon} ${npc.name}${done ? " · return to turn in" : ""} · reward ${rewardText(q.reward)}</div></div>`);
+      }
+      if (sideDone.length) {
+        rows.push(`<div class="quest-sep">Completed side quests</div>`);
+        for (const id of sideDone) {
+          const q = QUEST_BY_ID[id], reps = Story.sideTurnIns[id] || 0;
+          rows.push(`<div class="quest-row qcomplete">✅ ${q.title}${reps > 1 ? ` ×${reps}` : ""}</div>`);
+        }
       }
       dom.questLogItems.innerHTML = rows.join("");
     },
@@ -4510,6 +4842,7 @@
       if (this._spawnedBoss && !this.bossDefeated && !this.state.boss) {
         this.bossDefeated = true;
         if (this.state.bossesCleared) this.state.bossesCleared[this.zone.id] = true;
+        Quests.onBossCleared(this.zone.id); // advance any "defeat the lair boss" mission
       }
 
       if (this._ambient() < this.target) {
@@ -4698,6 +5031,7 @@
     Inventory.init(state, player);
     Anvil.init(state, player);
     Quests.init(state, player);
+    Story.init(state, player);
     Dialogue.init(state, player);
     Crafting.init(state, player);
     CastleUI.init(state, player);
@@ -5126,15 +5460,30 @@
   }
 
   // ---- The small "current quest" tracker (top-left, under the HUD chips) ----
-  function updateQuestTracker(q) {
+  // The small HUD tracker is the player's guide: it always shows the live MAIN
+  // step (which NPC to see, what to do, where to turn it in) so the campaign can
+  // be followed end-to-end with no guesswork. Once the main line is finished it
+  // falls back to any tracked side quest.
+  function updateQuestTracker() {
     if (!dom.questTracker) return;
-    const quest = q && q.tracked ? q.tracked() : null;
+    const g = Story.guidance();
+    if (g) {
+      const cls = g.state === "turnin" ? "qt-done" : g.state === "accept" ? "qt-go" : "";
+      dom.questTracker.classList.remove("hidden");
+      dom.questTracker.innerHTML =
+        `<div class="qt-chap">Chapter ${g.chapterIndex} · ${g.chapterTitle}</div>` +
+        `<div class="qt-title">📜 ${g.mission.title}</div>` +
+        `<div class="qt-obj ${cls}">${g.text}</div>`;
+      return;
+    }
+    // Campaign complete — surface an active side quest if there is one, else hide.
+    const quest = Quests.tracked ? Quests.tracked() : null;
     if (!quest) { dom.questTracker.classList.add("hidden"); dom.questTracker.innerHTML = ""; return; }
-    const done = q.isComplete(quest);
+    const done = Quests.isComplete(quest);
     dom.questTracker.classList.remove("hidden");
     dom.questTracker.innerHTML =
-      `<div class="qt-title">📜 ${quest.title}${done ? ' <span class="qt-done">✓ return to turn in</span>' : ""}</div>` +
-      `<div class="qt-obj">${q.objectiveText(quest)}</div>`;
+      `<div class="qt-title">🔸 ${quest.title}${done ? ' <span class="qt-done">✓ return to turn in</span>' : ""}</div>` +
+      `<div class="qt-obj">${Quests.objectiveText(quest)}</div>`;
   }
 
   // ---- Day/night clock + weather chips (top bar) ----
@@ -5233,8 +5582,11 @@
     state.won = true; state.over = true;
     dom.prompt.classList.add("hidden");
     hideBossBar();
+    Story.onWin();                         // mark the finale resolved
+    updateQuestTracker();                  // campaign complete → clear the tracker
     if (dom.winScore) dom.winScore.textContent = state.score;
     if (dom.winWave) dom.winWave.textContent = state.totalKills;
+    if (dom.winStory) dom.winStory.innerHTML = `<b>${STORY.ending.title}</b><br>${STORY.ending.text}`; // ending framing
     Sfx.play("artifact");
     setTimeout(() => { if (dom.win) dom.win.classList.remove("hidden"); }, 800);
   }
@@ -5248,7 +5600,7 @@
   // monsters, the boss, artifacts and dropped coins, plus the wave clock) is
   // serialized explicitly so the run resumes exactly where it left off.
   // =========================================================================
-  const SAVE_VERSION = 5;
+  const SAVE_VERSION = 6;
   const PENDING_LOAD_KEY = "gg3d_pending_load"; // sessionStorage hand-off across reload
   const AUTOSTART_KEY = "gg3d_autostart";       // restart -> skip the start screen
 
@@ -5296,15 +5648,18 @@
         materials: Object.assign({}, player.materials),
         relics: player.relics.slice(),
       },
-      // Story progression: quests, the castle build state, day/night + weather.
+      // Story progression: quests, the campaign-flow state, the castle build
+      // state, day/night + weather.
       totalKills: state.totalKills,
       won: !!state.won,
       quests: {
         active: Quests.active.slice(),
         completed: Quests.completed.slice(),
         acceptKills: Object.assign({}, Quests.acceptKills),
-        flags: Object.assign({}, Quests.flags),
+        reached: Object.assign({}, Quests.reached),
+        talked: Object.assign({}, Quests.talked),
       },
+      story: Story.serialize(),
       castle: state.castle ? state.castle.built.slice() : (state.castleBuilt || []),
       time: round(DayNight.t),
       weather: Weather.state,
@@ -5388,15 +5743,18 @@
     updateMaterialsHud(player);
     updateRelicHud(player);
 
-    // Story progression: kills, quests, win flag.
+    // Story progression: kills, quests, the campaign-flow state, win flag.
+    // Unknown ids (e.g. from a pre-campaign save) drop out, defaulting cleanly.
     state.totalKills = d.totalKills | 0;
     state.won = !!d.won;
     const q = d.quests || {};
     Quests.active = (q.active || []).filter((id) => QUEST_BY_ID[id]);
     Quests.completed = (q.completed || []).filter((id) => QUEST_BY_ID[id]);
     Quests.acceptKills = Object.assign({}, q.acceptKills || {});
-    Quests.flags = Object.assign({}, q.flags || {});
-    updateQuestTracker(Quests);
+    Quests.reached = Object.assign({}, q.reached || {});
+    Quests.talked = Object.assign({}, q.talked || {});
+    Story.restore(d.story);
+    updateQuestTracker();
 
     // Stream to the saved zone. If we're already there (the hub on boot), just
     // restore the castle build + re-wake the dragon if it was complete.
@@ -5435,7 +5793,7 @@
       const a = document.createElement("a");
       const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
       a.href = url;
-      a.download = `good-game-3d-wave${data.wave.number}-${stamp}.json`;
+      a.download = `good-game-3d-${data.zone || "meadow"}-${data.score | 0}pts-${stamp}.json`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -5542,13 +5900,17 @@
     dom.toast.textContent = msg; dom.toast.classList.add("show");
     clearTimeout(toastTimer); toastTimer = setTimeout(() => dom.toast.classList.remove("show"), 2200);
   }
-  function startGame() {
+  function startGame(loaded) {
     dom.overlay.classList.add("hidden"); dom.hud.classList.remove("hidden");
     if (isTouch) dom.touch.classList.remove("hidden");
     dom.canvas.focus();
     gameStarted = true;
     Music.start(); // browsers only allow audio after a user gesture (the click)
     Sfx.unlock();  // same gesture unlocks the sound-effect synth
+    // Fresh start → frame the adventure with the opening beat. Skipped when
+    // restoring a save (mid-story) and under the headless harness (which drives
+    // input directly and must not be blocked by the modal).
+    if (!loaded && !(typeof window !== "undefined" && window.__GG_TEST__)) Story.maybeShowIntro();
   }
 
   // =========================================================================
@@ -5802,7 +6164,7 @@
         dom.loadHint.textContent = "Ready!";
         dom.startBtn.disabled = false;
         if (pendingLoad) {
-          try { applySave(pendingLoad); startGame(); toast("Progress loaded! 🎮"); }
+          try { applySave(pendingLoad); startGame(true); toast("Progress loaded! 🎮"); }
           catch (e) { console.error(e); showFatal("Couldn't load save: " + e.message); }
         } else if (wantAutostart) {
           startGame();
@@ -5938,6 +6300,8 @@
       MONSTER_ABILITIES, RESOURCE_KINDS, abilitiesForWave,
       Quests, Dialogue, Crafting, CastleUI, QuestLog, DayNight, Weather,
       ResourceNode, QuestGiver, CastleSite, Dragon, Burst,
+      // ---- Main story campaign (Task 2) ----
+      Story, STORY, MISSIONS, SIDE_QUESTS, MAIN_IDS, SIDE_IDS, CHAPTER_BY_ID, missionsOfChapter,
       // ---- RPG world / zones ----
       ZONES, ZONE_BY_ID, HUB_ZONE, SpawnDirector, ZoneManager, buildWorld,
       setupZoneContent, teardownZone,
@@ -5962,22 +6326,23 @@
    *   PuzzleSystem    - levers/plates are Interactables flipping state flags
    *                     that gate a door mesh; reuses InteractionSystem.
    *
-   * SHIPPED THIS RELEASE — an RPG WORLD OF STREAMED ZONES replacing timed waves:
-   *   - ZONES + buildWorld(scene, zone): the map is a table of zones (a hub + wild
-   *     lands + boss lairs), each themed, with its own scenery spec, monster spawn
-   *     table and optional boss. buildWorld returns the world contract + portals
-   *     + a dispose() that streams the zone back out.
-   *   - ZoneManager: portal-driven travel — fade veil, tear down the old zone,
-   *     dispose its scenery, build + populate the new zone, place the player at the
-   *     return portal. Never shows a frozen frame (desktop or mobile).
-   *   - SpawnDirector: per-zone location spawns that ROAM (Monster._wander) and
-   *     RESPAWN after a delay up to the zone cap; boss-lair zones spawn a guardian
-   *     that stays cleared for the run (state.bossesCleared).
-   *   - setupZoneContent: hub gets merchant/blacksmith/NPCs/resources/castle/
-   *     artifacts; wild lands get themed resource nodes.
-   *   - Save/load is zone-aware (v5): seed + zone + cleared lairs + player +
-   *     progression; monsters regenerate from each zone's spawn table on load.
-   * Earlier releases shipped the STORY/ADVENTURE layer (Quests / QuestGiver /
+   * SHIPPED THIS RELEASE — a STRUCTURED MAIN STORY with missions + side quests:
+   *   - STORY / MISSIONS / SIDE_QUESTS: a declarative campaign — 5 ordered chapters
+   *     of 16 main missions that march the player across the lands to raise the
+   *     castle and slay the dragon, plus a pool of optional side quests (some
+   *     repeatable bounties). All objective types (hunt/gather/reach/talk and the
+   *     new defeat_boss/build/defeat_dragon) reuse the Quests engine.
+   *   - Story: the campaign meta — strict main-line ordering/unlocks, the single
+   *     "current step" that drives the guided HUD tracker (no guesswork), which
+   *     quest each NPC may offer, and the intro / chapter / ending beats.
+   *   - Dialogue lists every quest a giver is involved in (active + offerable) and
+   *     doubles as the narrator (showBeat); QuestLog is chaptered (main vs side);
+   *     the win screen carries the ending framing.
+   *   - Save/load v6: + story flags (intro seen, chapter beats, repeatable tallies)
+   *     and reach/talk objective sets; per-quest state round-trips as before.
+   * Earlier releases shipped an RPG WORLD OF STREAMED ZONES (ZONES + buildWorld +
+   * ZoneManager portal travel + SpawnDirector roaming/respawn + boss lairs, zone-
+   * aware save/load), the STORY/ADVENTURE layer (Quests / QuestGiver /
    * Dialogue, ResourceNode + Crafting, CastleSite + Dragon, DayNight + Weather),
    * the GEAR system (ITEM_DB / Inventory / Shop / Anvil), the six BOSS archetypes,
    * gravity-bound Projectile/Hazard physics, the potion belt, impact bursts and

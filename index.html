@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="description" content="Good Game 3D — a third-person browser action-RPG adventure. Take quests, gather and craft, fight living sweets and bosses, raise a castle from five relics, and slay the dragon to win." />
   <meta name="theme-color" content="#0b0f1a" />
-  <link rel="stylesheet" href="css/style.css?v=12" />
+  <link rel="stylesheet" href="css/style.css?v=13" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
@@ -20,8 +20,8 @@
       <p class="tagline">Run with Lily across a living island of <b>separate lands</b> — meadow vale,
         whispering wood, salt shore, frostpeak trail and the boss lairs. <b>Roaming monsters</b>
         guard each place and <b>respawn</b> over time; <b>travel</b> between lands through paths,
-        bridges and cave mouths. Take <b>quests</b>, <b>gather &amp; craft</b>, raise a <b>castle</b>
-        from five relics, then slay the <b>dragon</b> to win!</p>
+        bridges and cave mouths. Follow the <b>chaptered main quest</b> (with optional <b>side quests</b>),
+        <b>gather &amp; craft</b>, raise a <b>castle</b> from five relics, then slay the <b>dragon</b> to win!</p>
       <ul class="controls">
         <li><b>Move</b><span>WASD / Arrows · or the on-screen stick</span></li>
         <li><b>Attack</b><span>Space / F · or the ✨ button</span></li>
@@ -105,6 +105,7 @@
       <p class="tagline">The castle stands and the <b>Ancient Dragon</b> is slain! Meadowgate is
         saved. You finished with <b><span id="winScore">0</span></b> points after felling
         <b><span id="winWave">0</span></b> monsters.</p>
+      <p id="winStory" class="win-story"></p>
       <button id="winReplayBtn" class="start-btn">Play Again</button>
     </div>
   </div>
@@ -221,7 +222,7 @@
     <div class="shop-panel">
       <button id="questLogClose" class="shop-close" title="Close" aria-label="Close quest log">×</button>
       <h2>📜 Quest Log</h2>
-      <p class="shop-tagline">Seek out the ❗ NPCs at each landmark. Complete their tasks for coins, gear and the castle relics.</p>
+      <p class="shop-tagline">Your <b>main story</b> runs in chapters across the lands — follow the tracker from one ❗ giver to the next. <b>Side quests</b> are optional bounties &amp; errands, listed separately.</p>
       <div id="questLogItems" class="quest-log-items"></div>
       <button id="questLogDone" class="start-btn shop-done">Done</button>
     </div>
@@ -233,6 +234,6 @@
 
   <canvas id="renderCanvas"></canvas>
 
-  <script src="js/game.js?v=12"></script>
+  <script src="js/game.js?v=13"></script>
 </body>
 </html>
