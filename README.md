@@ -16,10 +16,14 @@ and loot **gear** from a merchant, bosses and quests.
 ## The story
 
 Meadowgate is besieged by living sweets. An old castle once warded the vale — help the
-villagers raise it again. Collect **coins** to fund construction and roam the **map** to find
-the five castle **relics** (Foundation Stone, Rampart Runes, Tower Crystal, Golden Gate Key and
-the Dragon Sigil), won from **NPC quests** and far-flung **landmarks**. Build all five parts of
-the castle and the **dragon** appears for the final battle. Defeat it and you **win**.
+villagers raise it again. A **structured main story** runs in **five chapters** of ordered
+**missions** that guide you, step by step, across the lands: cull the sweets, recover the five
+castle **relics** (Foundation Stone, Rampart Runes, Tower Crystal, Golden Gate Key and the
+Dragon Sigil), clear the two **lair bosses**, **build** each part of the castle in turn — and
+finally face the **Ancient Dragon** that wakes beneath the keep. Follow the on-screen **objective
+tracker** and you'll never be lost: each step says exactly which NPC to see, what to do, and where
+to turn it in. Optional **side quests** (bounties and errands, some repeatable) give extra coins
+and gear without ever blocking the main line. Slay the dragon to **win**.
 
 ▶️ **Play:** once GitHub Pages is enabled, the game is live at
 `https://<owner>.github.io/gg-3d/`
@@ -45,13 +49,23 @@ the castle and the **dragon** appears for the final battle. Defeat it and you **
 
 ## How to play — the adventure
 
-- **Quests & NPCs:** five **story NPCs** stand at the island's landmarks (the village, the
-  grove, the shore, the mountain pass and the ruins), each marked with a floating **❗ / ✓**.
-  Walk up + press **E** to **talk**: accept a quest, check progress, or turn a finished one in.
-  Quest objectives are **hunt** (defeat sweets), **gather** (collect a material), **reach** a
-  place, or **talk** to someone; rewards mix **coins**, **gear** and the all-important castle
-  **relics**. Track everything in the **quest log** (`J` / 📜). The HUD shows a live tracker for
-  your current quest.
+- **The main story (missions & chapters):** the campaign is a **guided main line** — five
+  ordered **chapters** of **missions** that march you to the castle→dragon finale. The HUD
+  **objective tracker** (top-left) always shows the **current step**: which **❗ NPC** to see to
+  accept it, the live **objective** while you're on it, and a **✓ return to turn in** when it's
+  done — so a new player can follow the whole story with **no guesswork**. An **intro** sets the
+  scene on a fresh game and an **ending** plays on victory.
+- **Quests & NPCs:** five **story NPCs** stand at the island's landmarks (the village, the grove,
+  the shore, the mountain pass and the ruins), each marked with a floating **❗ / ✓**. Walk up +
+  press **E** to **talk**: accept a mission or side quest, check progress, or turn a finished one
+  in. Objectives are **hunt** (defeat sweets), **gather** (collect a material), **reach** a place,
+  **talk** to someone, **defeat a lair boss**, **build** a castle part, or — for the finale —
+  **slay the dragon**; rewards mix **coins**, **gear** and the castle **relics**.
+- **Side quests:** optional **bounties and errands** from the same NPCs, clearly **separated from
+  the main line** in the quest log. Some are **repeatable** (steady-coin bounties), others
+  one-shot — take them in any order; they never block the story. Track everything in the
+  **chaptered quest log** (`J` / 📜), which groups the **Main Story** (by chapter) apart from your
+  **Side Quests**.
 - **Gathering & crafting:** the world is dotted with **resource nodes** — chop **trees** for
   wood, mine **rock** and **crystal**, gather **herbs**, cut **fibers** and collect **water** at
   the shore (walk up + **E**; nodes respawn after a cooldown). Open the **crafting bench**
@@ -154,11 +168,12 @@ the castle and the **dragon** appears for the final battle. Defeat it and you **
   menu lets you **Resume**, **Save Progress**, **Restart**, or **Exit to Menu** — the
   last two ask for confirmation so a stray tap can't wipe your run.
 - **Save & load:** **Save Progress** downloads a small `.json` save file to your device
-  capturing *everything* needed to resume — the procedural environment (via its world
-  seed), your score, money, perks/upgrades, weapon, health, every live sweet and boss,
-  the dropped coins and artifacts, and the wave clock. Back on the **start screen**,
-  **Load Progress** reads a save file from your device and drops you right back where you
-  left off — even on a different device or browser.
+  capturing *everything* needed to resume — the procedural environment (via its world seed),
+  the **land you're in**, your score, money, **gear & inventory**, health, **materials & relics**,
+  **story progress** (current chapter, completed missions, reach/talk objectives, side-quest
+  tallies), the **castle build state**, cleared **lair bosses**, and the **time/weather**. Back on
+  the **start screen**, **Load Progress** reads a save file from your device and drops you right
+  back where you left off — even on a different device or browser.
 
 ## Why Babylon.js?
 
@@ -198,11 +213,14 @@ gameplay code can run in Node — verifying collision, the river barrier, the
 **gear economy** (buy / equip / dual-wield / sell), **projectile physics** (gravity arc
 + finite life), the seeded RNG, the **save/load round-trip** and the **pause menu** — plus
 the **adventure systems**: **monster abilities** + **knockback** + **bomber** explosions,
-**gathering & crafting**, the **quest** flow (accept / progress / turn-in / rewards), the
-**day/night + weather** systems, **impact bursts**, the **castle → dragon → victory** path,
-and the new **RPG zones** suite: per-zone **location spawns**, monster **roaming**, timed
-**respawns**, **lair boss** spawn/clear/persist, and the streamed **zone travel** (teardown
-+ rebuild + player placement) — all without a browser:
+**gathering & crafting**, the **quest** engine (every objective type: hunt / gather / reach /
+talk / **defeat-boss** / **build** / **defeat-dragon** — accept / progress / turn-in / rewards),
+the **day/night + weather** systems, **impact bursts**, the **castle → dragon → victory** path,
+the **RPG zones** suite (per-zone **location spawns**, monster **roaming**, timed **respawns**,
+**lair boss** spawn/clear/persist, streamed **zone travel**), and the new **main-story campaign**
+suite: strict **mission ordering/unlocks**, the **guided tracker**, **main-vs-side** separation,
+**repeatable** side quests, the **finale** enablement, the UI render paths, and the **story-state
+save/load round-trip** — all without a browser:
 
 ```bash
 node test/harness.js
@@ -256,9 +274,18 @@ node test/harness.js
   (its monsters regenerate from the spawn table). Stats are recomputed from the restored gear.
 - **`Pause`** — the in-game pause menu (Resume / Save / Restart / Exit) that freezes the
   simulation, with a confirmation guard on the destructive actions.
-- **`Quests` / `QuestGiver` / `Dialogue`** — the story spine: NPCs (`NPC_DATA`) offer quest
-  chains (`hunt` / `gather` / `reach` / `talk`) whose rewards (coins / gear / **relics**) are
-  paid out on turn-in; the `Dialogue` overlay drives accept/progress/turn-in.
+- **`STORY` / `MISSIONS` / `SIDE_QUESTS` / `Story`** — the **structured main campaign**: a
+  declarative table of five ordered **chapters** of **missions** (plus an optional **side-quest**
+  pool), and the `Story` controller that gates the main line in order, computes the single
+  **guided step** for the HUD tracker, decides which quest each NPC may offer, and fires the
+  **intro / chapter / ending** beats. Campaign-flow state (intro seen, chapter beats, repeatable
+  tallies) lives here; per-quest state lives in `Quests`.
+- **`Quests` / `QuestGiver` / `Dialogue`** — the per-quest **objective engine** shared by the
+  main missions and side quests: objectives are `hunt` / `gather` / `reach` / `talk` /
+  `defeat_boss` / `build` / `defeat_dragon`, with rewards (coins / gear / **relics**) paid on
+  turn-in. The `Dialogue` overlay lists every quest a giver is involved in (accept / progress /
+  turn-in) and doubles as the narrator for story **beats**; `QuestGiver` markers light up in
+  campaign order.
 - **`ResourceNode` / materials / `CRAFT_RECIPES` / `Crafting`** — harvestable world nodes feed a
   materials pouch (`player.materials`); the crafting bench spends them on potions + gear.
 - **`CastleSite` / `CastleUI` / `Dragon`** — the five-part castle build (relic + coins per part)
@@ -317,6 +344,7 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 - [x] In-game pause menu (resume / save / restart / exit, with confirmations)
 - [x] Save progress to a file & load it back (seeded world + full game state)
 - [x] **Story mode**: collect coins + five relics, raise the castle, then beat the **dragon** to win
+- [x] **Structured main story**: five ordered **chapters** of **missions** (hunt / gather / reach / talk / defeat-boss / build / dragon) with a **guided objective tracker**, an **intro + ending**, and a separate pool of optional **side quests** (some repeatable) — `STORY` / `MISSIONS` / `SIDE_QUESTS` / `Story`
 - [x] **Quest-giving NPCs** with dialogue, story chains, and coin / gear / relic rewards
 - [x] **Crafting + gathering**: chop trees, mine rock/crystal, gather herbs/fibers, collect water → craft potions & gear
 - [x] **Monster abilities** (chaser / runner / brute / jumper / shooter / bomber) that vary by land

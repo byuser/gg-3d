@@ -117,7 +117,11 @@ A task is **done** only when **all** of these are true:
 > at Task 2.
 
 ### Task 2 — Main story line with missions + side quests
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-21 · Shipped a declarative `STORY`/`MISSIONS`/`SIDE_QUESTS`
+  campaign (5 chapters, 16 ordered main missions + 6 side quests) over the existing `Quests`
+  engine, with new `defeat_boss`/`build`/`defeat_dragon` objective types, a `Story` controller
+  for ordered unlocks + a guided HUD tracker (no guesswork), a chaptered quest log (main vs
+  side), intro/chapter/ending beats, v6 save/load of story state, and a new harness suite [27].
 - **Depends on:** none (builds on the existing `Quests` system).
 - **Goal.** Turn the loose quest chains into a **structured main story** with
   ordered **chapters/missions** that guide the player across the zones to the
@@ -388,4 +392,10 @@ and note it; if it's expensive or irreversible, ask me first.
 
 - _(unreleased)_ Task 1 — RPG world + loadable zones: **shipped** (see git history
   `RPG zones (1–5/n)`), deployed to Pages.
-- Add an entry here when you complete a task (date · task · one line).
+- 2026-06-21 · **Task 2 — Main story line with missions + side quests**: a structured,
+  chaptered main campaign (`STORY`/`MISSIONS`/`SIDE_QUESTS` + the `Story` controller) that
+  guides the player from the vale to the dragon with no guesswork — ordered mission unlocks,
+  a live objective tracker, new `defeat_boss`/`build`/`defeat_dragon` objectives, a chaptered
+  quest log separating main vs side, optional (some repeatable) side quests, intro/chapter/
+  ending beats, and v6 save/load of story state (round-tripped in tests). Also fixed a latent
+  save-file crash (the download filename referenced a non-existent `wave` field).
