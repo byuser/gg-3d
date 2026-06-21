@@ -575,7 +575,7 @@
       ],
     },
     {
-      id: "caverns", name: "Crystal Caverns", icon: "💎", level: 5, radius: 56,
+      id: "caverns", name: "Crystal Caverns", icon: "💎", level: 5, radius: 56, indoor: true,
       theme: { sky: "#160d28", fog: "#1a1030", fogDensity: 0.03, ground: "#2a2140",
                hemi: "#2a1f4a", sun: "#9a7aff", sunDir: [-0.2, -1, -0.3] },
       scenery: { rocks: 70, crystals: 40, pillars: 18 },
@@ -587,7 +587,7 @@
       ],
     },
     {
-      id: "thicket", name: "Bramblewood Thicket", icon: "🐉", level: 6, radius: 54,
+      id: "thicket", name: "Bramblewood Thicket", icon: "🐉", level: 6, radius: 54, indoor: true,
       theme: { sky: "#2a1c10", fog: "#21180e", fogDensity: 0.032, ground: "#2c3a1c",
                hemi: "#1c2a12", sun: "#c8b070", sunDir: [-0.3, -1, -0.55] },
       scenery: { trees: 90, rocks: 20, bushes: 60, toadstools: 30 },
@@ -5253,10 +5253,9 @@
   function gameOver(state) {
     state.over = true;
     dom.prompt.classList.add("hidden");
-    dom.wavePanel.classList.add("hidden");
     hideBossBar();
     dom.finalScore.textContent = state.score;
-    dom.finalWave.textContent = state.wave;
+    if (dom.finalWave) dom.finalWave.textContent = (state.world && state.world.zone ? state.world.zone.name : "—");
     setTimeout(() => dom.over.classList.remove("hidden"), 600);
   }
 
@@ -5266,10 +5265,9 @@
     if (state.won) return;
     state.won = true; state.over = true;
     dom.prompt.classList.add("hidden");
-    dom.wavePanel.classList.add("hidden");
     hideBossBar();
     if (dom.winScore) dom.winScore.textContent = state.score;
-    if (dom.winWave) dom.winWave.textContent = state.wave;
+    if (dom.winWave) dom.winWave.textContent = state.totalKills;
     Sfx.play("artifact");
     setTimeout(() => { if (dom.win) dom.win.classList.remove("hidden"); }, 800);
   }
@@ -5283,7 +5281,7 @@
   // monsters, the boss, artifacts and dropped coins, plus the wave clock) is
   // serialized explicitly so the run resumes exactly where it left off.
   // =========================================================================
-  const SAVE_VERSION = 4;
+  const SAVE_VERSION = 5;
   const PENDING_LOAD_KEY = "gg3d_pending_load"; // sessionStorage hand-off across reload
   const AUTOSTART_KEY = "gg3d_autostart";       // restart -> skip the start screen
 
@@ -5310,16 +5308,13 @@
       v: SAVE_VERSION,
       savedAt: new Date().toISOString(),
       seed: worldSeed,
+      // RPG world: the zone you're standing in + which lair bosses are already
+      // cleared. A zone's wandering monsters aren't saved — they regenerate from
+      // the zone's spawn table on load (and respawn during play anyway).
+      zone: state.zoneId,
+      bossesCleared: Object.assign({}, state.bossesCleared),
       score: state.score,
       money: state.coins,
-      waveStats: Object.assign({}, state.waveStats),
-      wave: {
-        number: waves.wave,
-        betweenWaves: waves.betweenWaves,
-        minimized: waves.minimized,
-        timer: round(waves.timer),
-        waveTotal: state.waveTotal,
-      },
       player: {
         health: round(player.health),
         facing: round(player.facing),
@@ -5343,24 +5338,9 @@
         acceptKills: Object.assign({}, Quests.acceptKills),
         flags: Object.assign({}, Quests.flags),
       },
-      castle: state.castle ? state.castle.built.slice() : [],
-      dragon: state.dragon ? { hp: round(state.dragon.hp), pos: xz(state.dragon.position) } : null,
+      castle: state.castle ? state.castle.built.slice() : (state.castleBuilt || []),
       time: round(DayNight.t),
       weather: Weather.state,
-      monsters: state.monsters
-        .filter((m) => m.alive && m.dying <= 0 && !m.isDragon)
-        .map((m) => m.isBoss
-          ? { boss: true, wave: m.wave, arch: m.archId, hp: round(m.hp), pos: xz(m.position) }
-          : { kind: m.kind, hp: m.hp, speed: round(m.speed), ability: m.ability, pos: xz(m.position) }),
-      artifacts: state.artifacts
-        .filter((a) => a._it && a._it.enabled)
-        .map((a) => ({ pos: xz(a.root.position), color: a._color })),
-      coinDrops: state.coinsList
-        .filter((c) => !c.collected && c.life > 0)
-        .map((c) => ({ pos: xz(c.root.position), value: c.value, life: round(c.life) })),
-      itemDrops: (state.drops || [])
-        .filter((dr) => dr.life > 0)
-        .map((dr) => ({ pos: xz(dr.root.position), id: dr.id, life: round(dr.life) })),
     };
   }
 
@@ -5391,7 +5371,7 @@
   function validateSave(d) {
     return !!(d && typeof d.v === "number" && d.v >= 2 && d.v <= SAVE_VERSION &&
       typeof d.seed === "number" &&
-      d.player && Array.isArray(d.player.pos) && d.wave && Array.isArray(d.monsters));
+      d.player && Array.isArray(d.player.pos));
   }
 
   // Tear down every live entity built by createScene so a save can be laid in.
@@ -5411,25 +5391,27 @@
     hideBossBar();
   }
 
-  // Rebuild a saved run on top of the freshly created (seeded) scene.
+  // Rebuild a saved run on top of the freshly created (seeded) scene. The world
+  // is regenerated from the seed; the player + progression are laid back on top,
+  // then we STREAM to the saved zone (which rebuilds its scenery + residents)
+  // and drop the player exactly where they left off.
   function applySave(d) {
-    const state = stateRef, player = playerRef, world = worldRef;
-    const interaction = interactionRef, waves = waveSystem;
-    if (!state || !player || !waves) throw new Error("game not ready");
-
-    clearWorldEntities(state, interaction);
+    const state = stateRef, player = playerRef;
+    const interaction = interactionRef;
+    if (!state || !player) throw new Error("game not ready");
 
     // Score / money economy.
     state.score = d.score | 0;
     state.coins = d.money | 0;
-    state.waveStats = Object.assign({ kills: 0, artifacts: 0, coins: 0 }, d.waveStats || {});
 
-    // Player pose + gear. Rebuild the bag and equipped slots from item ids, then
-    // recompute the whole derived stat block (health/speed/resist/weapon).
+    // Persistent progression the zone rebuild reads.
+    state.bossesCleared = Object.assign({}, d.bossesCleared || {});
+    state.castleBuilt = (d.castle || []).slice();
+
+    // Player gear (zone-independent). Rebuild the bag + equipped slots from item
+    // ids, then recompute the whole derived stat block.
     const ps = d.player;
-    player.health = ps.health != null ? ps.health : player.maxHealth;
     player.facing = ps.facing || 0;
-    player.root.position.set(ps.pos[0], 0, ps.pos[1]);
     player.inventory = (ps.inventory || []).map(itemFromSave).filter(Boolean);
     const eq = player.equipment;
     for (const slot of EQUIP_SLOTS) eq[slot] = null;
@@ -5455,9 +5437,8 @@
     updatePotionBar(player);
     updateMaterialsHud(player);
     updateRelicHud(player);
-    if (ps.health != null) { player.health = Math.min(player.maxHealth, ps.health); updateHealthBar(player.health); }
 
-    // Story progression: kills, quests, castle, day/night, weather, win flag.
+    // Story progression: kills, quests, win flag.
     state.totalKills = d.totalKills | 0;
     state.won = !!d.won;
     const q = d.quests || {};
@@ -5466,60 +5447,30 @@
     Quests.acceptKills = Object.assign({}, q.acceptKills || {});
     Quests.flags = Object.assign({}, q.flags || {});
     updateQuestTracker(Quests);
-    if (state.castle) state.castle.restore(d.castle || []);
+
+    // Stream to the saved zone. If we're already there (the hub on boot), just
+    // restore the castle build + re-wake the dragon if it was complete.
+    const targetZone = (d.zone && ZONE_BY_ID[d.zone]) ? d.zone : HUB_ZONE;
+    if (state.zoneId !== targetZone && zoneManager) {
+      zoneManager._swap(state.zoneId, targetZone, ZONE_BY_ID[targetZone]);
+    } else if (state.castle) {
+      state.castle.restore(state.castleBuilt);
+      state.castle.resummon();
+    }
+
+    // Day/night + weather (after the swap so the zone's handles are current).
     if (d.time != null) DayNight.set(d.time);
     if (d.weather) Weather.setState(d.weather);
 
-    // Monsters + boss (the boss restores its exact archetype + ability).
-    for (const md of d.monsters || []) {
-      if (md.boss) {
-        const boss = new Boss(sceneRef, world.shadow, new BABYLON.Vector3(md.pos[0], 0, md.pos[1]), md.wave, md.arch);
-        boss.hp = md.hp;
-        state.boss = boss;
-        state.monsters.push(boss);
-        showBossBar(boss);
-      } else {
-        const m = new Monster(sceneRef, world.shadow,
-          new BABYLON.Vector3(md.pos[0], 0, md.pos[1]), 1,
-          { kind: md.kind, hp: md.hp, speed: md.speed, ability: md.ability });
-        state.monsters.push(m);
-      }
-    }
-    // The dragon, if it had been summoned (castle complete).
-    if (d.dragon) {
-      const dragon = new Dragon(sceneRef, world.shadow, new BABYLON.Vector3(d.dragon.pos[0], 0, d.dragon.pos[1]), state);
-      dragon.hp = d.dragon.hp;
-      state.dragon = dragon;
-      state.monsters.push(dragon);
-      showBossBar(dragon);
-    }
-
-    // Artifacts + dropped coins + dropped rare loot.
-    for (const ad of d.artifacts || []) {
-      spawnArtifact(sceneRef, world, interaction, player, state, null, ad);
-    }
-    for (const cd of d.coinDrops || []) {
-      const c = new Coin(sceneRef, world.shadow, new BABYLON.Vector3(cd.pos[0], 0, cd.pos[1]), cd.value);
-      c.life = cd.life;
-      state.coinsList.push(c);
-    }
-    for (const it of d.itemDrops || []) {
-      if (!getDef(it.id)) continue;
-      const dr = new ItemDrop(sceneRef, world.shadow, new BABYLON.Vector3(it.pos[0], 0, it.pos[1]), it.id);
-      dr.life = it.life;
-      state.drops.push(dr);
-    }
-
-    // Wave clock + the merchant (present during a cleared-wave rest).
-    waves.restore(d.wave);
-    const npcsVisible = waves.betweenWaves && waves.wave > 0;
-    if (state.merchant) { if (npcsVisible) state.merchant.show(); else state.merchant.hide(); }
-    if (state.blacksmith) { if (npcsVisible) state.blacksmith.show(); else state.blacksmith.hide(); }
+    // Drop the player exactly where they saved (override the arrival spot).
+    player.root.position.set(ps.pos[0], 0, ps.pos[1]);
+    player.health = ps.health != null ? Math.min(player.maxHealth, ps.health) : player.maxHealth;
+    updateHealthBar(player.health);
 
     // Refresh every HUD readout.
     addScore(state, 0);
     updateCoins(state);
-    updateHealthBar(player.health);
+    updateLocationHud(ZONE_BY_ID[state.zoneId]);
     updateMonsterCounter(state);
   }
 
@@ -5911,12 +5862,6 @@
       window.addEventListener("resize", () => engine.resize());
       dom.startBtn.addEventListener("click", startGame);
       dom.replayBtn.addEventListener("click", () => window.location.reload());
-      // The results-window button is now "OK": it just collapses the window to
-      // the corner widget. Starting the next wave early is the corner widget's job.
-      dom.nextWaveBtn.addEventListener("click", () => { if (waveSystem) waveSystem.minimize(); });
-      dom.miniNextBtn.addEventListener("click", () => { Input.nextWaveQueued = true; });
-      // The × collapses the results window into the corner widget (frees the view).
-      dom.wavePanelClose.addEventListener("click", () => { if (waveSystem) waveSystem.minimize(); });
       // Shop open/close + Buy/Featured/Sell tabs.
       dom.shopClose.addEventListener("click", () => Shop.closeShop());
       dom.shopDone.addEventListener("click", () => Shop.closeShop());

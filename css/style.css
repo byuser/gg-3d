@@ -107,8 +107,13 @@ html, body {
 }
 .stat #score { color: var(--accent); }
 .stat #coins { color: #ffd34e; }
-.stat #wave { color: var(--accent2); }
-.stat #nextWave { color: #ff9d5c; }
+.stat #location { color: var(--accent2); }
+.stat #monsters { color: #ff8a8a; }
+/* The current-location chip stands out a touch from the other stats. */
+.loc-stat {
+  background: rgba(20, 26, 44, 0.72);
+  border-color: rgba(108, 198, 255, 0.4);
+}
 
 /* ---------- Health bar ---------- */
 .healthwrap {
@@ -165,6 +170,24 @@ html, body {
   20%  { opacity: 1; transform: translateX(-50%) scale(1.05); }
   75%  { opacity: 1; transform: translateX(-50%) scale(1); }
   100% { opacity: 0; transform: translateX(-50%) scale(1); }
+}
+
+/* ---------- Zone transition veil ---------- */
+/* A full-screen black curtain that fades in while a zone streams out and
+   fades back once the next zone is built, hiding the swap so the screen never
+   shows a frozen frame. The destination's name floats in the centre. */
+.zone-fade {
+  position: fixed; inset: 0; z-index: 50;
+  background: radial-gradient(circle at 50% 45%, #0d1326 0%, #05070e 100%);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.32s ease;
+}
+.zone-fade.show { opacity: 1; }
+.zone-fade-label {
+  font-size: clamp(22px, 5vw, 40px); font-weight: 900; letter-spacing: 1px;
+  color: #eaf2ff; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.7);
+  transform: translateY(8px); opacity: 0.92;
 }
 
 .prompt {

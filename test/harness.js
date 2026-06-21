@@ -75,7 +75,7 @@ function makeNode() {
   });
 }
 
-const Observable = () => { const l = []; return { add: (f) => l.push(f), _fire: (a) => l.forEach((f) => f(a)), list: l }; };
+const Observable = () => { const l = []; return { add: (f) => { l.push(f); return f; }, remove: (f) => { const i = l.indexOf(f); if (i >= 0) l.splice(i, 1); return i >= 0; }, _fire: (a) => l.slice().forEach((f) => f(a)), list: l }; };
 const scenes = [];
 
 const BABYLON = {
@@ -325,7 +325,7 @@ const seqB = [T.rng(), T.rng(), T.rng()];
 ok(seqA.every((v, i) => v === seqB[i]), "same seed reproduces the exact RNG stream");
 ok(seqA[0] !== seqA[1] && seqA.every((v) => v >= 0 && v < 1), "RNG yields varied values in [0,1)");
 
-console.log("\n[9] save / load round-trip (inventory + equipment)");
+console.log("\n[9] save / load round-trip (gear + progression + zone)");
 const st = T.state;
 const pl = T.player;
 st.score = 4242; st.coins = 99;
@@ -337,30 +337,28 @@ pl.equipment.breastplate = T.makeItem("iron_plate");
 pl.equipment.ring1 = T.makeItem("ring_power");
 T.recomputeStats(pl);
 pl.health = 33;
-// Monsters incl. a known boss archetype, a coin and a rare drop on the ground.
-st.monsters.length = 0; st.boss = null;
-st.monsters.push(new T.Monster(scene, world.shadow, new Vec3(5, 0, 5), 2));
-const bz = new T.Boss(scene, world.shadow, new Vec3(10, 0, 10), 10, "summoner"); bz.hp = 50;
-st.boss = bz; st.monsters.push(bz);
-st.coinsList.length = 0; st.coinsList.push(new T.Coin(scene, world.shadow, new Vec3(2, 0, 2), 3));
-st.drops.length = 0; st.drops.push(new T.ItemDrop(scene, world.shadow, new Vec3(4, 0, 4), "storm_bow"));
+// Progression under the RPG model: gathered materials, a cleared lair, and the
+// lifetime kill counter (individual roaming monsters are NOT saved — they
+// regenerate from each zone's spawn table on load).
+pl.materials.wood = 5; st.bossesCleared = { caverns: true }; st.totalKills = 17;
 
 const save = T.serializeGame();
-ok(save && save.v === 4, "serializeGame produced a versioned save");
+ok(save && save.v === 5, "serializeGame produced a versioned save");
 ok(T.validateSave(save), "save passes structural validation");
+ok(save.zone === st.zoneId, "current zone captured");
+ok(save.bossesCleared && save.bossesCleared.caverns === true, "cleared lair captured");
 ok(save.score === 4242 && save.money === 99, "score + money captured");
 ok(save.player.inventory.length === 2, "bag captured");
 ok(save.player.equipment.hand1.id === "magic_wand" && save.player.equipment.breastplate.id === "iron_plate", "equipment captured");
-ok(save.monsters.some((mo) => mo.boss && mo.arch === "summoner"), "boss + archetype captured");
-ok(save.itemDrops.length === 1 && save.itemDrops[0].id === "storm_bow", "dropped rare loot captured");
+ok(save.player.materials.wood === 5, "gathered materials captured");
+ok(save.totalKills === 17, "lifetime kills captured");
 ok(!T.validateSave({ v: 999 }), "validation rejects a foreign/old file");
 
 // Trash the live state, then restore from the save.
 st.score = 0; st.coins = 0;
 for (const slot of T.EQUIP_SLOTS) pl.equipment[slot] = null;
-pl.inventory = [];
+pl.inventory = []; pl.materials.wood = 0; st.bossesCleared = {}; st.totalKills = 0;
 pl.health = 1;
-const savedMaxHp = save.player ? null : null; // (stats are recomputed, not stored)
 
 T.applySave(save);
 ok(st.score === 4242 && st.coins === 99, "score + money restored");
@@ -370,9 +368,10 @@ ok(pl.equipment.ring1 && pl.equipment.ring1.id === "ring_power", "equipped acces
 ok(pl.inventory.length === 2, "bag restored to the same count");
 ok(pl.maxHealth > 100, "stats recomputed from the restored gear");
 ok(pl.weapon && pl.weapon.ranged, "active weapon rebuilt from equipped wand");
-ok(st.boss && st.boss.isBoss && st.boss.hp === 50 && st.boss.archId === "summoner", "boss restored with HP + archetype");
-ok(st.drops.length === 1 && st.drops[0].id === "storm_bow", "dropped rare loot restored");
-ok(T.waves.wave === save.wave.number, "wave counter restored");
+ok(pl.materials.wood === 5, "gathered materials restored");
+ok(st.bossesCleared.caverns === true, "cleared lair restored");
+ok(st.totalKills === 17, "lifetime kills restored");
+ok(st.zoneId === save.zone, "zone restored");
 step(5);
 ok(isFinite(pl.position.x), "restored game keeps simulating");
 
@@ -671,6 +670,57 @@ T.state.bolts = T.state.bolts || [];
 T.state.bolts.push(shoot(T.state.dragon, T.state.dragon.maxHp + 100));
 step(3);
 ok(T.won === true, "slaying the dragon wins the game");
+
+console.log("\n[26] RPG zones — location spawns, roaming, respawn, lair bosses, travel");
+const zm = T.zoneManager;
+ok(!!zm, "zone manager exists");
+// Reset the run state the earlier tests left behind, and start from the hub.
+T.state.over = false; T.state.won = false; T.state.dragon = null; T.state.bossesCleared = {};
+if (T.state.zoneId !== T.HUB_ZONE) zm._swap(T.state.zoneId, T.HUB_ZONE, T.ZONE_BY_ID[T.HUB_ZONE]);
+ok(T.world.zone.id === "meadow", "hub is the Meadowgate Vale");
+ok(T.world.portals.length >= 2, `hub exposes ${T.world.portals.length} travel portals`);
+ok(!!T.state.merchant && !!T.state.castle, "hub has the merchant + castle build site");
+// Travel to a wild zone.
+zm._swap("meadow", "forest", T.ZONE_BY_ID.forest);
+ok(T.world.zone.id === "forest", "streamed into Whisperwood Deep");
+ok(T.state.zoneId === "forest" && T.waves.zone.id === "forest", "zone id + spawn director updated");
+ok(T.state.merchant === null && T.state.castle === null, "wild zone has no vendor / castle");
+const forestPop = T.state.monsters.filter((m) => m.alive).length;
+ok(forestPop > 0, `forest seeded ${forestPop} resident monsters at spawn points`);
+ok(Math.hypot(T.player.position.x, T.player.position.z) > 1, "player placed at the arrival portal");
+// Roaming: a monster beyond its aggro radius wanders its home patch, it doesn't
+// beeline across the whole zone toward a far-off player.
+const roamer = T.state.monsters.find((m) => m.alive && m.zoneAmbient);
+roamer.home = { x: roamer.root.position.x, z: roamer.root.position.z }; roamer.aggroRange = 5;
+for (let i = 0; i < 40; i++) roamer.update(0.05, new Vec3(999, 0, 999), T.state);
+const drift = Math.hypot(roamer.root.position.x - roamer.home.x, roamer.root.position.z - roamer.home.z);
+ok(drift <= (roamer.homeRange || 11) + 2, `a far-off monster roams near home (drift ${drift.toFixed(1)}m)`);
+// Respawn: cull the whole population, confirm the director refills it over time.
+for (const m of T.state.monsters) if (m.zoneAmbient) m.alive = false;
+T.state.monsters = T.state.monsters.filter((m) => m.alive);
+T.waves.respawnTimer = 0.01;
+let respawned = 0;
+for (let i = 0; i < 200 && respawned < 1; i++) { T.waves.update(0.05); respawned = T.state.monsters.filter((m) => m.alive && m.zoneAmbient).length; }
+ok(respawned > 0, "the spawn director respawns culled monsters after a delay");
+// Boss lair: the caverns spawn their guardian; clearing it persists for the run.
+zm._swap("forest", "caverns", T.ZONE_BY_ID.caverns);
+ok(T.world.zone.id === "caverns" && T.world.zone.indoor, "streamed into the Crystal Caverns (indoor lair)");
+ok(T.state.boss && T.state.boss.isLairBoss, "the lair boss spawned in the depths");
+ok(T.state.boss.name === "Cavern Gumlord", "lair boss uses its custom name");
+// Simulate the weapon-kill cleanup path (onMonsterDefeated nulls state.boss).
+T.state.boss.alive = false; T.state.boss = null;
+T.waves.update(0.05);
+ok(T.state.bossesCleared.caverns === true, "felled lair boss recorded as cleared");
+// Re-entering the lair this run must not respawn the boss.
+zm._swap("caverns", "shore", T.ZONE_BY_ID.shore);
+zm._swap("shore", "caverns", T.ZONE_BY_ID.caverns);
+ok(!T.state.boss, "a cleared lair boss does not respawn this run");
+// Back to the hub: the vendor + castle return, the world rebuilds cleanly.
+zm._swap("caverns", "meadow", T.ZONE_BY_ID.meadow);
+ok(T.world.zone.id === "meadow" && !!T.state.merchant && !!T.state.castle, "returning to the hub rebuilds it");
+T.state.over = false;
+step(5);
+ok(isFinite(T.player.position.x), "simulation keeps running after repeated travel");
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED ✅" : failures + " CHECK(S) FAILED ❌"}`);
 process.exit(failures === 0 ? 0 : 1);

@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="description" content="Good Game 3D — a third-person browser action-RPG adventure. Take quests, gather and craft, fight living sweets and bosses, raise a castle from five relics, and slay the dragon to win." />
   <meta name="theme-color" content="#0b0f1a" />
-  <link rel="stylesheet" href="css/style.css?v=11" />
+  <link rel="stylesheet" href="css/style.css?v=12" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
@@ -17,16 +17,18 @@
   <div id="overlay" class="overlay">
     <div class="panel">
       <h1>Good Game <span class="badge">3D</span></h1>
-      <p class="tagline">Run with Lily across a living island: take <b>quests</b> from villagers,
-        <b>gather &amp; craft</b>, fight <b>wild monsters</b>, and raise a <b>castle</b> from five
-        relics. Build it, and the <b>dragon</b> awakens — slay it to win!</p>
+      <p class="tagline">Run with Lily across a living island of <b>separate lands</b> — meadow vale,
+        whispering wood, salt shore, frostpeak trail and the boss lairs. <b>Roaming monsters</b>
+        guard each place and <b>respawn</b> over time; <b>travel</b> between lands through paths,
+        bridges and cave mouths. Take <b>quests</b>, <b>gather &amp; craft</b>, raise a <b>castle</b>
+        from five relics, then slay the <b>dragon</b> to win!</p>
       <ul class="controls">
         <li><b>Move</b><span>WASD / Arrows · or the on-screen stick</span></li>
         <li><b>Attack</b><span>Space / F · or the ✨ button</span></li>
         <li><b>Interact / talk / gather</b><span>E · or the action button</span></li>
         <li><b>Inventory</b><span>I · or the 🎒 button</span></li>
         <li><b>Craft · Quests</b><span>C · J · or the 🛠️ 📜 buttons</span></li>
-        <li><b>Next&nbsp;wave</b><span>Enter / N · or the Next Wave button</span></li>
+        <li><b>Travel</b><span>walk into a path / bridge / cave portal</span></li>
       </ul>
       <button id="startBtn" class="start-btn">Start Adventure</button>
       <button id="loadBtn" class="start-btn secondary-btn">Load Progress</button>
@@ -38,10 +40,10 @@
   <!-- HUD -->
   <div id="hud" class="hud hidden">
     <div class="hud-top">
+      <div class="stat loc-stat">📍 <span id="location">Meadowgate Vale</span></div>
       <div class="stat">⭐ <span id="score">0</span></div>
       <div class="stat">🪙 <span id="coins">0</span></div>
-      <div class="stat">Wave <span id="wave">0</span></div>
-      <div class="stat">🍬 <span id="monsters">0 / 0</span></div>
+      <div class="stat">👹 <span id="monsters">0</span></div>
       <div class="stat" id="clock">☀️ 07:00</div>
       <div class="stat" id="weather">☀️ Clear</div>
       <div id="prompt" class="prompt hidden">Press <b>E</b></div>
@@ -61,30 +63,9 @@
       <div class="boss-track"><div id="bossFill" class="boss-fill"></div></div>
     </div>
 
+    <!-- Zone/location banner: shows the name of the land you've just entered. -->
     <div id="waveBanner" class="wave-banner"></div>
 
-    <!-- Between-waves results window: appears once a wave is cleared.
-         The × collapses it into the small corner widget below so the player
-         can roam the map (and visit the merchant) without the view blocked. -->
-    <div id="wavePanel" class="wave-panel-box hidden">
-      <button id="wavePanelClose" class="wave-panel-close" title="Close" aria-label="Close results">×</button>
-      <div id="wavePanelTitle" class="wave-panel-title">Get ready!</div>
-      <div id="waveResults" class="wave-results hidden">
-        <div class="wave-result"><span>🍬 Sweets defeated</span><b id="resKills">0</b></div>
-        <div class="wave-result"><span>💎 Artifacts</span><b id="resArtifacts">0</b></div>
-        <div class="wave-result"><span>🪙 Coins earned</span><b id="resCoins">0</b></div>
-      </div>
-      <div id="waveShopHint" class="wave-shop-hint hidden">🧙 The merchant is at the plaza — spend your coins!</div>
-      <button id="nextWaveBtn" class="next-wave-btn">Start Wave 1</button>
-      <div class="wave-panel-sub">auto-starts in <span id="nextWave">—</span></div>
-    </div>
-
-    <!-- Collapsed wave widget: small, non-blocking, lets you start the next
-         wave while freely exploring the map. -->
-    <div id="waveMini" class="wave-mini hidden">
-      <button id="miniNextBtn" class="mini-next-btn">Start Wave <span id="miniWaveNum">1</span> ▶</button>
-      <div class="mini-sub">auto in <span id="miniCountdown">—</span></div>
-    </div>
     <!-- Potion belt: up to 3 stackable potion slots (use with 1/2/3 or a tap),
          with active-buff countdown pills above it. -->
     <div id="buffBar" class="buff-bar"></div>
@@ -111,8 +92,8 @@
   <div id="over" class="overlay hidden">
     <div class="panel">
       <h1>Game Over 🍭</h1>
-      <p class="tagline">The living sweets got you! You scored <b><span id="finalScore">0</span></b>
-        and survived to <b>wave <span id="finalWave">0</span></b>.</p>
+      <p class="tagline">The wild monsters got you! You scored <b><span id="finalScore">0</span></b>
+        and fell in <b><span id="finalWave">—</span></b>.</p>
       <button id="replayBtn" class="start-btn">Play Again</button>
     </div>
   </div>
@@ -122,8 +103,8 @@
     <div class="panel win-panel">
       <h1>Victory! 🐉🏰</h1>
       <p class="tagline">The castle stands and the <b>Ancient Dragon</b> is slain! Meadowgate is
-        saved. You finished with <b><span id="winScore">0</span></b> points on
-        <b>wave <span id="winWave">0</span></b>.</p>
+        saved. You finished with <b><span id="winScore">0</span></b> points after felling
+        <b><span id="winWave">0</span></b> monsters.</p>
       <button id="winReplayBtn" class="start-btn">Play Again</button>
     </div>
   </div>
@@ -246,8 +227,12 @@
     </div>
   </div>
 
+  <!-- Zone transition veil: fades to black while a zone streams in/out so the
+       teardown/rebuild swap is never visible (gameplay never freezes on screen). -->
+  <div id="zoneFade" class="zone-fade"><div id="zoneFadeLabel" class="zone-fade-label"></div></div>
+
   <canvas id="renderCanvas"></canvas>
 
-  <script src="js/game.js?v=11"></script>
+  <script src="js/game.js?v=12"></script>
 </body>
 </html>
