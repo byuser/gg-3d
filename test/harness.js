@@ -1041,5 +1041,99 @@ ok(!fxErr && fxOut && "pipeline" in fxOut && "ssao" in fxOut,
 T.DayNight.set(0.5); T.DayNight.update(0.01);
 ok(T.DayNight.phase === "day", "DayNight still resolves noon after the lighting rebuilds");
 
+console.log("\n[30] higher-fidelity models — PBR materials, env IBL probe, mesh-detail tiers");
+// Each tier carries a complete model-fidelity block (pure data — no device needed).
+let modelTiersOk = true;
+["high", "medium", "low"].forEach((tier) => {
+  const s = QT.TIERS[tier];
+  if (!(s && typeof s.pbr === "boolean" && typeof s.env === "boolean" &&
+        s.seg >= 6 && s.tess >= 8 && s.rockSub >= 1 && s.foliage > 0)) modelTiersOk = false;
+});
+ok(modelTiersOk, "every tier has a complete model-fidelity block (pbr/env/seg/tess/rockSub/foliage)");
+ok(QT.TIERS.high.pbr === true && QT.TIERS.low.pbr === false, "PBR materials gate to capable tiers (desktop/high), Standard on weak GPUs");
+ok(QT.TIERS.high.env === true && QT.TIERS.medium.env === false && QT.TIERS.low.env === false,
+   "the IBL env probe is desktop-high only (phones skip it)");
+ok(QT.TIERS.high.seg > QT.TIERS.low.seg && QT.TIERS.high.tess >= QT.TIERS.low.tess,
+   "mesh segment/tessellation density scales up with the tier");
+ok(QT.TIERS.high.foliage > QT.TIERS.low.foliage, "the extra-detail (foliage) budget scales with the tier");
+
+const scene30 = T.state.scene;
+const origTier30 = QT.tier;
+
+// Without a PBRMaterial implementation (the live boot path), mat()/emat() fall
+// back to StandardMaterial and the env probe is skipped — never throwing.
+ok(T.usePBR() === false, "usePBR() is false until a PBRMaterial implementation exists (Standard fallback)");
+const fbMat = T.mat(scene30, "t30fallback", "#9aa0a6");
+ok(fbMat && !fbMat._ggPBR, "mat() returns a non-PBR material on the fallback path");
+const stdOnly = T.stdMat(scene30, "t30std", "#808080");
+ok(stdOnly && !stdOnly._ggPBR, "stdMat() always stays off the PBR path (the backdrop/sky uses it)");
+
+// Inject PBRMaterial + RawCubeTexture stubs to drive the PBR + env code paths.
+BABYLON.PBRMaterial = class { constructor() { return makeNode(); } };
+BABYLON.RawCubeTexture = class { constructor() { return makeNode(); } };
+QT.tier = "high";
+ok(T.usePBR() === true, "usePBR() flips true on the high tier once PBRMaterial is available");
+
+// The procedural IBL probe installs a scene environment texture (high tier).
+let envErr = null, env = null;
+try { env = T.makeEnvironment(scene30); } catch (e) { envErr = e && e.message; }
+ok(!envErr && !!env && !!scene30.environmentTexture && T.envOn === true,
+   "makeEnvironment builds a procedural cube + installs scene.environmentTexture on the high tier" + (envErr ? " — " + envErr : ""));
+
+// mat()/emat() now produce PBR; the legacy diffuse/specular writes still work.
+const pm = T.mat(scene30, "t30pbr", "#3366cc");
+ok(pm && pm._ggPBR === true, "mat() returns a PBR material on the high tier");
+pm.diffuseColor = Color3.FromHexString("#ff0000");
+ok(pm.albedoColor && Math.abs(pm.albedoColor.r - 1) < 1e-6 && pm.albedoColor.g < 1e-6,
+   "a legacy diffuseColor write is aliased onto the PBR albedoColor");
+pm.specularColor = new Color3(0.5, 0.5, 0.5);
+ok(pm.specularColor && pm.specularColor.r === 0.5, "a legacy specularColor write is captured without throwing");
+const pe = T.emat(scene30, "t30pbre", "#22cc88", 0.6);
+ok(pe && pe._ggPBR === true && pe.emissiveColor && pe.emissiveColor.g > 0, "emat() sets PBR emissive");
+
+// gloss() tightens roughness/metalness on PBR, and is a no-op-safe on Standard.
+T.gloss(pm, 0.3, 0.4);
+ok(pm.roughness === 0.3 && pm.metallic === 0.4, "gloss() tightens PBR roughness + metalness");
+let glossErr = null;
+try { T.gloss(stdOnly, 0.3, 0.4); } catch (e) { glossErr = e && e.message; }
+ok(!glossErr, "gloss() is safe on a StandardMaterial (no throw)");
+
+// Build + tear down EVERY zone on the PBR + env (high) tier: the upgraded meshes,
+// shared materials and gloss tweaks must run headless and dispose without throwing.
+let modelErr = null;
+for (const z of T.ZONES) {
+  try {
+    const w = T.buildWorld(scene30, z);
+    if (!(w && w.dispose)) throw new Error("no dispose handle");
+    w.dispose();
+  } catch (e) { modelErr = z.id + ": " + (e && e.message); break; }
+}
+ok(!modelErr, "every zone builds + tears down on the PBR+env high tier without throwing" + (modelErr ? " — " + modelErr : ""));
+
+// World GENERATION must be tier-independent: the graphics tier changes rendering
+// only, never the seeded layout. Building the same seed + zone (peaks: trees +
+// rocks + crystals — the gated-detail props) on the high vs low tier must yield
+// an identical obstacle layout (the per-tier extras draw their rng unconditionally).
+function obsSig30(tier) {
+  QT.tier = tier; T.setSeed(98765);
+  const w = T.buildWorld(scene30, T.ZONE_BY_ID.peaks);
+  const sig = (w.obstacles || []).map((o) => o.x.toFixed(2) + "," + o.z.toFixed(2) + "," + o.r.toFixed(2)).join("|");
+  w.dispose();
+  return sig;
+}
+const sigHi30 = obsSig30("high"), sigLo30 = obsSig30("low");
+ok(sigHi30.length > 0 && sigHi30 === sigLo30,
+   "world layout is identical across graphics tiers (rng consumption is tier-independent)");
+
+// The low tier forces the Standard fallback + skips the env probe even when PBR exists.
+QT.tier = "low";
+ok(T.usePBR() === false, "the low tier forces the Standard fallback even when PBRMaterial exists");
+ok(!T.mat(scene30, "t30low", "#888888")._ggPBR, "mat() honours the low tier with a Standard material");
+ok(T.makeEnvironment(scene30) === null && T.envOn === false, "the env probe is skipped on the low tier");
+
+// Restore the booted state (tier + remove the injected stubs) for tidiness.
+QT.tier = origTier30;
+delete BABYLON.PBRMaterial; delete BABYLON.RawCubeTexture;
+
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED ✅" : failures + " CHECK(S) FAILED ❌"}`);
 process.exit(failures === 0 ? 0 : 1);
