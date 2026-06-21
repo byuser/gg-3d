@@ -2096,6 +2096,11 @@
       this.armR = limb("armR", 1.45, 0.32, dress, 0.6);
       this.legL = limb("legL", 0.7, -0.14, skin, 0.6);
       this.legR = limb("legR", 0.7, 0.14, skin, 0.6);
+      // Little hands at the ends of the arms so the silhouette reads as a person.
+      for (const arm of [this.armL, this.armR]) {
+        const hand = add(sphere(scene, "hand", 0.17, skin), arm);
+        hand.position.y = -0.62;
+      }
       // Shoes parented to the leg pivots so the feet swing with the stride.
       this.shoes = [];
       for (const pivot of [this.legL, this.legR]) {
@@ -2130,7 +2135,7 @@
       handle.parent = grip; handle.position.y = 0.35; shadow.addShadowCaster(handle);
 
       // Glowing crystal star at the tip.
-      const crystalMat = emat(scene, "wandCrystal", "#9fd0ff", 1.0);
+      const crystalMat = gloss(emat(scene, "wandCrystal", "#9fd0ff", 1.0), 0.2, 0.1);
       const crystal = BABYLON.MeshBuilder.CreatePolyhedron("wandCrystal", { type: 2, size: 0.16 }, scene);
       crystal.material = crystalMat; crystal.parent = grip; crystal.position.y = 0.9;
       this.wandCrystal = crystal;
@@ -2153,7 +2158,7 @@
 
       // ---- Alternate held weapons, toggled by refreshWeaponVisual(). ----
       // A melee blade (sword/axe/hammer share this silhouette, recoloured).
-      const bladeMat = emat(scene, "heldBlade", "#d7dde6", 0.06);
+      const bladeMat = gloss(emat(scene, "heldBlade", "#d7dde6", 0.06), 0.34, 0.35);
       const blade = box(scene, "heldBlade", 0.12, 1.1, 0.03, bladeMat);
       blade.parent = grip; blade.position.y = 0.7; shadow.addShadowCaster(blade);
       const guard = box(scene, "heldGuard", 0.42, 0.1, 0.1, emat(scene, "heldGuardM", "#8a6a3a", 0.05));
@@ -2512,7 +2517,7 @@
       const ab = MONSTER_ABILITIES[this.ability] || MONSTER_ABILITIES.chaser;
       const candy = ab.tint || PALETTE[(rng() * PALETTE.length) | 0];
       this.tint = candy;
-      const main = emat(scene, "swt" + root.uniqueId, candy, ab.tint ? 0.28 : 0.18);
+      const main = gloss(emat(scene, "swt" + root.uniqueId, candy, ab.tint ? 0.28 : 0.18), 0.45);
       const cream = emat(scene, "cream" + root.uniqueId, "#fff3e0", 0.1);
       const dark = emat(scene, "swtd" + root.uniqueId, "#7a4030", 0.08);
       const add = (m) => { m.parent = body; shadow.addShadowCaster(m); return m; };
@@ -3761,13 +3766,25 @@
   // =========================================================================
   const Quality = {
     tier: "high",
+    // Each tier carries lighting (Task 4) AND model fidelity (Task 3) knobs:
+    //   pbr    — energy-conserving PBRMaterial vs the StandardMaterial fallback
+    //   env    — install the procedural image-based-lighting probe (sky reflections)
+    //   seg    — sphere segment count   (rounder silhouettes)
+    //   tess   — cylinder/disc tessellation
+    //   rockSub— icosphere subdivisions for rocks (craggier facets)
+    //   foliage— extra-detail budget (0..1): layered canopies / rock + crystal clusters
+    // The mobile tiers never exceed the old geometry density (phones stay smooth);
+    // only the desktop "high" tier adds triangles + PBR + the IBL probe.
     TIERS: {
       high:   { shadowMap: 2048, shadowFilter: "contact", csm: true,  bloom: true,  ssao: true,
-                shadowDarkness: 0.34, exposure: 1.08, contrast: 1.12, bloomWeight: 0.20, shadowMaxZ: 220 },
+                shadowDarkness: 0.34, exposure: 1.08, contrast: 1.12, bloomWeight: 0.20, shadowMaxZ: 220,
+                pbr: true,  env: true,  seg: 14, tess: 20, rockSub: 2, foliage: 1.0 },
       medium: { shadowMap: 1024, shadowFilter: "pcf",     csm: false, bloom: true,  ssao: false,
-                shadowDarkness: 0.40, exposure: 1.02, contrast: 1.08, bloomWeight: 0.15, shadowMaxZ: 160 },
+                shadowDarkness: 0.40, exposure: 1.02, contrast: 1.08, bloomWeight: 0.15, shadowMaxZ: 160,
+                pbr: true,  env: false, seg: 12, tess: 16, rockSub: 1, foliage: 0.6 },
       low:    { shadowMap: 1024, shadowFilter: "blur",    csm: false, bloom: false, ssao: false,
-                shadowDarkness: 0.46, exposure: 1.00, contrast: 1.04, bloomWeight: 0.00, shadowMaxZ: 120 },
+                shadowDarkness: 0.46, exposure: 1.00, contrast: 1.04, bloomWeight: 0.00, shadowMaxZ: 120,
+                pbr: false, env: false, seg: 10, tess: 12, rockSub: 1, foliage: 0.3 },
     },
     settings() { return this.TIERS[this.tier] || this.TIERS.high; },
 
@@ -3930,6 +3947,62 @@
     } catch (e) {}
   }
 
+  // A tiny procedural image-based-lighting probe: a 6-face gradient cube (warm
+  // sky overhead → cool horizon → dark ground, with a soft sun glow) that PBR
+  // materials sample for gentle sky reflections + ambient fill. No asset files —
+  // ~6 KB of pixels generated once and shared by every zone for the session.
+  // Feature-detected (RawCubeTexture only), tier-gated (high) and try/caught, so
+  // weak GPUs / the headless harness skip it and PBR falls back to direct light.
+  // ENV_ON tells pbrMat() whether to let materials pick the probe up.
+  let ENV_ON = false, envTex = null;
+  function makeEnvironment(scene) {
+    ENV_ON = false; envTex = null;
+    try {
+      if (!scene || !Quality.settings().env || !BABYLON.RawCubeTexture) return null;
+      const N = 16;
+      // Per-face direction basis — Babylon cube-face order: +X,-X,+Y,-Y,+Z,-Z.
+      const basis = [
+        { u: [0, 0, -1], v: [0, -1, 0], n: [1, 0, 0] },
+        { u: [0, 0, 1],  v: [0, -1, 0], n: [-1, 0, 0] },
+        { u: [1, 0, 0],  v: [0, 0, 1],  n: [0, 1, 0] },
+        { u: [1, 0, 0],  v: [0, 0, -1], n: [0, -1, 0] },
+        { u: [1, 0, 0],  v: [0, -1, 0], n: [0, 0, 1] },
+        { u: [-1, 0, 0], v: [0, -1, 0], n: [0, 0, -1] },
+      ];
+      const sky = [0.62, 0.78, 1.0], horizon = [0.86, 0.84, 0.78];
+      const grnd = [0.22, 0.20, 0.17], sunC = [1.0, 0.93, 0.78];
+      let sx = -0.4, sy = 0.78, sz = -0.32; // roughly the directional sun
+      const slen = Math.hypot(sx, sy, sz) || 1; sx /= slen; sy /= slen; sz /= slen;
+      const faces = [];
+      for (let f = 0; f < 6; f++) {
+        const b = basis[f], data = new Uint8Array(N * N * 4);
+        for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+          const fx = ((x + 0.5) / N) * 2 - 1, fy = ((y + 0.5) / N) * 2 - 1;
+          let dx = b.n[0] + b.u[0] * fx + b.v[0] * fy;
+          let dy = b.n[1] + b.u[1] * fx + b.v[1] * fy;
+          let dz = b.n[2] + b.u[2] * fx + b.v[2] * fy;
+          const dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
+          const up = Math.max(-1, Math.min(1, dy));
+          let r, g, bl;
+          if (up >= 0) { const t = up; r = horizon[0] + (sky[0] - horizon[0]) * t; g = horizon[1] + (sky[1] - horizon[1]) * t; bl = horizon[2] + (sky[2] - horizon[2]) * t; }
+          else { const t = -up; r = horizon[0] + (grnd[0] - horizon[0]) * t; g = horizon[1] + (grnd[1] - horizon[1]) * t; bl = horizon[2] + (grnd[2] - horizon[2]) * t; }
+          const sd = Math.max(0, dx * sx + dy * sy + dz * sz);
+          const glow = Math.pow(sd, 24) * 0.85 + Math.pow(sd, 4) * 0.12;
+          r = Math.min(1, r + sunC[0] * glow); g = Math.min(1, g + sunC[1] * glow); bl = Math.min(1, bl + sunC[2] * glow);
+          const o = (y * N + x) * 4;
+          data[o] = (r * 255) | 0; data[o + 1] = (g * 255) | 0; data[o + 2] = (bl * 255) | 0; data[o + 3] = 255;
+        }
+        faces.push(data);
+      }
+      const tex = new BABYLON.RawCubeTexture(scene, faces, N);
+      tex.name = "ggEnv"; tex.gammaSpace = true;
+      scene.environmentTexture = tex;
+      if ("environmentIntensity" in scene) scene.environmentIntensity = 0.55;
+      ENV_ON = true; envTex = tex;
+      return tex;
+    } catch (e) { ENV_ON = false; envTex = null; return null; }
+  }
+
   // =========================================================================
   // World — procedural environment.
   // =========================================================================
@@ -3975,7 +4048,9 @@
     // ---- BACKDROP: a sky dome, a surrounding SEA, distant MOUNTAINS and a
     // shoreline skirt. All purely decorative (no collision). The day/night +
     // weather systems tint the sky/sun/fog returned here. ----
-    const skyMat = emat(scene, "sky", T.sky, 1.0);
+    // The sky dome is a pure unlit emissive backdrop (DayNight repaints it), which
+    // is exactly StandardMaterial's job — keep it off the PBR path.
+    const skyMat = stdEmat(scene, "sky", T.sky, 1.0);
     skyMat.backFaceCulling = false; skyMat.disableLighting = true;
     const sky = BABYLON.MeshBuilder.CreateSphere("skyDome", { diameter: 900, segments: 16, sideOrientation: 1 }, scene);
     sky.material = skyMat; sky.infiniteDistance = true; sky.isPickable = false;
@@ -3983,7 +4058,7 @@
     // The sea: a vast plane just below the zone, lapping at its shores (dark in
     // the indoor cavern/thicket so it reads as a void rather than ocean).
     const seaCol = indoor ? "#0a0814" : "#2c78c8";
-    const seaMat = emat(scene, "sea", seaCol, indoor ? 0.05 : 0.16);
+    const seaMat = stdEmat(scene, "sea", seaCol, indoor ? 0.05 : 0.16);
     seaMat.specularColor = new BABYLON.Color3(0.4, 0.5, 0.6);
     const sea = BABYLON.MeshBuilder.CreateGround("sea", { width: 1600, height: 1600 }, scene);
     sea.material = seaMat; sea.position.y = -0.35; sea.isPickable = false;
@@ -4056,7 +4131,7 @@
       const bank = BABYLON.MeshBuilder.CreateGround("bank", { width: riverHalf * 2 + 4, height: riverLen }, scene);
       bank.rotation.y = riverAngle; bank.position.set(riverCenter.x, 0.015, riverCenter.z);
       bank.material = mat(scene, "bank", "#5c4a32"); bank.receiveShadows = true;
-      waterMat = emat(scene, "water", "#3aa0e0", 0.18);
+      waterMat = stdEmat(scene, "water", "#3aa0e0", 0.18);
       waterMat.alpha = 0.82; waterMat.specularColor = new BABYLON.Color3(0.5, 0.6, 0.7);
       water = BABYLON.MeshBuilder.CreateGround("water", { width: riverHalf * 2, height: riverLen }, scene);
       water.rotation.y = riverAngle; water.position.set(riverCenter.x, 0.05, riverCenter.z);
@@ -4191,24 +4266,44 @@
       : (zone.id === "forest" || zone.id === "thicket") ? ["#2f8f3a", "#247a30", "#36a142"]
       : ["#3f9d4a", "#46ad53", "#379142"];
     const leafMats = leafCols.map((c, i) => mat(scene, "leaf" + i, c));
+    // Model-fidelity budget for this tier (see Quality.TIERS): extra canopy/rock/
+    // crystal detail and rounder rocks only where the GPU can afford it.
+    const foliage = Quality.settings().foliage || 0.3;
+    const rockSub = Quality.settings().rockSub || 1;
+    const richDetail = foliage >= 0.9; // desktop "high" only
 
-    // ---- Trees (swaying foliage hooks are tagged for the wind animator). ----
+    // ---- Trees: a tapered trunk + a layered, rounded canopy — a darker shaded
+    // base lobe, brighter lobes stacked above, swaying as one. (Lobe count stays
+    // modest so the dense forests keep their triangle budget; the high tier adds a
+    // small bright crown tuft.) ----
     const swayers = []; // {mesh, baseRot, phase, amp}
     const nTrees = SC.trees || 0;
     for (let i = 0; i < nTrees; i++) {
       const p = place(7, FAR); if (!p) continue;
       const h = 1.3 + rng() * 1.0;
-      const trunk = cyl(scene, "trunk", 0.5, 0.6, h * 1.5, trunkMat);
+      const trunk = cyl(scene, "trunk", 0.28, 0.62, h * 1.5, trunkMat); // tapered
       trunk.position.set(p.x, h * 0.75, p.z); shadow.addShadowCaster(trunk);
-      const lm = leafMats[(rng() * leafMats.length) | 0];
+      const li = (rng() * leafMats.length) | 0;
+      const lm = leafMats[li];
+      const darkLm = leafMats[Math.min(leafMats.length - 1, li + 1)] || lm;
       const crown = new BABYLON.TransformNode("crown", scene);
       crown.position.set(p.x, h * 1.5, p.z);
       const n = 2 + ((rng() * 2) | 0);
       for (let k = 0; k < n; k++) {
-        const leaf = sphere(scene, "leaf", 1.9 + rng(), lm);
+        const lobeMat = k === 0 ? darkLm : lm;        // a shaded base lobe
+        const size = (2.1 - k * 0.28) + rng() * 0.5;  // bigger low, smaller up
+        const leaf = sphere(scene, "leaf", size, lobeMat);
         leaf.parent = crown;
-        leaf.position.set((rng() - 0.5), 0.6 + k * 0.6, (rng() - 0.5));
-        leaf.scaling.y = 1.1; shadow.addShadowCaster(leaf);
+        leaf.position.set((rng() - 0.5) * 0.7, 0.5 + k * 0.62, (rng() - 0.5) * 0.7);
+        leaf.scaling.y = 1.08; shadow.addShadowCaster(leaf);
+      }
+      // Draw the rng for the crown tuft UNCONDITIONALLY (so the seeded world layout
+      // is identical on every graphics tier); only the mesh is gated to the high tier.
+      const tipSize = 1.0 + rng() * 0.4, tipX = (rng() - 0.5) * 0.4, tipZ = (rng() - 0.5) * 0.4;
+      if (richDetail) {                                // bright crown tuft (high tier)
+        const tip = sphere(scene, "leafTip", tipSize, lm);
+        tip.parent = crown; tip.position.set(tipX, 0.5 + n * 0.62, tipZ);
+        shadow.addShadowCaster(tip);
       }
       swayers.push({ mesh: crown, phase: rng() * Math.PI * 2, amp: 0.03 + rng() * 0.03 });
       addObstacle(p.x, p.z, 0.9);
@@ -4237,15 +4332,26 @@
       }
     }
 
-    // ---- Rocks. ----
+    // ---- Rocks (craggier icospheres on the high tier; a flatter, boulder-like
+    // silhouette; matte under PBR so they read as stone, not plastic). ----
     const rockMat = mat(scene, "rock", indoor ? "#4a4258" : (zone.id === "peaks" ? "#b9c4d2" : "#9aa0a6"));
+    if (rockMat._ggPBR) rockMat.roughness = 0.96;
     const nRocks = SC.rocks || 0;
     for (let i = 0; i < nRocks; i++) {
       const p = place(6, FAR); if (!p) continue;
       const rad = 0.5 + rng() * 0.9;
-      const rock = BABYLON.MeshBuilder.CreateIcoSphere("rock", { radius: rad, subdivisions: 1 }, scene);
-      rock.material = rockMat; rock.position.set(p.x, rad * 0.6, p.z);
-      rock.rotation.set(rng(), rng(), rng()); shadow.addShadowCaster(rock);
+      const rock = BABYLON.MeshBuilder.CreateIcoSphere("rock", { radius: rad, subdivisions: rockSub }, scene);
+      rock.material = rockMat; rock.position.set(p.x, rad * 0.55, p.z);
+      rock.rotation.set(rng(), rng(), rng()); rock.scaling.set(1, 0.74 + rng() * 0.3, 1);
+      shadow.addShadowCaster(rock);
+      // Satellite-chunk rng drawn unconditionally (tier-independent world layout).
+      const bit = rng() < 0.6, bitX = rad * (0.7 + rng() * 0.4), bitZ = (rng() - 0.5) * rad;
+      const bitRX = rng(), bitRY = rng(), bitRZ = rng();
+      if (richDetail && bit) {                          // a smaller chunk beside it
+        const r2 = BABYLON.MeshBuilder.CreateIcoSphere("rockBit", { radius: rad * 0.5, subdivisions: rockSub }, scene);
+        r2.material = rockMat; r2.position.set(p.x + bitX, rad * 0.3, p.z + bitZ);
+        r2.rotation.set(bitRX, bitRY, bitRZ); shadow.addShadowCaster(r2);
+      }
       addObstacle(p.x, p.z, rad * 0.85);
     }
 
@@ -4287,16 +4393,29 @@
       }
     }
 
-    // ---- Crystals (peaks + caverns): glowing faceted spires. ----
+    // ---- Crystals (peaks + caverns): glowing, glassy faceted spires that catch
+    // the sky probe — three shared materials, with a small shard cluster on
+    // capable tiers. ----
     const nCryst = SC.crystals || 0;
     if (nCryst) {
+      const crystMats = ["#8fe0ff", "#b58cff", "#7affc6"].map((c, i) => gloss(emat(scene, "cryst" + i, c, 0.6), 0.18, 0.1));
       for (let i = 0; i < nCryst; i++) {
         const p = place(6, FAR); if (!p) continue;
-        const col = ["#8fe0ff", "#b58cff", "#7affc6"][(rng() * 3) | 0];
-        const cm = emat(scene, "cryst" + i, col, 0.6);
+        const cm = crystMats[(rng() * crystMats.length) | 0];
         const h = 1.4 + rng() * 2.2;
-        const cr = BABYLON.MeshBuilder.CreateCylinder("cryst", { diameterTop: 0, diameterBottom: 0.7 + rng() * 0.5, height: h, tessellation: 5 }, scene);
+        const cr = BABYLON.MeshBuilder.CreateCylinder("cryst", { diameterTop: 0, diameterBottom: 0.7 + rng() * 0.5, height: h, tessellation: 6 }, scene);
         cr.material = cm; cr.position.set(p.x, h / 2, p.z); cr.rotation.y = rng() * Math.PI; shadow.addShadowCaster(cr);
+        // Shard rng drawn unconditionally (tier-independent world layout); the
+        // shards themselves only render where the detail budget allows.
+        const shards = 1 + ((rng() * 2) | 0), drawShards = foliage >= 0.6;
+        for (let s = 0; s < shards; s++) {
+          const sh = h * (0.3 + rng() * 0.3), ang = rng() * Math.PI * 2, rr = 0.5 + rng() * 0.4;
+          const botD = 0.28 + rng() * 0.3, rx = (rng() - 0.5) * 0.5, ry = rng() * Math.PI, rz = (rng() - 0.5) * 0.5;
+          if (!drawShards) continue;
+          const c2 = BABYLON.MeshBuilder.CreateCylinder("crystS", { diameterTop: 0, diameterBottom: botD, height: sh, tessellation: 6 }, scene);
+          c2.material = cm; c2.position.set(p.x + Math.cos(ang) * rr, sh / 2, p.z + Math.sin(ang) * rr);
+          c2.rotation.set(rx, ry, rz); shadow.addShadowCaster(c2);
+        }
         addObstacle(p.x, p.z, 0.7);
       }
     }
@@ -4324,19 +4443,26 @@
       }
     }
 
-    // ---- Flowers + grass tufts (decorative ground cover). ----
+    // ---- Flowers + grass tufts (decorative ground cover). Materials are SHARED
+    // across the patch (one stem + one head per palette colour) so the dense
+    // meadow doesn't spawn hundreds of one-off materials; heads use a cheap
+    // fixed-density sphere since they're barely a handspan wide. ----
     const tuftMat = mat(scene, "tuft", indoor ? "#2c4a26" : "#69bd55");
     const nFlow = SC.flowers || 0;
-    for (let i = 0; i < nFlow; i++) {
-      const p = place(5, FAR); if (!p) continue;
-      if (rng() < 0.5) {
-        const stem = cyl(scene, "stem", 0.04, 0.04, 0.4, mat(scene, "stem", "#3c8a3c"));
-        stem.position.set(p.x, 0.2, p.z);
-        const head = sphere(scene, "fhead", 0.18, mat(scene, "fhead", PALETTE[(rng() * PALETTE.length) | 0]));
-        head.position.set(p.x, 0.42, p.z);
-      } else {
-        const tuft = cone(scene, "tuft", 0.35, 0, 0.5, tuftMat);
-        tuft.position.set(p.x, 0.25, p.z);
+    if (nFlow) {
+      const stemMat = mat(scene, "stem", "#3c8a3c");
+      const headMats = PALETTE.map((c, i) => mat(scene, "fhead" + i, c));
+      for (let i = 0; i < nFlow; i++) {
+        const p = place(5, FAR); if (!p) continue;
+        if (rng() < 0.5) {
+          const stem = cyl(scene, "stem", 0.04, 0.04, 0.4, stemMat);
+          stem.position.set(p.x, 0.2, p.z);
+          const head = tinySphere(scene, "fhead", 0.18, headMats[(rng() * headMats.length) | 0]);
+          head.position.set(p.x, 0.42, p.z);
+        } else {
+          const tuft = cone(scene, "tuft", 0.35, 0, 0.5, tuftMat);
+          tuft.position.set(p.x, 0.25, p.z);
+        }
       }
     }
 
@@ -5972,6 +6098,7 @@
   function createScene() {
     const scene = new BABYLON.Scene(engine);
     Quality.detect();   // choose a graphics tier before the first zone is built
+    makeEnvironment(scene);  // procedural IBL probe (tier-gated; feeds PBR reflections)
 
     const camera = new BABYLON.ArcRotateCamera("cam", -Math.PI / 2, 1.05, 12, new BABYLON.Vector3(0, 1.4, 12), scene);
     camera.lowerRadiusLimit = 6; camera.upperRadiusLimit = 18;
@@ -7267,24 +7394,83 @@
     } catch (e) { showFatal(e.message); throw e; }
   }
 
-  // ---- mesh + math helpers ----------------------------------------------
-  function mat(scene, name, hex) {
+  // ---- materials -------------------------------------------------------------
+  // PBR on capable tiers (energy-conserving, env-lit) with a StandardMaterial
+  // fallback on weak GPUs / headless. Both share one API so the rest of the game
+  // never branches: mat()/emat() return whichever the active tier wants. A small
+  // alias maps the legacy diffuseColor/specularColor writes (weapon recolour, NPC
+  // markers, …) onto the PBR channels so every existing build/animation path keeps
+  // working untouched. Backdrop materials that lean on StandardMaterial specifics
+  // (the unlit sky dome, the sea/river sheen) call stdMat/stdEmat directly.
+  function stdMat(scene, name, hex) {
     const m = new BABYLON.StandardMaterial(name, scene);
     m.diffuseColor = BABYLON.Color3.FromHexString(hex);
     m.specularColor = new BABYLON.Color3(0.08, 0.08, 0.08);
     return m;
   }
-  function emat(scene, name, hex, emissive) {
-    const m = mat(scene, name, hex);
+  function stdEmat(scene, name, hex, emissive) {
+    const m = stdMat(scene, name, hex);
     m.emissiveColor = BABYLON.Color3.FromHexString(hex).scale(emissive);
     return m;
   }
-  const sphere = (s, n, d, m) => { const x = BABYLON.MeshBuilder.CreateSphere(n, { diameter: d, segments: 12 }, s); x.material = m; return x; };
+  function pbrMat(scene, name, hex) {
+    const m = new BABYLON.PBRMaterial(name, scene);
+    m._ggPBR = true;
+    m.albedoColor = BABYLON.Color3.FromHexString(hex);
+    m.metallic = 0.0; m.roughness = 0.82;
+    m.environmentIntensity = ENV_ON ? 0.6 : 0.0;
+    // Legacy aliases: lots of code still writes .diffuseColor / .specularColor.
+    try {
+      Object.defineProperty(m, "diffuseColor", {
+        configurable: true,
+        get() { return this.albedoColor; },
+        set(v) { this.albedoColor = v; },
+      });
+      let _spec = new BABYLON.Color3(0.08, 0.08, 0.08);
+      Object.defineProperty(m, "specularColor", {
+        configurable: true,
+        get() { return _spec; },
+        set(v) { _spec = v; },
+      });
+    } catch (e) {}
+    return m;
+  }
+  function pbrEmat(scene, name, hex, emissive) {
+    const m = pbrMat(scene, name, hex);
+    m.emissiveColor = BABYLON.Color3.FromHexString(hex).scale(emissive);
+    return m;
+  }
+  function usePBR() { return !!(BABYLON.PBRMaterial && Quality.settings().pbr); }
+  function mat(scene, name, hex) { return usePBR() ? pbrMat(scene, name, hex) : stdMat(scene, name, hex); }
+  function emat(scene, name, hex, emissive) { return usePBR() ? pbrEmat(scene, name, hex, emissive) : stdEmat(scene, name, hex, emissive); }
+
+  // Give a material a polished finish (candy sheen, gem facets, blades). PBR:
+  // tighten roughness + optional metalness; Standard: a crisp tight specular.
+  function gloss(m, roughness, metallic) {
+    if (!m) return m;
+    if (m._ggPBR) {
+      if (roughness != null) m.roughness = roughness;
+      if (metallic != null) m.metallic = metallic;
+    } else {
+      try { m.specularColor = new BABYLON.Color3(0.42, 0.42, 0.46); m.specularPower = 96; } catch (e) {}
+    }
+    return m;
+  }
+
+  // ---- mesh + math helpers ----------------------------------------------
+  // Segment / tessellation density scales with the quality tier — rounder, denser
+  // silhouettes on desktop; lighter (≤ the original counts) on phones / headless.
+  const _seg = () => Quality.settings().seg || 12;
+  const _tess = () => Quality.settings().tess || 16;
+  const sphere = (s, n, d, m) => { const x = BABYLON.MeshBuilder.CreateSphere(n, { diameter: d, segments: _seg() }, s); x.material = m; return x; };
   const box = (s, n, w, h, d, m) => { const x = BABYLON.MeshBuilder.CreateBox(n, { width: w, height: h, depth: d }, s); x.material = m; return x; };
-  const cyl = (s, n, top, bot, h, m) => { const x = BABYLON.MeshBuilder.CreateCylinder(n, { diameterTop: top, diameterBottom: bot, height: h, tessellation: 16 }, s); x.material = m; return x; };
+  const cyl = (s, n, top, bot, h, m) => { const x = BABYLON.MeshBuilder.CreateCylinder(n, { diameterTop: top, diameterBottom: bot, height: h, tessellation: _tess() }, s); x.material = m; return x; };
   const cone = (s, n, bot, top, h, m) => cyl(s, n, top, bot, h, m);
-  const capsule = (s, n, h, r, m) => { const x = BABYLON.MeshBuilder.CreateCapsule(n, { height: h, radius: r }, s); x.material = m; return x; };
-  const disc = (s, n, r, m) => { const x = BABYLON.MeshBuilder.CreateDisc(n, { radius: r, tessellation: 28 }, s); x.material = m; return x; };
+  const capsule = (s, n, h, r, m) => { const x = BABYLON.MeshBuilder.CreateCapsule(n, { height: h, radius: r, tessellation: _tess(), subdivisions: 2 }, s); x.material = m; return x; };
+  const disc = (s, n, r, m) => { const x = BABYLON.MeshBuilder.CreateDisc(n, { radius: r, tessellation: _tess() + 8 }, s); x.material = m; return x; };
+  // A tiny fixed-density sphere for very-high-count decorations (flower heads,
+  // salt grains) where the tier's segment count would be wasted on a 0.2 m prop.
+  const tinySphere = (s, n, d, m) => { const x = BABYLON.MeshBuilder.CreateSphere(n, { diameter: d, segments: 6 }, s); x.material = m; return x; };
 
   function lerp(a, b, t) { return a + (b - a) * t; }
   function lerpAngle(a, b, t) {
@@ -7323,6 +7509,9 @@
       setupZoneContent, teardownZone,
       // ---- Lighting / shadows / quality tier (Task 4) ----
       Quality, makeSunShadows, setupPostFX, applyZoneMood,
+      // ---- Higher-fidelity models / materials (Task 3) ----
+      makeEnvironment, mat, emat, stdMat, stdEmat, pbrMat, pbrEmat, gloss, usePBR,
+      get envOn() { return ENV_ON; },
       addMaterial, spendMaterials, hasMaterials, craftRecipe, addRelic, hasRelic,
       grantReward, spawnImpact, winGame,
       get interaction() { return interactionRef; },
