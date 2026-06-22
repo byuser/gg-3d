@@ -285,7 +285,23 @@ A task is **done** only when **all** of these are true:
   motion), `test/harness.js`, `README.md`.
 
 ### Task 6 — More sound effects + per‑location background ambience
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-22 · Shipped a fuller, fully‑procedural soundscape (no audio files) on a
+  new shared **`Mixer`** (one Web Audio graph: `Sfx`/`Music`/`Ambience` → per‑channel bus gains → master,
+  with 0..1 volumes + a master mute persisted in `localStorage`). New **SFX**: per‑surface **footsteps**
+  (grass/stone/sand/snow, stride‑cadenced off `walkPhase`), gather/mine, quest accept/turn‑in chimes, a
+  portal **whoosh** on travel, UI clicks and a hysteresis **low‑health** warning. Each land gets a unique
+  **ambient bed** (meadow birds+breeze, forest wind+creaks, shore waves+gulls, peak wind howl, cavern
+  drips+drone, thicket insects) chosen by a pure `bedFor(zone)`, **crossfaded** on zone travel via
+  `ZoneManager` (no clicks/pops). A 4‑slider mixer (Master/Music/Effects/Ambience) + **Mute all** lives on
+  the start screen **and** pause settings (`AudioUI`), localized EN/RU, persisted across reload. Nothing
+  plays before the first user gesture; ambience uses `Math.random()` (cosmetic) so the seeded gameplay
+  `rng()` stays deterministic. Fully headless‑safe (no `AudioContext` ⇒ silent no‑op). New harness suite
+  **[33]** (22 checks; total 332 → 354): footstep surface mapping, the pure per‑zone bed recipes, mixer
+  clamp/channel‑validation/mute, the settings persistence round‑trip (survives reload), the no‑context
+  no‑op path, and — against an injected Web Audio stub — the bus‑graph build, **every** SFX cue firing,
+  ambience crossfade through all zones, and stride‑cadenced footstep wiring. No save‑schema change
+  (`SAVE_VERSION` untouched — audio prefs persist to `localStorage` like locale/graphics). `index.html`
+  `?v=` bumped to **19** (css **16**).
 - **Depends on:** none (slots onto zones + the existing `Sfx`/`Music`).
 - **Goal.** A fuller, higher‑quality soundscape: more **SFX** and a unique
   **ambient bed** per location, mixed well and toggleable.
@@ -428,6 +444,28 @@ and note it; if it's expensive or irreversible, ask me first.
 
 ## 7. Changelog
 
+- 2026-06-22 · **Task 6 — More sound effects + per‑location background ambience**: a fuller,
+  fully‑procedural soundscape (still **zero audio files**) built on a new shared **`Mixer`** — one Web
+  Audio graph routing `Sfx` / `Music` / `Ambience` through **per‑channel bus gains** into a master, with
+  0..1 channel volumes + a master‑mute that **persist** in `localStorage` (`gg3d_audio`). Richer **SFX**:
+  per‑surface **footsteps** (grass / stone / sand / snow, fired in stride cadence off the character's
+  `walkPhase`), a gather/**mine** harvest cue, **quest accept / turn‑in** chimes, a portal **whoosh** on
+  travel, **UI clicks**, and a hysteresis **low‑health** warning. Every land now has its own **ambient
+  bed** — meadow **birds + breeze**, forest **wind + creaks**, shore **waves + gulls**, frostpeak **wind
+  howl**, cavern **drips + drone**, thicket **insects** — selected by a pure, testable `Ambience.bedFor(zone)`
+  and **crossfaded** (fade‑out + fade‑in, no clicks/pops) when the `ZoneManager` streams between zones.
+  A small player‑facing **mixer** (`AudioUI`): four volume sliders (Master · Music · Effects · Ambience)
+  + a **Mute all** toggle, mirrored on the **start screen** and **pause settings**, EN/RU localized,
+  applied live and **persisted across reload**. Nothing sounds before the first user gesture (autoplay
+  policy); ambience scheduling uses `Math.random()` (purely cosmetic) so the seeded gameplay `rng()` stays
+  deterministic and save/load is untouched. Fully **headless‑safe**: with no `AudioContext` the whole
+  stack no‑ops, while the pure volume/persistence/mapping logic is still exercised. New harness suite
+  **[33]** (22 checks; total 332 → 354) covers footstep surface mapping, the per‑zone bed recipes, the
+  mixer's volume **clamping** + channel validation + **master mute**, the **settings persistence
+  round‑trip** (survives reload), the headless no‑op path, and — against an injected Web Audio stub — the
+  **bus‑graph build**, **every SFX cue** firing, **ambience crossfade through all zones**, and
+  stride‑cadenced **footstep wiring**. No save‑schema change (`SAVE_VERSION` untouched). `index.html`
+  `?v=` bumped to **19** (css **16**, for the slider/mute styles).
 - 2026-06-22 · **Task 5 — More + higher‑quality animation (actions + environment)**: a tier‑gated,
   fully feature‑detected animation pass. Combat now reads with clear **anticipation → impact →
   recovery**: a small, pure **`Swing`** state machine (windup → strike → recover, with leftover time

@@ -50,6 +50,7 @@ and gear without ever blocking the main line. Slay the dragon to **win**.
 | Music on/off | `M` | 🔊 button (top-right) |
 | Pause / menu | `Esc` | ☰ button (top-right) |
 | Language (EN / RU) | start screen · pause settings | same |
+| Audio volumes / mute | start screen · pause settings | same |
 
 ## Languages (English / Russian)
 
@@ -209,6 +210,14 @@ runs in English without a browser.
   separate currency spent at the merchant.
 - **Music:** a procedurally-synthesised soundtrack plays as you fight (no audio files —
   it's generated in-browser). Toggle it with `M` or the 🔊 button.
+- **Sound & ambience:** a fuller procedural soundscape (still no audio files). Richer
+  **sound effects** — per-surface **footsteps** (grass / stone / sand / snow), gather/mine
+  cues, quest accept/turn-in chimes, a portal **whoosh** on travel, UI clicks and a
+  **low-health** warning. Every land also has its own **ambient bed** — meadow birds &
+  breeze, forest wind & creaks, shore waves & gulls, frostpeak wind howl, cavern drips &
+  drone, thicket insects — that **crossfades** as you travel between zones. A small **mixer**
+  (Master · Music · Effects · Ambience volume sliders + a **Mute all** toggle) lives on the
+  **start screen** and in the **pause settings**, and your choice **persists** across reload.
 - **Health:** the sweets bite on contact. When your health hits zero it's **game over** —
   your final score and the wave you reached are shown.
 - **Camera:** the view follows Lily at a fixed distance; zoom only with the mouse
@@ -281,8 +290,13 @@ probe**, and **every zone building + tearing down on the PBR + env tier** withou
 new **animation** suite: the attack **state machine** (anticipation → impact → recovery phase
 transitions + timers, proven **frame-rate independent** and **pause-correct**), the player **flinch**
 + **gather** triggers, the pure **per-zone ambient spec**, **tier-gated** ambient density, and
-**every zone building + animating + disposing its ambient FX** (feature-detected, **leak-free**) —
-all without a browser:
+**every zone building + animating + disposing its ambient FX** (feature-detected, **leak-free**),
+and the new **audio** suite: per-surface **footstep** mapping, the pure **per-zone ambience bed**
+recipes, the **mixer** volume **clamping** + channel validation + **master mute**, the
+**settings persistence round-trip** (survives reload), the **headless no-op** path (no
+`AudioContext`), and — against an **injected Web Audio stub** — the **bus graph build**, **every
+SFX cue** firing, and **ambience crossfade** through all zones (plus stride-cadenced footstep
+wiring) — all without a browser:
 
 ```bash
 node test/harness.js
@@ -312,8 +326,17 @@ node test/harness.js
   randomly every 5 waves, and drops a guaranteed **rare item** (`ItemDrop`) + coins.
 - **`Coin` / `ItemDrop` / `Merchant`** — coins and rare loot dropped in the world, plus
   the plaza merchant who runs the shop between waves.
+- **`Mixer`** — the shared audio backbone: a single Web Audio graph wiring `Sfx` / `Music` /
+  `Ambience` through per-channel **bus gains** into a master, with 0..1 volumes + a master-mute
+  that **persist** in `localStorage`. `AudioUI` drives the matching sliders/mute on the start
+  screen + pause settings; everything is feature-detected (no `AudioContext` ⇒ silent no-op).
 - **`Music`** — a tiny Web Audio synth that plays a looping procedural soundtrack (no
-  audio assets), mutable from the HUD.
+  audio assets), mutable from the HUD; now routed through the `Mixer`'s music bus.
+- **`Sfx`** — procedural one-shot sound effects (combat, pickups, **footsteps** per surface,
+  gather/mine, quest, UI, portal, low-health) on the `Mixer`'s effects bus.
+- **`Ambience`** — a per-location procedural **background bed** (birds/wind/waves/gulls/drips/
+  insects/drone, chosen by a pure `bedFor(zone)`) on the `Mixer`'s ambience bus, **crossfaded**
+  on zone travel via `ZoneManager`.
 - **`ZONES` / `buildWorld(scene, zone)`** — the world is a table of **zones** (a hub + wild
   lands + boss lairs), each with its own theme, scenery spec, monster spawn table and
   optional boss. `buildWorld` themes the terrain/lighting/backdrop, scatters the zone's
@@ -456,4 +479,10 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 - [x] **Graphics-quality setting** — a **Pause → Graphics** selector to choose **Auto** (device
       detect) or force **High / Medium / Low**; the choice **persists** (`localStorage`) and applies
       via a quick **progress-preserving reload**; EN/RU localized, headless-safe + unit-tested
+- [x] **More sound effects + per-location ambience** — richer procedural **SFX** (per-surface
+      **footsteps**, gather/mine, quest accept/turn-in, portal **whoosh**, UI clicks, low-health
+      warning) and a unique **ambient bed** per land (birds/breeze, wind/creaks, waves/gulls, wind
+      howl, drips/drone, insects) that **crossfades** on travel, all behind a small **mixer**
+      (Master · Music · Effects · Ambience + **Mute all**) on the start screen + pause settings that
+      **persists** (`localStorage`); fully procedural (no audio files), feature-detected + unit-tested
 - [ ] Puzzles (levers, plates, gated doors)
