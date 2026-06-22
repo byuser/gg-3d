@@ -1179,5 +1179,97 @@ ok(T.t("settings.gfxAutoIs", { tier: "Zzz" }).indexOf("Zzz") >= 0, "the Auto hin
 // Restore booted state so nothing leaks into later runs.
 localStorage.removeItem(QUALITY_KEY_T); QT.pref = origPref31; QT.tier = origTier31;
 
+console.log("\n[32] animation — attack state machine, flinch, gather + per-zone ambient FX");
+// ---- Swing: the anticipation → impact → recovery action state machine. ----
+const D = T.SWING_DUR.melee;
+const s = new T.Swing();
+ok(s.phase === "idle" && !s.busy, "a fresh Swing is idle");
+s.trigger("melee");
+ok(s.phase === "windup" && s.busy && s.kind === "melee", "trigger() enters the wind-up (anticipation) phase");
+s.update(D.windup * 0.5);
+ok(s.phase === "windup" && s.progress() > 0.4 && s.progress() < 0.6, "progress() reports 0..1 within the phase");
+s.update(D.windup * 0.5 + D.strike * 0.5);
+ok(s.phase === "strike" && s.striking, "advances wind-up → strike (impact)");
+s.update(D.strike * 0.5 + D.recover * 0.5);
+ok(s.phase === "recover", "advances strike → recover (follow-through)");
+s.update(D.recover);
+ok(s.phase === "idle" && s.kind === null && !s.busy, "recover → idle, and the machine resets");
+// Frame-rate independence: leftover time carries across phase edges, so one big
+// dt and many tiny dts land in the same terminal state.
+const total = D.windup + D.strike + D.recover;
+const big = new T.Swing().trigger("melee"); big.update(total + 0.001);
+const tiny = new T.Swing().trigger("melee"); for (let i = 0; i < 240; i++) tiny.update((total + 0.001) / 240);
+ok(big.phase === "idle" && tiny.phase === "idle", "a single oversized dt and 240 tiny dts both resolve to idle (frame-rate independent)");
+ok(new T.Swing().trigger("nonsense").kind === "melee", "an unknown action kind defaults to a melee arc");
+// Each action kind carries a complete 3-phase timing block.
+ok(["melee", "ranged", "gather"].every((k) => {
+  const d = T.SWING_DUR[k]; return d && d.windup > 0 && d.strike > 0 && d.recover > 0;
+}), "melee / ranged / gather each define windup + strike + recover durations");
+
+// ---- Player: tryCast drives the swing; damage triggers a flinch; gather chops. ----
+const cam = { alpha: 0 };
+pl.swing.phase = "idle"; pl.swing.kind = null; pl.castCooldown = 0; pl.state = "idle";
+pl.tryCast();
+ok(pl.swing.busy, "tryCast() starts an attack swing (anticipation → impact → recovery)");
+pl.swing.phase = "idle"; pl.swing.kind = null; pl.flinch = 0;
+pl.takeDamage(7);
+ok(pl.flinch === 1, "taking damage arms the flinch recoil");
+for (let i = 0; i < 6; i++) pl.update(0.1, cam);
+ok(pl.flinch === 0, "the flinch recoil decays to rest under update() (dt-driven, so it freezes when paused)");
+pl.swing.phase = "idle"; pl.swing.kind = null; pl.state = "idle";
+pl.gather();
+ok(pl.swing.kind === "gather" && pl.swing.busy, "gather() triggers the harvest chop motion");
+// Zero / negative dt never advances the machine (guards a paused / first frame).
+const frozen = new T.Swing().trigger("melee"); frozen.update(0); frozen.update(-1);
+ok(frozen.phase === "windup", "a zero/negative dt leaves the swing frozen (pause-correct)");
+
+// ---- Ambient FX: per-zone spec is pure data; build is feature-detected. ----
+let specOk = true; const kinds = new Set();
+for (const z of T.ZONES) {
+  const sp = T.ambientSpecFor(z);
+  if (!(sp && typeof sp.kind === "string" && typeof sp.rate === "number" && sp.rate > 0 &&
+        typeof sp.critters === "number" && sp.critters >= 0)) specOk = false;
+  kinds.add(sp.kind);
+}
+ok(specOk, "every zone resolves a valid ambient spec (kind + emit rate + critter count)");
+ok(kinds.size >= 4, `zones use a variety of ambient particle kinds (${kinds.size} distinct)`);
+ok(T.ambientSpecFor(null).kind && T.ambientSpecFor({ id: "void" }).kind, "an unknown / missing zone falls back to a safe spec");
+ok(QT.TIERS.high.ambient > QT.TIERS.low.ambient && QT.TIERS.low.ambient > 0,
+   "ambient-FX density scales with the quality tier (and never drops to zero)");
+
+// Build + animate + dispose ambient FX for EVERY zone — headless-safe + leak-free.
+const sceneA = T.state.scene;
+let ambErr = null;
+for (const z of T.ZONES) {
+  try {
+    const fx = T.buildAmbientFX(sceneA, z, z.radius || 60, !!z.indoor);
+    const sp = T.ambientSpecFor(z);
+    if (fx.critters.length !== sp.critters) throw new Error(`critter count ${fx.critters.length} != ${sp.critters}`);
+    fx.update(0); fx.update(1.7); fx.update(9.9);   // drive the motion at several clock times
+    fx.dispose();
+  } catch (e) { ambErr = z.id + ": " + (e && e.message); break; }
+}
+ok(!ambErr, "ambient FX builds, animates + disposes for every zone headless-safe" + (ambErr ? " — " + ambErr : ""));
+
+const fxPS = T.buildAmbientFX(sceneA, T.ZONE_BY_ID.meadow, 88, false);
+ok(fxPS.particles.length === 1, "a drifting particle system is built when ParticleSystem is available");
+fxPS.dispose();
+
+// Feature-detect: with no ParticleSystem (weak/old browser), it degrades to just
+// the critter swarm without throwing.
+const savedPS = BABYLON.ParticleSystem; delete BABYLON.ParticleSystem;
+let noPsErr = null, fxNo = null;
+try { fxNo = T.buildAmbientFX(sceneA, T.ZONE_BY_ID.meadow, 88, false); fxNo.update(1); fxNo.dispose(); }
+catch (e) { noPsErr = e && e.message; }
+ok(!noPsErr && fxNo && fxNo.particles.length === 0, "ambient FX degrades gracefully when ParticleSystem is unavailable");
+BABYLON.ParticleSystem = savedPS;
+
+// buildWorld wires the ambient FX onto the world + tears it down with the zone.
+const w32 = T.buildWorld(sceneA, T.ZONE_BY_ID.shore);
+ok(w32.ambient && typeof w32.ambient.update === "function" && typeof w32.ambient.dispose === "function",
+   "buildWorld exposes the zone's ambient FX handle");
+let disposeErr = null; try { w32.dispose(); } catch (e) { disposeErr = e && e.message; }
+ok(!disposeErr, "disposing the world tears the ambient FX down without throwing");
+
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED ✅" : failures + " CHECK(S) FAILED ❌"}`);
 process.exit(failures === 0 ? 0 : 1);
