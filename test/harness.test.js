@@ -181,12 +181,16 @@ p.castCooldown = 0; p.meleeAnim = 0;
 const act = p.tryCast();
 ok(act && act.type === "melee", "melee weapon yields a melee attack");
 const killsBefore = T.state.score;
-// meleeSweep isn't exported; drive it through the live attack path instead.
+// Damage now lands on the swing's STRIKE (impact) frame, not the wind-up, so
+// the hit lines up with the animation (Task 10). Drive it through the live path.
 T.state.monsters.length = 0;
 const mm2 = new T.Monster(scene, world.shadow, new Vec3(p.position.x, 0, p.position.z + 1.5), 1);
 mm2.hp = 1; T.state.monsters.push(mm2);
-p.castCooldown = 0; key("Space"); step(2); key("Space", false);
-ok(!mm2.alive || mm2.dying > 0, "melee swing struck the sweet in front");
+p.swing.phase = "idle"; p.swing.kind = null; T.state.pendingAttack = null;
+p.castCooldown = 0; key("Space"); step(1); key("Space", false); // queue the swing (wind-up)
+ok(mm2.alive && mm2.dying <= 0, "no damage on the wind-up frame — the hit waits for the strike");
+step(14);                                                       // advance wind-up → strike (impact)
+ok(!mm2.alive || mm2.dying > 0, "melee swing struck the sweet on its strike (impact) frame");
 
 // Lifesteal heals on kill.
 p.health = 10; p.lifesteal = 5;

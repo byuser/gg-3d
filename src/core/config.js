@@ -81,6 +81,10 @@
     // World / exploration (the bigger story map).
     gatherRange: 3.0,         // reach to harvest a resource node
     questReachRange: 6.0,     // how close counts as "reaching" a location/NPC
+    // Hard ceiling on the number of LIVE harvestable resource nodes in a zone at
+    // once. Spawning + respawn both honour it, so the world can never accumulate
+    // an unbounded supply across zone re-entry or save/load (Task 10).
+    maxResourceNodes: 90,
 
     // Day / night cycle — one full day every `dayLength` seconds.
     dayLength: 180,           // seconds for a full dawn→dusk→night→dawn cycle

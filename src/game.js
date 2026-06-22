@@ -611,7 +611,16 @@ import {
       this.onInteract = onInteract; this.enabled = true;
     }
     get position() { return this.node.getAbsolutePosition(); }
-    distanceTo(p) { return BABYLON.Vector3.Distance(this.position, p); }
+    // Defensive: a disposed/stale node (e.g. left over across a zone swap) must
+    // never throw or return NaN here, or it could break selection of the valid
+    // nodes around it — it just sorts to the back as unreachable.
+    distanceTo(p) {
+      try {
+        const pos = this.position;
+        const d = pos ? BABYLON.Vector3.Distance(pos, p) : Infinity;
+        return isFinite(d) ? d : Infinity;
+      } catch (e) { return Infinity; }
+    }
   }
 
   class InteractionSystem {
@@ -2228,12 +2237,48 @@ import {
     }
   }
 
+  // Solid-collision footprint of the built castle, as {x,z,r} circles in the
+  // castle's LOCAL frame (offset by the site root). Walls/towers/keep are solid;
+  // the gate is a PASSABLE opening (a gap in the north wall, flanked by jambs) so
+  // the player can still walk through the gateway. The foundation is a low base
+  // you stand on, so it stays walkable. Pure + headless-safe so it can be unit
+  // tested; CastleSite._syncCollision() maps it into the world's obstacle set.
+  const CASTLE_GATE_HALF = 2.4;          // half-width of the passable gateway
+  function castleCollisionCircles(built) {
+    const has = (id) => built.includes(id);
+    const circles = [];
+    if (has("walls")) {
+      const wallR = 0.9, step = 1.15;
+      // Lay a chain of circles along a wall segment; `gap` (if set) leaves a
+      // passable doorway centred on x=0 (the gateway, on the north wall).
+      const chain = (x0, x1, z0, z1, gap) => {
+        const len = Math.hypot(x1 - x0, z1 - z0);
+        const n = Math.max(1, Math.round(len / step));
+        for (let i = 0; i <= n; i++) {
+          const f = i / n, x = x0 + (x1 - x0) * f, z = z0 + (z1 - z0) * f;
+          if (gap && Math.abs(x) < CASTLE_GATE_HALF) continue;  // gateway gap
+          circles.push({ x, z, r: wallR });
+        }
+      };
+      chain(-6, 6, 6, 6, true);    // north wall (z=+6) — passable gateway at x≈0
+      chain(-6, 6, -6, -6, false); // south wall
+      chain(6, 6, -6, 6, false);   // east wall
+      chain(-6, -6, -6, 6, false); // west wall
+    }
+    if (has("towers")) for (const sx of [-6, 6]) for (const sz of [-6, 6]) circles.push({ x: sx, z: sz, r: 1.5 });
+    if (has("gate")) for (const s of [-1, 1]) circles.push({ x: s * (CASTLE_GATE_HALF + 0.45), z: 6, r: 0.8 }); // gate jambs
+    if (has("keep")) circles.push({ x: 0, z: 0, r: 2.7 });
+    return circles;
+  }
+
   // =========================================================================
   // CastleSite — the heart of the story. Stands on Castle Hill. Spend a castle
   // relic + coins to raise each of the five parts (foundation → walls → towers
   // → gate → keep), watching the castle grow in the world. Building the final
   // keep summons the DRAGON for the climactic battle. Walk up + press E to open
-  // the build panel (CastleUI).
+  // the build panel (CastleUI). Built parts register SOLID collision (walls,
+  // towers, keep) with a passable gate, so the player + wand bolts no longer
+  // pass through it.
   // =========================================================================
   class CastleSite {
     constructor(scene, shadow, interaction, player, state) {
@@ -2244,8 +2289,24 @@ import {
       root.position.set(loc.x, 0, loc.z + 8); this.root = root;
       this.parts = {};
       this._build(scene, shadow);
-      this.it = new Interactable(root, { label: t("label.buildCastle"), range: 6, onInteract: () => CastleUI.openPanel() });
+      // Range reaches over the (now solid) walls so building a part never locks
+      // the player out — they can raise each part from outside the curtain.
+      this.it = new Interactable(root, { label: t("label.buildCastle"), range: 10, onInteract: () => CastleUI.openPanel() });
       interaction.register(this.it);
+    }
+
+    // Re-register the castle's solid-collision circles in the world's obstacle
+    // set to match what's currently built. Tagged with `_castle` so a rebuild
+    // (build / restore) can drop the old ones first — no leaks, no duplicates.
+    _syncCollision() {
+      const world = this.state && this.state.world;
+      if (!world || !Array.isArray(world.obstacles)) return;
+      const obs = world.obstacles;
+      for (let i = obs.length - 1; i >= 0; i--) if (obs[i]._castle) obs.splice(i, 1);
+      const cx = this.root.position.x, cz = this.root.position.z;
+      for (const c of castleCollisionCircles(this.built)) {
+        obs.push({ x: cx + c.x, z: cz + c.z, r: c.r, _castle: true });
+      }
     }
 
     _build(scene, shadow) {
@@ -2313,6 +2374,7 @@ import {
       this.state.coins -= part.cost;
       updateCoins(this.state); updateRelicHud(this.player);
       this.built.push(part.id);
+      this._syncCollision();         // raise solid collision for the new part
       const n = this.parts[part.id];
       if (n) { n.setEnabled(true); n.scaling.setAll(0.01); n._pop = 1; }
       spawnImpact(this.state, this.root.position, "#ffd34e", { y: 4, count: 16, spread: 6, up: 4 });
@@ -2327,6 +2389,7 @@ import {
     restore(builtIds) {
       this.built = (builtIds || []).filter((id) => CASTLE_PART_BY_ID[id]);
       for (const id of this.built) if (this.parts[id]) this.parts[id].setEnabled(true);
+      this._syncCollision();         // re-raise the saved castle's solid collision
     }
 
     // Tear down the build site (everything is parented to root) when the hub
@@ -2862,7 +2925,9 @@ import {
     // Hub-only helpers default to no-ops so the wild zones share one code path.
     let onRoad = () => false;
     let inRiver = () => false;
+    let onBridge = () => false;
     let clearOfRiver = () => true;
+    let roadLanes = [];   // hub road centrelines [{ang,dir}] (empty in the wild)
     let water = null, waterMat = null;
     const FAR = RADIUS - 6;
     let baseWaterY = 0;
@@ -2876,27 +2941,64 @@ import {
     if (zone.home) {
       const riverAngle = 0.5 + rng() * 0.7;
       const ca = Math.cos(riverAngle), sa = Math.sin(riverAngle);
-      const crossN = { x: ca, z: -sa };            // perpendicular to the flow
-      const alongT = { x: sa, z: ca };             // direction of flow
-      const riverPerp = 30 + rng() * 6;    // offset of the river from centre
+      const crossN = { x: ca, z: -sa };            // unit perpendicular to the flow
+      const alongT = { x: sa, z: ca };             // unit direction of flow
+      const riverPerp = 30 + rng() * 6;            // offset of the river from centre
       const riverHalf = 6.5;                        // half-width of the water
-      const bridgeHalf = 5;                         // half-length of each bridge gap
-      const bridges = [0, 52, -52];                 // crossing points along the flow
+      const riverLen = GROUND;
+      const riverCenter = { x: riverPerp * crossN.x, z: riverPerp * crossN.z };
 
       const signedPerp = (x, z) => x * crossN.x + z * crossN.z;
       const tangent = (x, z) => x * alongT.x + z * alongT.z;
-      const onBridge = (x, z) => {
-        const t = tangent(x, z);
-        for (const b of bridges) if (Math.abs(t - b) < bridgeHalf) return true;
+
+      // ---- Roads: a crossroads laid out RELATIVE to the river. Road A meets the
+      // water head-on (so it earns a real bridge); road B is rotated 90° and runs
+      // ALONGSIDE the river — a small jitter keeps road B's crossing beyond the
+      // fence, so neither road ever spills into open water. `dir` is the unit
+      // along-road vector (the ground mesh's long axis under rotation.y = ang). ----
+      const roadHalf = 5;                                   // onRoad clear-lane half-width
+      const roadTilt = (rng() - 0.5) * 0.36;                // ±0.18rad jitter on the crossing road
+      const baseRoadAng = riverAngle + Math.PI / 2 + roadTilt;
+      roadLanes = [baseRoadAng, baseRoadAng + Math.PI / 2].map((ang) => ({
+        ang, dir: { x: Math.sin(ang), z: Math.cos(ang) },
+      }));
+      const roads = roadLanes;
+
+      // Bridge-aware crossings: for every road that actually reaches the river
+      // WITHIN the fence, drop a bridge gap centred on its crossing and sized to
+      // span the road's full (oblique) footprint — so "onRoad ∩ open water" is
+      // empty and the player never walks a road into the water off a bridge.
+      const bridges = [];
+      for (const r of roads) {
+        const dN = r.dir.x * crossN.x + r.dir.z * crossN.z;  // dir · N (perp alignment)
+        if (Math.abs(dN) < 1e-3) continue;                   // parallel to flow → never crosses
+        const along = riverPerp / dN;                        // distance along the road to the crossing
+        if (Math.abs(along) > RADIUS) continue;              // road leaves the map before the water
+        const dT = r.dir.x * alongT.x + r.dir.z * alongT.z;  // dir · T (flow alignment)
+        bridges.push({ t: along * dT, half: (Math.abs(dT) * riverHalf + roadHalf) / Math.abs(dN) + 1.5 });
+      }
+      // A couple of plain foot-bridges further along the river for extra crossings.
+      const roadBridgeT = bridges.length ? bridges[0].t : 0;
+      for (const off of [44, -44]) {
+        const ft = roadBridgeT + off;
+        if (Math.abs(ft) < riverLen * 0.4) bridges.push({ t: ft, half: 5 });
+      }
+
+      onBridge = (x, z) => {
+        const tt = tangent(x, z);
+        for (const b of bridges) if (Math.abs(tt - b.t) < b.half) return true;
         return false;
       };
       // True if a point sits in open water (blocks movement); bridges are walkable.
       inRiver = (x, z) => Math.abs(signedPerp(x, z) - riverPerp) < riverHalf && !onBridge(x, z);
       clearOfRiver = (x, z) => Math.abs(signedPerp(x, z) - riverPerp) > riverHalf + 1.5;
+      // On/near a road centreline? (perp distance to the road's along-axis.)
+      onRoad = (x, z) => {
+        for (const r of roads) if (Math.abs(x * r.dir.z - z * r.dir.x) < roadHalf) return true;
+        return false;
+      };
 
       // Water surface (a long translucent blue band) + darker muddy banks.
-      const riverCenter = { x: riverPerp * crossN.x, z: riverPerp * crossN.z };
-      const riverLen = GROUND;
       const bank = BABYLON.MeshBuilder.CreateGround("bank", { width: riverHalf * 2 + 4, height: riverLen }, scene);
       bank.rotation.y = riverAngle; bank.position.set(riverCenter.x, 0.015, riverCenter.z);
       bank.material = mat(scene, "bank", "#5c4a32"); bank.receiveShadows = true;
@@ -2907,48 +3009,47 @@ import {
       water.material = waterMat; water.isPickable = false;
       baseWaterY = water.position.y;
 
-      // Lily pads floating on the water (purely decorative).
+      // Lily pads floating on the open water (never under a bridge deck).
       const padMat = mat(scene, "pad", "#2f8f4a");
       for (let i = 0; i < 14; i++) {
-        const t = (rng() - 0.5) * riverLen * 0.8;
-        if (Math.abs((((t) % 52) + 52) % 52) < bridgeHalf + 1) continue; // not on a bridge
+        const tt = (rng() - 0.5) * riverLen * 0.8;
         const off = (rng() - 0.5) * (riverHalf * 1.4);
-        const x = riverCenter.x + alongT.x * t + crossN.x * off;
-        const z = riverCenter.z + alongT.z * t + crossN.z * off;
+        const x = riverCenter.x + alongT.x * tt + crossN.x * off;
+        const z = riverCenter.z + alongT.z * tt + crossN.z * off;
+        if (onBridge(x, z)) continue;
         const pad = disc(scene, "pad", 0.5 + rng() * 0.4, padMat);
         pad.rotation.x = Math.PI / 2; pad.position.set(x, 0.08, z); pad.isPickable = false;
       }
 
-      // Bridges — a wooden plank deck + rails at each crossing.
+      // Bridges — a wooden plank deck + rails spanning the water at each crossing.
       const plankMat = mat(scene, "plank", "#9a6a3a");
       const railMat = mat(scene, "rail", "#7a5230");
       for (const b of bridges) {
-        const cx = riverCenter.x + alongT.x * b;
-        const cz = riverCenter.z + alongT.z * b;
-        const deck = box(scene, "bridge", riverHalf * 2 + 5, 0.25, bridgeHalf * 2, plankMat);
+        const cx = riverCenter.x + alongT.x * b.t;
+        const cz = riverCenter.z + alongT.z * b.t;
+        const deck = box(scene, "bridge", riverHalf * 2 + 5, 0.25, b.half * 2, plankMat);
         deck.rotation.y = riverAngle; deck.position.set(cx, 0.12, cz); deck.receiveShadows = true;
         shadow.addShadowCaster(deck);
         for (const side of [-1, 1]) {
           const rail = box(scene, "rail", riverHalf * 2 + 5, 0.5, 0.18, railMat);
           rail.rotation.y = riverAngle;
-          rail.position.set(cx + alongT.x * (bridgeHalf - 0.2) * side, 0.5, cz + alongT.z * (bridgeHalf - 0.2) * side);
+          rail.position.set(cx + alongT.x * (b.half - 0.2) * side, 0.5, cz + alongT.z * (b.half - 0.2) * side);
           shadow.addShadowCaster(rail);
         }
       }
 
-      // ---- Roads: a randomly oriented crossroads of grey strips. ----
+      // ---- Roads: grey strips along each centreline, with sandy edge lines. ----
       const roadMat = mat(scene, "road", "#6b6f78");
       const roadEdge = mat(scene, "roadEdge", "#d9c47a");
-      const baseAngle = rng() * Math.PI;
-      const roadAngles = [baseAngle, baseAngle + Math.PI / 2];
-      for (const ang of roadAngles) {
+      for (const r of roads) {
         const road = BABYLON.MeshBuilder.CreateGround("road", { width: 7, height: GROUND }, scene);
-        road.rotation.y = ang; road.position.y = 0.02; road.material = roadMat; road.receiveShadows = true;
+        road.rotation.y = r.ang; road.position.y = 0.02; road.material = roadMat; road.receiveShadows = true;
+        const nd = { x: r.dir.z, z: -r.dir.x };   // unit perpendicular to the road
         for (const side of [-1, 1]) {
           const edge = BABYLON.MeshBuilder.CreateGround("edge", { width: 0.35, height: GROUND }, scene);
-          edge.rotation.y = ang; edge.position.y = 0.03; edge.material = roadEdge;
-          edge.position.x = Math.cos(ang) * 3.3 * side;
-          edge.position.z = -Math.sin(ang) * 3.3 * side;
+          edge.rotation.y = r.ang; edge.position.y = 0.03; edge.material = roadEdge;
+          edge.position.x = nd.x * 3.3 * side;
+          edge.position.z = nd.z * 3.3 * side;
         }
       }
 
@@ -2956,23 +3057,15 @@ import {
       const plaza = disc(scene, "plaza", 5, mat(scene, "plaza", "#caa46a"));
       plaza.rotation.x = Math.PI / 2; plaza.position.y = 0.04; plaza.receiveShadows = true;
 
-      // Helper: are we on/near a road centerline? (keep trees off the roads)
-      onRoad = (x, z) => {
-        for (const ang of roadAngles) {
-          const perp = Math.abs(x * Math.sin(ang) - z * Math.cos(ang));
-          if (perp < 5) return true;
-        }
-        return false;
-      };
-
       // ---- Lampposts marching along the roads (emissive, no extra GPU lights). ----
       const poleMat = mat(scene, "pole", "#3a3f4a");
       const lampMat = emat(scene, "lamp", "#ffe6a0", 0.9);
-      for (const ang of roadAngles) {
+      for (const r of roads) {
+        const nd = { x: r.dir.z, z: -r.dir.x };
         for (let d = -FAR + 8; d <= FAR - 8; d += 18) {
           for (const side of [-1, 1]) {
-            const x = Math.cos(ang) * d + Math.sin(ang) * 4.4 * side;
-            const z = -Math.sin(ang) * d + Math.cos(ang) * 4.4 * side;
+            const x = r.dir.x * d + nd.x * 4.4 * side;
+            const z = r.dir.z * d + nd.z * 4.4 * side;
             if (Math.hypot(x, z) > FAR || inRiver(x, z)) continue;
             const pole = cyl(scene, "pole", 0.18, 0.22, 3.2, poleMat);
             pole.position.set(x, 1.6, z); shadow.addShadowCaster(pole);
@@ -3371,7 +3464,7 @@ import {
       for (const mt of _newMat) { try { if (mt && mt.dispose) mt.dispose(); } catch (e) {} }
     }
 
-    return { shadow, onRoad, obstacles, inRiver, moveActor, water, waterMat,
+    return { shadow, onRoad, obstacles, inRiver, onBridge, roadLanes, moveActor, water, waterMat,
              hemi, sun, sky, skyMat, seaMat, ground, portals, zone, radius: RADIUS, ambient, dispose };
   }
 
@@ -3801,6 +3894,7 @@ import {
     ];
     for (const s of spec) {
       for (let i = 0; i < s.n; i++) {
+        if (state.resources.length >= CONFIG.maxResourceNodes) break; // global live-node cap
         const p = scatter(s.band[0], s.band[1]); if (!p) continue;
         state.resources.push(new ResourceNode(scene, world.shadow, interaction, new BABYLON.Vector3(p.x, 0, p.z), s.kind, player, state));
       }
@@ -3864,6 +3958,7 @@ import {
     };
     for (const pair of spec) {
       for (let i = 0; i < pair[1]; i++) {
+        if (state.resources.length >= CONFIG.maxResourceNodes) break; // global live-node cap
         const p = scatter(); if (!p) continue;
         state.resources.push(new ResourceNode(scene, world.shadow, interaction, new BABYLON.Vector3(p.x, 0, p.z), pair[0], player, state));
       }
@@ -4987,6 +5082,7 @@ import {
     if (state.castle && state.castle.dispose) { try { state.castle.dispose(); } catch (e) {} }
     state.merchant = null; state.blacksmith = null; state.castle = null;
     state.boss = null; state.dragon = null;
+    state.pendingAttack = null;   // drop any mid-swing attack queued in the old zone
     if (interaction && interaction.clear) interaction.clear();
     hideBossBar();
   }
@@ -5049,6 +5145,7 @@ import {
       totalKills: 0,    // lifetime sweets felled (quest "hunt" progress)
       waveStats: { kills: 0, artifacts: 0, coins: 0 },
       merchant: null, blacksmith: null, boss: null,
+      pendingAttack: null, // attack awaiting its swing's strike (impact) frame
     };
 
     // Hand out the starting gear and compute the initial stat block.
@@ -5140,25 +5237,22 @@ import {
 
       // Attacking — ranged weapons fire ballistic bolts/arrows (possibly a
       // multishot spread); melee weapons sweep an arc in front of the player.
+      // The hit/bolt is QUEUED here and RESOLVED on the swing's strike (impact)
+      // frame below, so damage lands with the animation, never on the wind-up.
       if (Input.wantsCast()) {
         const act = player.tryCast();
-        if (act && act.type === "ranged") {
-          const w = act.weapon;
-          for (const s of act.shots) {
-            state.bolts.push(new Projectile(scene, state.world.shadow, s.origin, s.dir, {
-              speed: w.boltSpeed, radius: w.boltRadius, damage: w.damage,
-              pierce: w.pierce, color: w.color, haloColor: w.haloColor,
-              gravity: w.gravity, shape: w.shape,
-            }));
-          }
-          // Distinct audio per ranged weapon family: arrows whoosh, multi-bolt
-          // staves shimmer, a plain wand blips.
-          Sfx.play(w.shape === "arrow" ? "arrow" : (w.multishot > 1 ? "staff" : "bolt"));
-        } else if (act && act.type === "melee") {
-          meleeSweep(state, act);
-          // Heavy, wide weapons (axe/hammer/greatsword) get a beefier swing.
-          const mw = act.weapon;
-          Sfx.play((mw.melee && mw.melee.arc >= 2.2) ? "heavy" : "melee");
+        if (act) {
+          if (state.pendingAttack) fireAttack(state, scene, player, state.pendingAttack); // flush any straggler
+          state.pendingAttack = act;
+        }
+      }
+      // Land the queued attack the instant the swing reaches its strike phase
+      // (or just after, if a big dt skipped it — never drop a committed hit).
+      if (state.pendingAttack) {
+        const sw = player.swing;
+        if (sw.striking || sw.phase === "recover" || !sw.busy) {
+          fireAttack(state, scene, player, state.pendingAttack);
+          state.pendingAttack = null;
         }
       }
 
@@ -5263,6 +5357,31 @@ import {
       const hit = h.update(dt, player.position);
       if (hit) { damagePlayer(state, h.damage); h.dead = true; }
       if (h.dead) { h.dispose(); state.enemyBolts.splice(i, 1); }
+    }
+  }
+
+  // Land a queued attack on the swing's strike frame: spawn the ranged bolts
+  // (from the committed shots) or sweep the melee arc from the player's LIVE
+  // position in the committed direction, so the hit lines up with the animation.
+  function fireAttack(state, scene, player, act) {
+    if (!act) return;
+    if (act.type === "ranged") {
+      const w = act.weapon;
+      for (const s of act.shots) {
+        state.bolts.push(new Projectile(scene, state.world.shadow, s.origin, s.dir, {
+          speed: w.boltSpeed, radius: w.boltRadius, damage: w.damage,
+          pierce: w.pierce, color: w.color, haloColor: w.haloColor,
+          gravity: w.gravity, shape: w.shape,
+        }));
+      }
+      // Distinct audio per ranged weapon family: arrows whoosh, multi-bolt
+      // staves shimmer, a plain wand blips.
+      Sfx.play(w.shape === "arrow" ? "arrow" : (w.multishot > 1 ? "staff" : "bolt"));
+    } else {
+      meleeSweep(state, { weapon: act.weapon, origin: player.position.clone(), dir: act.dir });
+      // Heavy, wide weapons (axe/hammer/greatsword) get a beefier swing.
+      const mw = act.weapon;
+      Sfx.play((mw.melee && mw.melee.arc >= 2.2) ? "heavy" : "melee");
     }
   }
 
@@ -6836,7 +6955,8 @@ import {
       MATERIALS, MATERIAL_IDS, RELICS, CASTLE_PARTS, CRAFT_RECIPES, NPC_DATA, QUEST_BY_ID,
       MONSTER_ABILITIES, RESOURCE_KINDS, abilitiesForWave,
       Quests, Dialogue, Crafting, CastleUI, QuestLog, DayNight, Weather,
-      ResourceNode, QuestGiver, CastleSite, Dragon, Burst,
+      ResourceNode, QuestGiver, CastleSite, castleCollisionCircles, Dragon, Burst,
+      meleeSweep,
       // ---- Main story campaign (Task 2) ----
       Story, STORY, MISSIONS, SIDE_QUESTS, MAIN_IDS, SIDE_IDS, CHAPTER_BY_ID, missionsOfChapter,
       // ---- RPG world / zones ----

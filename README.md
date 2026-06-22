@@ -315,7 +315,14 @@ recipes, the **mixer** volume **clamping** + channel validation + **master mute*
 SFX cue** firing, and **ambience crossfade** through all zones (plus stride-cadenced footstep
 wiring), and a **docs doc-lint** suite that asserts `CHANGELOG.md` parses as the expected
 Keep a Changelog structure (title + a single `[Unreleased]` section atop the migrated dated
-entries) and that `TODO.md` no longer carries the release log. On top of that, a
+entries) and that `TODO.md` no longer carries the release log, and the **bug-fix**
+suite (`test/bugfixes.test.js`) that locks in the Task 10 correctness fixes:
+**roads never cross open water** off a bridge (seeded over 40 hub layouts), the
+**resource-node cap** invariant (spawn / respawn / travel / reload), reliable
+**harvest** through the real interact key (including right after a zone swap),
+**solid castle** collision (player push-out + wand-bolt splat, with a **passable
+gate**) that survives a zone rebuild, and the **swing** landing damage on its
+**strike (impact) frame** in arc + range, exactly once. On top of that, a
 **functional** suite (`test/functional.test.js`) boots the assembled game in
 isolation and drives whole flows (start → zone travel → save/reload round-trip),
 and a **Playwright** suite (`test/e2e/boot.spec.js`) loads the built bundle in
@@ -528,4 +535,11 @@ Source: GitHub Actions**.
       **`tsc --checkJs`**, a layered test suite (**Vitest** logic + functional +
       **Playwright** real-browser smoke), and staged **CI** — behavior unchanged
       (the full legacy harness ported verbatim still passes)
+- [x] **Correctness pass + deeper test net** — **bridge-aware roads** (no road
+      crosses open water in any seed), a **resource-node cap**, hardened
+      **harvest** (reliable through the real interact key, even after travel),
+      **solid built castle** parts (player push-out + no shoot-through, gate stays
+      passable) restored across zone rebuilds, and a **swing** that lands on its
+      **strike (impact) frame** in arc + range — each locked in by a new
+      `test/bugfixes.test.js` suite
 - [ ] Puzzles (levers, plates, gated doors)

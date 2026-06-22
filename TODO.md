@@ -551,7 +551,19 @@ A task is **done** only when **all** of these are true:
   cleanup. Keep Babylon feature‑detection intact across module boundaries.
 
 ### Task 10 — Fix logical, code & UI bugs (pathing, resource caps, pickup, collision, projectiles, swing) + a deeper test net
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-22 · Made the hub crossroads **bridge-aware** (a road
+  meets the river head-on with a real spanning bridge; the other runs alongside it;
+  the road mesh / `onRoad` / lampposts / bridge now share one vector convention) —
+  seeded test proves **0 road-over-water cells** across 40 layouts (was 40/40).
+  Added `CONFIG.maxResourceNodes` enforced at every spawn (live count provably
+  bounded across spawn/respawn/travel/reload). Audited + hardened resource pickup
+  (defensive `Interactable.distanceTo`; regression-tested via the real interact key,
+  post-zone-swap and respawn re-harvest). Built castle parts now register **solid
+  collision** (walls/towers/keep) with a **passable gate**, so the player is pushed
+  out and **wand bolts splat instead of passing through** (shared obstacle set),
+  rebuilt on build + save-restore. The **swing** now lands damage on the **strike
+  (impact) frame** — in arc + range, once, aimed from the live position. New
+  `test/bugfixes.test.js` suite (14 cases; Vitest 5 → 19). No save-schema change.
 - **Depends on:** none. Lighter to land **after Task 9** (smaller modules =
   surgical fixes), but must not wait on it.
 - **Goal.** Hunt down and fix the gameplay correctness bugs below — and any

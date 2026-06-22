@@ -24,6 +24,52 @@ delta it shipped with, since later tasks reference those.
 
 _Nothing pending._
 
+## [2026-06-22] — Task 10 — Fix logical, code & UI bugs + a deeper test net
+
+Hunted down and root-caused the gameplay-correctness defects called out in the
+backlog, fixing each at the source and locking it in with a dedicated Vitest
+suite (`test/bugfixes.test.js`, 14 cases). No save-schema change (`SAVE_VERSION`
+untouched — every fix is derived or transient state, so old saves still load).
+
+- **Roads no longer cross open water off a bridge.** The hub crossroads was laid
+  out with a random angle, independent of the river, so a road sliced through the
+  water in **every** seed (and its `onRoad` clear-lane was even rotated 90° off
+  the visible road mesh). Rebuilt the layout **relative to the river**: one road
+  meets the water head-on and earns a real, correctly-sized **bridge** spanning
+  its full oblique footprint; the other runs alongside the river (a small jitter
+  keeps its crossing beyond the fence). The road mesh, `onRoad`, edges, lampposts
+  and bridge placement now share one coherent vector convention. A seeded test
+  proves **0 road-over-open-water cells across 40 layouts** (was 40/40), the
+  river still blocks elsewhere, and `moveActor` refuses to walk into open water.
+- **World resources are hard-capped.** Added `CONFIG.maxResourceNodes` (90),
+  enforced at every spawn in `populateAdventure` / `populateWildResources`, so the
+  live node count can never grow unbounded across spawn, respawn (which only
+  re-enables an existing node), zone travel or reload — covered by cap-invariant
+  tests including a forced low cap.
+- **Resource pickup audited + hardened.** The walk-up + interact harvest path was
+  found robust; hardened `Interactable.distanceTo` so a stale/disposed node (e.g.
+  left across a zone swap) returns `Infinity` instead of throwing and breaking
+  selection of the valid nodes around it. New regression tests harvest a node
+  through the **real interact key** path, immediately **after a zone swap**, and
+  across a **respawn re-harvest**.
+- **Built castle parts are solid.** Walls, towers and the keep now register
+  `{x,z,r}` collision circles in the world's obstacle set (rebuilt on `build()`
+  and on save-`restore()`), with the **gate left as a passable gateway**. Because
+  the obstacle set is shared, the player is pushed out of the walls **and wand
+  bolts splat on them (no shoot-through)** for free, while bolts still fly over
+  the top. The build-interact range was widened so raising a part never locks the
+  player out. The footprint round-trips through a zone rebuild.
+- **The swing lands true.** Melee/ranged damage no longer fires on the **wind-up**;
+  it's queued and resolved on the swing's **strike (impact) frame** (from the
+  player's live position, in the committed direction), so the hit lines up with
+  the animation, stays within arc + range, and lands **exactly once**. Tests
+  assert no damage during wind-up, a single in-arc/in-range hit on the strike, and
+  out-of-arc/out-of-range misses.
+
+Vitest: **5 → 19 test cases across 4 files** (new `test/bugfixes.test.js`); the
+ported harness's melee check was updated to the strike-frame timing. Full
+pipeline green (lint · typecheck · test · build · Playwright E2E).
+
 ## [2026-06-22] — Task 9 — Modularize the codebase + a production build/test/CI toolchain
 
 Split the 8.3k-line `js/game.js` IIFE into an **ES-module source tree** under
