@@ -6,6 +6,8 @@ Golden Rules** and conventions that apply to **all** work in this repository.
 - **Task backlog + per-task acceptance criteria + the run prompt:** see
   [`TODO.md`](./TODO.md). One agentic run completes **exactly one** task there.
 - **Definition of Done** (the shared per-task gate): see `TODO.md` § 2.
+- **Release history:** see [`CHANGELOG.md`](./CHANGELOG.md) (Keep a Changelog
+  format). When a task ships, append its entry **there**, not to `TODO.md`.
 
 ## What this project is
 
@@ -81,6 +83,8 @@ the game with the harness stubs and exercises the new path) is encouraged.
   push; `.github/workflows/deploy-pages.yml` publishes to GitHub Pages.
 - **Confirm the Pages deploy run for your commit finished `conclusion: success`**
   (and the CI `Tests` run is green); fix any failures.
+- Record the shipped release as a new entry in [`CHANGELOG.md`](./CHANGELOG.md)
+  (not `TODO.md`); commit + push it with the rest.
 - Do **not** open a pull request unless explicitly asked.
 
 > Release-ready means a player can load the Pages URL on desktop **and** mobile

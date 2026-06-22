@@ -259,9 +259,13 @@ index.html              # markup, overlays, HUD, CDN script tags
 css/style.css           # HUD, overlays, touch controls, responsive styling
 js/game.js              # engine, systems, gameplay
 test/harness.js         # headless Node harness that exercises the gameplay logic
+CHANGELOG.md            # release history (Keep a Changelog format)
+TODO.md                 # agent task backlog + per-task acceptance criteria
 .github/workflows/      # GitHub Pages deploy on push
 .nojekyll               # serve files as-is (skip Jekyll processing)
 ```
+
+Release history lives in [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Tests
 
@@ -296,7 +300,9 @@ recipes, the **mixer** volume **clamping** + channel validation + **master mute*
 **settings persistence round-trip** (survives reload), the **headless no-op** path (no
 `AudioContext`), and — against an **injected Web Audio stub** — the **bus graph build**, **every
 SFX cue** firing, and **ambience crossfade** through all zones (plus stride-cadenced footstep
-wiring) — all without a browser:
+wiring), and a **docs doc-lint** suite that asserts `CHANGELOG.md` parses as the expected
+Keep a Changelog structure (title + a single `[Unreleased]` section atop the migrated dated
+entries) and that `TODO.md` no longer carries the release log — all without a browser:
 
 ```bash
 node test/harness.js

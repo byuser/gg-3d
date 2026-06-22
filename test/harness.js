@@ -1391,5 +1391,37 @@ MX.ctx = null; MX.master = null; MX.bus = { music: null, sfx: null, ambience: nu
 T.Sfx.ctx = null; T.Music.ctx = null; AMB.ctx = null; AMB.bed = null;
 MX.vol = savedVol; MX.muted = savedMuted; MX._loaded = false;
 
+console.log("\n[34] docs — CHANGELOG.md split + structure (no silent regression)");
+{
+  const root = path.join(__dirname, "..");
+  const clPath = path.join(root, "CHANGELOG.md");
+  const todoPath = path.join(root, "TODO.md");
+  ok(fs.existsSync(clPath), "CHANGELOG.md exists at the repo root");
+  const cl = fs.existsSync(clPath) ? fs.readFileSync(clPath, "utf8") : "";
+  const todo = fs.readFileSync(todoPath, "utf8");
+
+  // Expected heading structure (Keep a Changelog): a title + one Unreleased
+  // section atop a reverse-chronological dated list.
+  ok(/^# Changelog\b/m.test(cl), "CHANGELOG.md opens with a '# Changelog' title");
+  const unreleased = (cl.match(/^##\s+\[Unreleased\]/gm) || []).length;
+  ok(unreleased === 1, "exactly one '## [Unreleased]' section");
+  const releaseHeads = (cl.match(/^##\s+(?!\[Unreleased\]).+$/gm) || []);
+  ok(releaseHeads.length >= 8, `at least 8 release entries migrated (found ${releaseHeads.length})`);
+  const dated = releaseHeads.filter((h) => /\d{4}-\d{2}-\d{2}/.test(h)).length;
+  ok(dated >= 7, `at least 7 dated release headings (found ${dated})`);
+
+  // No content loss: every migrated task + the monotonic ?v= build tags survive.
+  ok(["Task 1", "Task 2", "Task 3", "Task 4", "Task 5", "Task 6", "Task 7", "Task 8"]
+    .every((t) => cl.includes(t)), "every prior task entry (Task 1–8) is present");
+  ok(["[v15]", "[v16]", "[v17]", "[v18]", "[v19]"]
+    .every((v) => cl.includes(v)), "the ?v= build tags (v15–v19) are preserved as version keys");
+
+  // The split must hold: TODO.md keeps the §7 heading but no longer carries the log.
+  ok(/^##\s*7\.\s*Changelog/m.test(todo), "TODO.md still has the '## 7. Changelog' heading (no dead links)");
+  ok(/\bCHANGELOG\.md\b/.test(todo.split(/^##\s*7\.\s*Changelog/m)[1] || ""), "TODO.md §7 points at CHANGELOG.md");
+  const strayLog = (todo.match(/^- \d{4}-\d{2}-\d{2} ·/gm) || []).length;
+  ok(strayLog === 0, `TODO.md no longer contains dated changelog entries (found ${strayLog})`);
+}
+
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED ✅" : failures + " CHECK(S) FAILED ❌"}`);
 process.exit(failures === 0 ? 0 : 1);
