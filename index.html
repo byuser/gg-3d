@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="description" content="Good Game 3D — a third-person browser action-RPG adventure. Take quests, gather and craft, fight living sweets and bosses, raise a castle from five relics, and slay the dragon to win. Playable in English and Russian." />
   <meta name="theme-color" content="#0b0f1a" />
-  <link rel="stylesheet" href="css/style.css?v=14" />
+  <link rel="stylesheet" href="css/style.css?v=15" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
@@ -132,6 +132,17 @@
         <button id="langRuPause" class="lang-btn" lang="ru">RU</button>
       </div>
 
+      <!-- Graphics-quality selector: Auto-detect (default) or force a tier.
+           Applies via a quick reload that keeps your progress. -->
+      <div class="gfx-select" role="group" aria-label="Graphics quality">
+        <span class="lang-label" data-i18n="settings.graphics">Graphics</span>
+        <button id="gfxAuto" class="lang-btn gfx-btn" data-i18n="settings.gfxAuto">Auto</button>
+        <button id="gfxHigh" class="lang-btn gfx-btn" data-i18n="settings.gfxHigh">High</button>
+        <button id="gfxMedium" class="lang-btn gfx-btn" data-i18n="settings.gfxMedium">Medium</button>
+        <button id="gfxLow" class="lang-btn gfx-btn" data-i18n="settings.gfxLow">Low</button>
+      </div>
+      <p id="gfxHint" class="gfx-hint" data-i18n="settings.gfxReload">Reloads to apply · progress is kept</p>
+
       <!-- Confirmation guard for the destructive Restart / Exit actions. -->
       <div id="confirmDialog" class="confirm-dialog hidden">
         <p id="confirmText" class="confirm-text">Are you sure?</p>
@@ -244,6 +255,6 @@
 
   <canvas id="renderCanvas"></canvas>
 
-  <script src="js/game.js?v=16"></script>
+  <script src="js/game.js?v=17"></script>
 </body>
 </html>

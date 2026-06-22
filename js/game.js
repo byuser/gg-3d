@@ -754,6 +754,13 @@
       "start.startBtn": "Start Adventure",
       "start.loadBtn": "Load Progress",
       "settings.language": "Language",
+      "settings.graphics": "Graphics",
+      "settings.gfxAuto": "Auto",
+      "settings.gfxHigh": "High",
+      "settings.gfxMedium": "Medium",
+      "settings.gfxLow": "Low",
+      "settings.gfxAutoIs": "Auto: {tier}",
+      "settings.gfxReload": "Reloads to apply · progress is kept",
       "ctrl.move": "Move", "ctrl.moveKeys": "WASD / Arrows · or the on-screen stick",
       "ctrl.attack": "Attack", "ctrl.attackKeys": "Space / F · or the ✨ button",
       "ctrl.interact": "Interact / talk / gather", "ctrl.interactKeys": "E · or the action button",
@@ -785,6 +792,7 @@
       "pause.resume": "Resume",
       "pause.save": "Save Progress",
       "pause.savedBtn": "Saved! 💾",
+      "pause.applyingGfx": "Applying graphics…",
       "pause.restart": "Restart",
       "pause.exit": "Exit to Menu",
       "pause.confirmYes": "Yes",
@@ -994,6 +1002,13 @@
       "start.startBtn": "Начать приключение",
       "start.loadBtn": "Загрузить прогресс",
       "settings.language": "Язык",
+      "settings.graphics": "Графика",
+      "settings.gfxAuto": "Авто",
+      "settings.gfxHigh": "Высокое",
+      "settings.gfxMedium": "Среднее",
+      "settings.gfxLow": "Низкое",
+      "settings.gfxAutoIs": "Авто: {tier}",
+      "settings.gfxReload": "Применится после перезагрузки · прогресс сохранится",
       "ctrl.move": "Движение", "ctrl.moveKeys": "WASD / стрелки · или экранный джойстик",
       "ctrl.attack": "Атака", "ctrl.attackKeys": "Пробел / F · или кнопка ✨",
       "ctrl.interact": "Действие / разговор / сбор", "ctrl.interactKeys": "E · или кнопка действия",
@@ -1025,6 +1040,7 @@
       "pause.resume": "Продолжить",
       "pause.save": "Сохранить прогресс",
       "pause.savedBtn": "Сохранено! 💾",
+      "pause.applyingGfx": "Применение настроек…",
       "pause.restart": "Заново",
       "pause.exit": "Выйти в меню",
       "pause.confirmYes": "Да",
@@ -1461,6 +1477,7 @@
     try { if (typeof document !== "undefined" && document.documentElement) document.documentElement.lang = I18N.locale; } catch (e) {}
     applyStaticI18n();
     _syncLangButtons();
+    _syncGfxButtons();
     // Once the engine is ready the start hint reads "Ready!" — keep that on switch.
     if (dom.loadHint && dom.startBtn && dom.startBtn.disabled === false) dom.loadHint.textContent = t("hint.ready");
     // Dynamic HUD + any open overlay (all guarded — null before the scene boots).
@@ -1496,6 +1513,20 @@
     const set = (el, on) => { if (el && el.classList) el.classList.toggle("active", on); };
     set(dom.langEn, I18N.locale === "en"); set(dom.langRu, I18N.locale === "ru");
     set(dom.langEnPause, I18N.locale === "en"); set(dom.langRuPause, I18N.locale === "ru");
+  }
+
+  // Highlight the chosen graphics preference and (when Auto) reveal which tier the
+  // device was detected as, plus the "reloads to apply" note. Localized live.
+  function _syncGfxButtons() {
+    const set = (el, on) => { if (el && el.classList) el.classList.toggle("active", on); };
+    const pref = Quality.pref;
+    set(dom.gfxAuto, pref === "auto"); set(dom.gfxHigh, pref === "high");
+    set(dom.gfxMedium, pref === "medium"); set(dom.gfxLow, pref === "low");
+    if (dom.gfxHint) {
+      const tierLabel = t("settings.gfx" + Quality.tier.charAt(0).toUpperCase() + Quality.tier.slice(1));
+      dom.gfxHint.textContent =
+        (pref === "auto" ? t("settings.gfxAutoIs", { tier: tierLabel }) + " · " : "") + t("settings.gfxReload");
+    }
   }
 
   // A monotonically increasing id so inventory/equipment entries are distinct
@@ -1818,6 +1849,12 @@
     langRu: document.getElementById("langRu"),
     langEnPause: document.getElementById("langEnPause"),
     langRuPause: document.getElementById("langRuPause"),
+    // ---- Graphics-quality selector (pause settings) ----
+    gfxAuto: document.getElementById("gfxAuto"),
+    gfxHigh: document.getElementById("gfxHigh"),
+    gfxMedium: document.getElementById("gfxMedium"),
+    gfxLow: document.getElementById("gfxLow"),
+    gfxHint: document.getElementById("gfxHint"),
     confirmDialog: document.getElementById("confirmDialog"),
     confirmText: document.getElementById("confirmText"),
     confirmYes: document.getElementById("confirmYes"),
@@ -3763,9 +3800,15 @@
   // SSAO) so phones + weak GPUs stay smooth while desktops get the full
   // treatment. `pick()` is a PURE function of capability facts so the headless
   // harness can assert the mapping without a real device.
+  //
+  // The auto-detected tier is the default, but the player can OVERRIDE it from
+  // the pause settings (Auto / High / Medium / Low). That preference persists in
+  // localStorage (`QUALITY_KEY`) and is honoured by `detect()` on every (re)boot.
   // =========================================================================
+  const QUALITY_KEY = "gg3d_quality";  // persisted graphics preference: auto|high|medium|low
   const Quality = {
     tier: "high",
+    pref: "auto",   // user preference: "auto" (capability-detect) or a forced tier
     // Each tier carries lighting (Task 4) AND model fidelity (Task 3) knobs:
     //   pbr    — energy-conserving PBRMaterial vs the StandardMaterial fallback
     //   env    — install the procedural image-based-lighting probe (sky reflections)
@@ -3802,10 +3845,30 @@
       return "high";
     },
 
-    // Sniff the device once at boot. Every browser-only read is feature-detected
-    // so the Node harness simply keeps the default tier. `window.__GG_QUALITY__`
-    // (high|medium|low) forces a tier for debugging / weak-GPU overrides.
+    // Read the persisted graphics preference (headless-safe; missing/garbage →
+    // "auto"). A tampered value that isn't a real tier falls back to Auto.
+    loadPref() {
+      const v = localGet(QUALITY_KEY);
+      this.pref = (v === "auto" || this.TIERS[v]) ? v : "auto";
+      return this.pref;
+    },
+
+    // Store a new preference ("auto" or a tier) and recompute the active tier.
+    // Returns the resolved tier. Does NOT rebuild the scene — the caller decides
+    // how to apply it (the pause settings reload to re-run the whole build path).
+    setPref(pref, persist) {
+      this.pref = (pref === "auto" || this.TIERS[pref]) ? pref : "auto";
+      if (persist !== false) localSet(QUALITY_KEY, this.pref);
+      return this.detect();
+    },
+
+    // Sniff the device and resolve the active tier. Every browser-only read is
+    // feature-detected so the Node harness simply keeps the default tier. A
+    // forced tier wins over auto-detection, in priority order: the persisted
+    // user preference, then `window.__GG_QUALITY__` (high|medium|low) — the
+    // latter a debug / weak-GPU override that always trumps the saved choice.
     detect() {
+      this.loadPref();   // honour the saved preference on every (re)detect
       const info = {};
       try {
         if (typeof navigator !== "undefined") {
@@ -3817,6 +3880,7 @@
           info.mobile = /Android|iPhone|iPad|iPod|IEMobile|Mobile|Silk|Kindle/i.test(ua) ||
             (coarse && (navigator.maxTouchPoints || 0) > 1);
         }
+        if (this.pref && this.pref !== "auto" && this.TIERS[this.pref]) info.forced = this.pref;
         if (typeof window !== "undefined" && window.__GG_QUALITY__ && this.TIERS[window.__GG_QUALITY__]) {
           info.forced = window.__GG_QUALITY__;
         }
@@ -6964,8 +7028,32 @@
       const wave = waveSystem ? waveSystem.wave : 0;
       const score = stateRef ? stateRef.score : 0;
       if (dom.pauseStats) dom.pauseStats.innerHTML = t("pause.stats", { wave, score });
+      _syncGfxButtons();   // reflect the current graphics preference + detected tier
       if (this.pendingAction && dom.confirmText)
         dom.confirmText.textContent = t(this.pendingAction === "restart" ? "pause.confirmRestart" : "pause.confirmExit");
+    },
+
+    // Change the graphics-quality preference. The tier is baked into meshes,
+    // materials and shadows at zone-build time, so we apply it the bulletproof
+    // way: persist the choice, hand the EXACT current run across a reload (the
+    // same path "Load Progress" uses) and let the boot rebuild everything under
+    // the new tier. Progress is preserved; the fade veil hides the reload.
+    applyGraphics(pref) {
+      if (pref !== "auto" && !Quality.TIERS[pref]) return;
+      if (pref === Quality.pref) { _syncGfxButtons(); return; }   // already active → no-op
+      Quality.setPref(pref, true);
+      _syncGfxButtons();
+      // Stash the run so the boot path lays it straight back in (autostart).
+      try {
+        const snap = serializeGame();
+        if (snap) sessionSet(PENDING_LOAD_KEY, JSON.stringify(snap));
+        sessionSet(AUTOSTART_KEY, "1");
+      } catch (e) {}
+      fadeVeil(true, t("pause.applyingGfx"));
+      // Reload on the next macrotask so the veil paints over the boot hitch.
+      setTimeout(() => {
+        try { if (typeof window !== "undefined" && window.location) window.location.reload(); } catch (e) {}
+      }, 220);
     },
     close() {
       if (!paused) return;
@@ -7015,6 +7103,11 @@
         () => this.askConfirm("exit", t("pause.confirmExit")));
       if (dom.confirmYes) dom.confirmYes.addEventListener("click", () => this.confirmYes());
       if (dom.confirmNo) dom.confirmNo.addEventListener("click", () => this.hideConfirm());
+      // Graphics-quality selector: each button forces a tier (or Auto), applied
+      // via a progress-preserving reload.
+      [[dom.gfxAuto, "auto"], [dom.gfxHigh, "high"], [dom.gfxMedium, "medium"], [dom.gfxLow, "low"]]
+        .forEach(([el, pref]) => { if (el) el.addEventListener("click", () => this.applyGraphics(pref)); });
+      _syncGfxButtons();   // paint the initial selection at boot
     },
   };
 

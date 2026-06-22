@@ -114,8 +114,10 @@ runs in English without a browser.
   mapping** so colours sit in a coherent filmic light, a **subtle bloom** on glowing props and
   optional **soft ambient occlusion** — all on a **graphics tier** auto-detected from your
   device (desktop → full, phones → lighter) so it stays smooth. Each land carries its own light
-  **mood** (airy peaks, moody caverns) on top of the day/night + weather tint. *(Force a tier for
-  testing with `?` → `window.__GG_QUALITY__ = "high" | "medium" | "low"`.)*
+  **mood** (airy peaks, moody caverns) on top of the day/night + weather tint. You can also
+  **override the tier yourself** in **Pause → Graphics** — pick **Auto** (the default device-detect)
+  or force **High / Medium / Low**; the choice **persists** and applies via a quick reload that
+  **keeps your progress**. *(Debug: `window.__GG_QUALITY__ = "high" | "medium" | "low"` still wins.)*
 - **Higher-fidelity models:** materials upgrade to **physically-based (PBR)** rendering — energy-
   conserving, lit by a tiny **procedural sky probe** (image-based lighting, no asset files) so
   candy reads glossy, gems + crystals glint, and metal blades sheen — with a **StandardMaterial
@@ -343,7 +345,9 @@ node test/harness.js
   rain particle system) that layer over the scene.
 - **`Quality` / `makeSunShadows` / `setupPostFX` / `applyZoneMood`** — the lighting layer.
   `Quality` auto-detects one graphics **tier** (high / medium / low) from device facts (its
-  `pick()` is a pure, tested function); `makeSunShadows` builds the directional sun's shadow
+  `pick()` is a pure, tested function) — or honours a **player override** (`pref`/`setPref`,
+  persisted in `localStorage` and resolved by `detect()`) chosen from **Pause → Graphics**, applied
+  via a progress-preserving reload; `makeSunShadows` builds the directional sun's shadow
   generator for that tier (cascaded + contact-hardening → PCF → blurred-exponential, with tuned
   bias/darkness so casters sit grounded); `setupPostFX` wires **ACES tone mapping** plus
   tier-gated **bloom** and **SSAO** onto the camera once; `applyZoneMood` nudges exposure/contrast
@@ -431,4 +435,7 @@ repo as a Pages artifact and publishes it. Enable Pages once in
       **image-based-lighting** probe, glossy candy/gems/blades, and **rounder, layered** procedural
       meshes (canopies, rocks, crystals, Lily's hands) — tier-gated (PBR + env + densest geometry on
       desktop; lighter on phones; **StandardMaterial fallback** on weak GPUs) and disposed on teardown
+- [x] **Graphics-quality setting** — a **Pause → Graphics** selector to choose **Auto** (device
+      detect) or force **High / Medium / Low**; the choice **persists** (`localStorage`) and applies
+      via a quick **progress-preserving reload**; EN/RU localized, headless-safe + unit-tested
 - [ ] Puzzles (levers, plates, gated doors)

@@ -414,6 +414,24 @@ and note it; if it's expensive or irreversible, ask me first.
 
 ## 7. Changelog
 
+- 2026-06-22 · **Graphics‑quality setting (player‑facing tier override)**: the auto‑detected
+  graphics tier can now be **overridden from the pause menu**. A new **Pause → Graphics** selector
+  (Auto · High · Medium · Low, mirroring the language selector's styling) lets the player force a
+  tier or return to **Auto** (device detect). `Quality` gains a persisted `pref` with `loadPref()`/
+  `setPref()`, and `detect()` now resolves the active tier from the saved preference (falling back to
+  capability detection for "auto"); a tampered/unknown stored value coerces to Auto, and the debug
+  `window.__GG_QUALITY__` still trumps everything. Because the tier is baked into meshes, materials
+  and shadows at zone‑build time, a change is applied the **bulletproof** way — `Pause.applyGraphics`
+  persists the choice, hands the **exact current run** across a reload via the proven `PENDING_LOAD`
+  hand‑off (the same path "Load Progress" uses), and lets the boot rebuild everything under the new
+  tier behind the existing **fade veil** ("Applying graphics…"), so **progress is preserved** and
+  every knob (PBR/env/shadows/post‑FX/mesh density) re‑applies identically to a fresh boot. New
+  EN+RU strings (`settings.graphics`, `settings.gfx*`, `pause.applyingGfx`); the dynamic hint shows
+  the Auto‑detected tier and relocalizes live. New harness suite [31] covers manual override, the
+  Auto fallback, **localStorage persistence (survives reload)**, invalid‑value coercion, the
+  `__GG_QUALITY__` priority, and the live‑hint string resolution (14 checks; harness 295 → 309).
+  Headless‑safe (localStorage/DOM feature‑detected). No save‑schema change (`SAVE_VERSION`
+  untouched). `index.html` `?v=` bumped to **17** (css **15**, for the selector styles).
 - 2026-06-21 · **Task 3 — Higher‑fidelity models (character, monsters, trees, stones, environment)**:
   a tier‑gated, fully feature‑detected model + material pass that builds on the Task 4 lighting.
   The shared `mat`/`emat` helpers now return an **energy‑conserving `PBRMaterial`** (metallic 0 /

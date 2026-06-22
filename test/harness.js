@@ -1135,5 +1135,49 @@ ok(T.makeEnvironment(scene30) === null && T.envOn === false, "the env probe is s
 QT.tier = origTier30;
 delete BABYLON.PBRMaterial; delete BABYLON.RawCubeTexture;
 
+console.log("\n[31] graphics quality — manual override / Auto, persistence, override priority");
+const QUALITY_KEY_T = "gg3d_quality";   // mirrors QUALITY_KEY inside the IIFE
+const origTier31 = QT.tier, origPref31 = QT.pref;
+localStorage.removeItem(QUALITY_KEY_T);
+// Default (no saved preference) is Auto → capability detection (high in the
+// harness: no navigator hints, so pick({}) returns high).
+QT.loadPref();
+ok(QT.pref === "auto", "absent preference defaults to Auto");
+ok(QT.setPref("auto") === "high" && QT.tier === "high",
+   "Auto resolves to capability detection (high with no device hints)");
+// Forcing a tier overrides detection, persists, and survives a fresh detect()
+// (i.e. it would survive a page reload).
+QT.setPref("low");
+ok(QT.pref === "low" && QT.tier === "low" && QT.settings() === QT.TIERS.low,
+   "manual Low forces the low tier regardless of device capability");
+ok(localStorage.getItem(QUALITY_KEY_T) === "low", "the chosen tier persists to localStorage");
+QT.tier = "high"; QT.detect();
+ok(QT.tier === "low", "a saved preference is honoured on the next detect() (survives reload)");
+// High/Medium are forceable too.
+ok(QT.setPref("high") === "high" && QT.setPref("medium") === "medium",
+   "High and Medium are forceable preferences");
+// Back to Auto persists and returns to detection.
+QT.setPref("auto");
+ok(QT.pref === "auto" && QT.tier === "high" && localStorage.getItem(QUALITY_KEY_T) === "auto",
+   "switching back to Auto persists and returns to capability-based detection");
+// A tampered / unknown stored value is coerced to Auto (never crashes the boot).
+localStorage.setItem(QUALITY_KEY_T, "ultra"); QT.loadPref();
+ok(QT.pref === "auto", "an invalid persisted preference falls back to Auto");
+ok(QT.setPref("bogus") === "high" && QT.pref === "auto", "setPref() rejects an unknown tier (stays Auto)");
+// The __GG_QUALITY__ debug override still wins over the saved preference.
+QT.setPref("high"); window.__GG_QUALITY__ = "low"; QT.detect();
+ok(QT.tier === "low", "the __GG_QUALITY__ debug override beats the saved preference");
+delete window.__GG_QUALITY__;
+// The pause hint builds a tier label key as "settings.gfx" + Capitalized(tier);
+// every resolved tier must map to a real localized label (no raw-key echo), and
+// the Auto hint must interpolate the detected tier — guards the live UI string.
+["high", "medium", "low"].forEach((tr) => {
+  const key = "settings.gfx" + tr.charAt(0).toUpperCase() + tr.slice(1);
+  ok(T.t(key) && T.t(key) !== key, "graphics label resolves for tier '" + tr + "' (" + key + ")");
+});
+ok(T.t("settings.gfxAutoIs", { tier: "Zzz" }).indexOf("Zzz") >= 0, "the Auto hint interpolates the detected tier name");
+// Restore booted state so nothing leaks into later runs.
+localStorage.removeItem(QUALITY_KEY_T); QT.pref = origPref31; QT.tier = origTier31;
+
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED ✅" : failures + " CHECK(S) FAILED ❌"}`);
 process.exit(failures === 0 ? 0 : 1);

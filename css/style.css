@@ -389,6 +389,16 @@ html, body {
   border-color: transparent;
 }
 
+/* ---------- Graphics-quality selector (pause settings) ---------- */
+.gfx-select {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-top: 12px; flex-wrap: wrap;
+}
+.gfx-btn { min-width: 62px; padding: 7px 14px; }
+.gfx-hint {
+  margin: 8px 0 0; font-size: 12px; opacity: 0.6; line-height: 1.35; text-align: center;
+}
+
 /* ---------- Confirmation guard (restart / exit) ---------- */
 .confirm-dialog {
   margin-top: 18px; padding: 16px;
