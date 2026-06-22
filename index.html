@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="description" content="Good Game 3D — a third-person browser action-RPG adventure. Take quests, gather and craft, fight living sweets and bosses, raise a castle from five relics, and slay the dragon to win. Playable in English and Russian." />
   <meta name="theme-color" content="#0b0f1a" />
-  <link rel="stylesheet" href="css/style.css?v=15" />
+  <link rel="stylesheet" href="css/style.css?v=16" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
@@ -39,6 +39,15 @@
         <span class="lang-label" data-i18n="settings.language">Language</span>
         <button id="langEn" class="lang-btn" lang="en">EN</button>
         <button id="langRu" class="lang-btn" lang="ru">RU</button>
+      </div>
+      <!-- Audio mixer: volume sliders + mute (mirrored in the pause settings). -->
+      <div class="audio-settings" role="group" aria-label="Audio">
+        <span class="lang-label" data-i18n="settings.audio">Audio</span>
+        <div class="vol-row"><label for="vol_master" data-i18n="settings.volMaster">Master</label><input id="vol_master" class="vol-slider" type="range" min="0" max="100" value="90" aria-label="Master volume" /></div>
+        <div class="vol-row"><label for="vol_music" data-i18n="settings.volMusic">Music</label><input id="vol_music" class="vol-slider" type="range" min="0" max="100" value="70" aria-label="Music volume" /></div>
+        <div class="vol-row"><label for="vol_sfx" data-i18n="settings.volSfx">Effects</label><input id="vol_sfx" class="vol-slider" type="range" min="0" max="100" value="85" aria-label="Effects volume" /></div>
+        <div class="vol-row"><label for="vol_ambience" data-i18n="settings.volAmbience">Ambience</label><input id="vol_ambience" class="vol-slider" type="range" min="0" max="100" value="75" aria-label="Ambience volume" /></div>
+        <button id="muteToggle" class="lang-btn mute-btn" data-i18n="settings.mute">Mute all</button>
       </div>
     </div>
   </div>
@@ -142,6 +151,16 @@
         <button id="gfxLow" class="lang-btn gfx-btn" data-i18n="settings.gfxLow">Low</button>
       </div>
       <p id="gfxHint" class="gfx-hint" data-i18n="settings.gfxReload">Reloads to apply · progress is kept</p>
+
+      <!-- Audio mixer: volume sliders + mute (applies live; mirrors the start screen). -->
+      <div class="audio-settings" role="group" aria-label="Audio">
+        <span class="lang-label" data-i18n="settings.audio">Audio</span>
+        <div class="vol-row"><label for="vol_masterP" data-i18n="settings.volMaster">Master</label><input id="vol_masterP" class="vol-slider" type="range" min="0" max="100" value="90" aria-label="Master volume" /></div>
+        <div class="vol-row"><label for="vol_musicP" data-i18n="settings.volMusic">Music</label><input id="vol_musicP" class="vol-slider" type="range" min="0" max="100" value="70" aria-label="Music volume" /></div>
+        <div class="vol-row"><label for="vol_sfxP" data-i18n="settings.volSfx">Effects</label><input id="vol_sfxP" class="vol-slider" type="range" min="0" max="100" value="85" aria-label="Effects volume" /></div>
+        <div class="vol-row"><label for="vol_ambienceP" data-i18n="settings.volAmbience">Ambience</label><input id="vol_ambienceP" class="vol-slider" type="range" min="0" max="100" value="75" aria-label="Ambience volume" /></div>
+        <button id="muteToggleP" class="lang-btn mute-btn" data-i18n="settings.mute">Mute all</button>
+      </div>
 
       <!-- Confirmation guard for the destructive Restart / Exit actions. -->
       <div id="confirmDialog" class="confirm-dialog hidden">
@@ -255,6 +274,6 @@
 
   <canvas id="renderCanvas"></canvas>
 
-  <script src="js/game.js?v=18"></script>
+  <script src="js/game.js?v=19"></script>
 </body>
 </html>

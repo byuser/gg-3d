@@ -761,6 +761,13 @@
       "settings.gfxLow": "Low",
       "settings.gfxAutoIs": "Auto: {tier}",
       "settings.gfxReload": "Reloads to apply · progress is kept",
+      "settings.audio": "Audio",
+      "settings.volMaster": "Master",
+      "settings.volMusic": "Music",
+      "settings.volSfx": "Effects",
+      "settings.volAmbience": "Ambience",
+      "settings.mute": "Mute all",
+      "settings.unmute": "Unmute",
       "ctrl.move": "Move", "ctrl.moveKeys": "WASD / Arrows · or the on-screen stick",
       "ctrl.attack": "Attack", "ctrl.attackKeys": "Space / F · or the ✨ button",
       "ctrl.interact": "Interact / talk / gather", "ctrl.interactKeys": "E · or the action button",
@@ -1009,6 +1016,13 @@
       "settings.gfxLow": "Низкое",
       "settings.gfxAutoIs": "Авто: {tier}",
       "settings.gfxReload": "Применится после перезагрузки · прогресс сохранится",
+      "settings.audio": "Звук",
+      "settings.volMaster": "Общий",
+      "settings.volMusic": "Музыка",
+      "settings.volSfx": "Эффекты",
+      "settings.volAmbience": "Атмосфера",
+      "settings.mute": "Выключить звук",
+      "settings.unmute": "Включить звук",
       "ctrl.move": "Движение", "ctrl.moveKeys": "WASD / стрелки · или экранный джойстик",
       "ctrl.attack": "Атака", "ctrl.attackKeys": "Пробел / F · или кнопка ✨",
       "ctrl.interact": "Действие / разговор / сбор", "ctrl.interactKeys": "E · или кнопка действия",
@@ -1505,6 +1519,7 @@
     if (typeof Dialogue !== "undefined" && Dialogue.open && Dialogue.npc) Dialogue.render();
     if (typeof Pause !== "undefined" && typeof paused !== "undefined" && paused) Pause.refreshTexts();
     if (typeof Music !== "undefined" && dom.musicBtn) dom.musicBtn.title = t(Music.on ? "btnTitle.muteMusic" : "btnTitle.playMusic");
+    if (typeof AudioUI !== "undefined" && AudioUI.sync) AudioUI.sync();
     if (typeof Fullscreen !== "undefined" && Fullscreen.sync) Fullscreen.sync();
   }
 
@@ -3539,7 +3554,8 @@
       addMaterial(this.player, this.def.mat, n);
       if (this.player && this.player.gather) this.player.gather(); // chop/reach motion
       spawnImpact(this.state, this.root.position, "#cfe0b0", { y: 0.8, count: 7, spread: 3 });
-      Sfx.play("hit");
+      // A surface-matched harvest cue: pickaxe ring for rock/crystal, a softer chop otherwise.
+      Sfx.play((this.def.mat === "stone" || this.def.mat === "crystal") ? "mine" : "gather");
       toast(t("toast.gathered", { icon: MATERIALS[this.def.mat].icon, n, label: tMaterialLabel(this.def.mat) }));
       this.respawn = this.def.respawn;
       this.body.setEnabled(false);
@@ -5652,7 +5668,7 @@
       if (q.line === "side" && this.isDone(id) && !q.repeatable) return false;
       this.active.push(id);
       this.acceptKills[id] = this.state.totalKills;
-      Sfx.play("buy");
+      Sfx.play("quest_accept");
       toast(t("toast.questAccepted", { kind: q.line === "main" ? t("quest.kindMission") : t("quest.kindSide"), title: tQuestTitle(q) }));
       updateQuestTracker(this);
       return true;
@@ -5706,7 +5722,7 @@
       if (q.line === "side" && q.repeatable) Story.sideTurnIns[id] = (Story.sideTurnIns[id] || 0) + 1;
       else this.completed.push(id);
       grantReward(this.player, this.state, q.reward);
-      Sfx.play("artifact");
+      Sfx.play("quest_turnin");
       const r = q.reward || {};
       const bits = [];
       if (r.coins) bits.push(`🪙 ${r.coins}`);
@@ -6310,6 +6326,7 @@
       if (!target || this.transitioning) return;
       this.transitioning = true;
       const fromId = this.state.world.zone.id;
+      Sfx.play("portal");   // a whoosh as the veil drops
       fadeVeil(true, t("label.zone", { icon: target.icon, name: tZoneName(target) }));
       // Swap after the veil has painted (next macrotask) so the black screen is
       // already up and the teardown/build hitch is never visible.
@@ -6334,6 +6351,7 @@
       DayNight.init(world, DayNight.t);   // re-point sky/sun/hemi to the new zone
       Weather.world = world;               // keep the rain system; just re-aim it
       applyZoneMood(scene, target);        // re-tune exposure/contrast for the mood
+      Ambience.crossfadeTo(toId);          // fade the old soundscape out, the new one in
       // 4) Lay the new zone's content + seed its residents.
       setupZoneContent(scene, world, interaction, player, state);
       const waves = new SpawnDirector(scene, world, interaction, player, state);
@@ -6502,6 +6520,9 @@
       }
 
       player.update(dt, camera);
+      // Per-surface footsteps + a low-health warning (both dt-driven → pause-safe).
+      Footsteps.update(player, state.world && state.world.zone);
+      LowHealth.update(dt, player);
       // Rigid follow: mutate the camera's pivot vector IN PLACE so the pivot
       // tracks the character exactly while alpha/beta/radius stay untouched.
       // (Assigning camera.target = ... or setTarget() would rebuild the radius
@@ -7252,6 +7273,7 @@
     open() {
       if (!this.canOpen()) return;
       paused = true;
+      Sfx.play("ui_click");
       this.hideConfirm();
       this.refreshTexts();
       dom.pauseMenu.classList.remove("hidden");
@@ -7358,6 +7380,7 @@
     gameStarted = true;
     Music.start(); // browsers only allow audio after a user gesture (the click)
     Sfx.unlock();  // same gesture unlocks the sound-effect synth
+    Ambience.start((worldRef && worldRef.zone) ? worldRef.zone.id : HUB_ZONE); // per-location bed
     // Fresh start → frame the adventure with the opening beat. Skipped when
     // restoring a save (mid-story) and under the headless harness (which drives
     // input directly and must not be blocked by the modal).
@@ -7365,30 +7388,121 @@
   }
 
   // =========================================================================
+  // Mixer — the shared audio backbone (Task 6). A SINGLE Web Audio graph:
+  //   Sfx / Music / Ambience  →  per-channel bus gains  →  master gain  →  out
+  // so the player can balance the soundtrack, sound-effects and per-location
+  // ambience independently and mute everything at once. The 0..1 channel volumes
+  // + the master-mute flag persist in localStorage (`AUDIO_KEY`) and are applied
+  // before any sound plays. One AudioContext is built lazily on the first user
+  // gesture (browsers forbid audio before then). Fully headless-safe: with no
+  // AudioContext (the Node harness) `ensure()` returns false and every consumer
+  // no-ops — but the pure volume/persistence logic is still exercised in tests.
+  // =========================================================================
+  const AUDIO_KEY = "gg3d_audio";   // persisted mixer settings { vol:{…}, muted }
+  const Mixer = {
+    ctx: null, master: null,
+    bus: { music: null, sfx: null, ambience: null },
+    // Channel volumes (0..1). The per-subsystem nodes carry their own internal
+    // trim on top of these, so the defaults sit a touch below 1 for headroom.
+    vol: { master: 0.9, music: 0.7, sfx: 0.85, ambience: 0.75 },
+    muted: false,                   // master mute (the 🔊/M control + settings)
+    _loaded: false,
+
+    CHANNELS: ["master", "music", "sfx", "ambience"],
+    isChannel(ch) { return this.CHANNELS.indexOf(ch) >= 0; },
+    // Clamp a volume to 0..1; garbage/NaN falls back to the supplied default.
+    _clamp(v, d) { v = +v; return isFinite(v) ? Math.max(0, Math.min(1, v)) : d; },
+
+    // Read the persisted settings (headless-safe; missing/garbage → defaults).
+    load() {
+      if (this._loaded) return this;
+      this._loaded = true;
+      try {
+        const raw = localGet(AUDIO_KEY);
+        if (raw) {
+          const o = JSON.parse(raw);
+          if (o && o.vol) for (const k of this.CHANNELS)
+            if (o.vol[k] != null) this.vol[k] = this._clamp(o.vol[k], this.vol[k]);
+          if (typeof o.muted === "boolean") this.muted = o.muted;
+        }
+      } catch (e) {}
+      return this;
+    },
+    save() { try { localSet(AUDIO_KEY, JSON.stringify({ vol: this.vol, muted: this.muted })); } catch (e) {} },
+
+    // Lazily build the AudioContext + bus graph. Returns false where Web Audio is
+    // unavailable (the harness / very old browsers) so callers cleanly no-op.
+    ensure() {
+      if (this.ctx) return true;
+      try {
+        const AC = (typeof window !== "undefined") && (window.AudioContext || window.webkitAudioContext);
+        if (!AC) return false;
+        this.load();
+        this.ctx = new AC();
+        this.master = this.ctx.createGain();
+        this.master.connect(this.ctx.destination);
+        for (const k of ["music", "sfx", "ambience"]) {
+          const g = this.ctx.createGain();
+          g.connect(this.master);
+          this.bus[k] = g;
+        }
+        this._apply();
+        return true;
+      } catch (e) { this.ctx = null; return false; }
+    },
+    unlock() { try { if (this.ctx && this.ctx.state === "suspended") this.ctx.resume(); } catch (e) {} },
+
+    // Push the current volumes/mute onto the live gain nodes (smoothed so there
+    // are no clicks/pops). Safe to call before the graph exists (no-op).
+    _apply() {
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime, mm = this.muted ? 0 : 1;
+      const set = (node, v) => {
+        if (!node) return;
+        try { node.gain.setTargetAtTime(v, now, 0.04); }
+        catch (e) { try { node.gain.value = v; } catch (_) {} }
+      };
+      set(this.master, this.vol.master * mm);
+      set(this.bus.music, this.vol.music);
+      set(this.bus.sfx, this.vol.sfx);
+      set(this.bus.ambience, this.vol.ambience);
+    },
+
+    setVolume(ch, v, persist) {
+      if (!this.isChannel(ch)) return;
+      this.vol[ch] = this._clamp(v, this.vol[ch]);
+      this._apply();
+      if (persist !== false) this.save();
+    },
+    setMuted(on, persist) { this.muted = !!on; this._apply(); if (persist !== false) this.save(); },
+    toggleMute() { this.setMuted(!this.muted); return this.muted; },
+  };
+
+  // =========================================================================
   // Sfx — short procedurally-synthesised sound effects via the Web Audio API.
   // Like the Music system there are NO audio files: every weapon swing, bolt,
   // pickup, potion, enhancement and boss attack is generated in-browser, so the
   // game ships on static hosting with zero assets. Headless-safe (no-ops with
   // no AudioContext, as in the Node test harness). Unlocked on the first user
-  // gesture (the Start click), shared with Music.
+  // gesture (the Start click). Routes through the Mixer's `sfx` bus.
   // =========================================================================
   const Sfx = {
     ctx: null, master: null, on: true, _noiseBuf: null,
 
     _ensure() {
       if (this.ctx) return true;
+      if (!Mixer.ensure()) return false;
       try {
-        const AC = window.AudioContext || window.webkitAudioContext;
-        if (!AC) return false;
-        this.ctx = new AC();
-        this.master = this.ctx.createGain();
+        this.ctx = Mixer.ctx;
+        this.master = this.ctx.createGain();   // an internal trim under the sfx bus
         this.master.gain.value = 0.55;
-        this.master.connect(this.ctx.destination);
+        this.master.connect(Mixer.bus.sfx);
         return true;
       } catch (e) { return false; }
     },
     unlock() {
       if (!this._ensure()) return;
+      Mixer.unlock();
       try { if (this.ctx.state === "suspended") this.ctx.resume(); } catch (e) {}
     },
     setEnabled(on) { this.on = !!on; },
@@ -7463,6 +7577,25 @@
                               this._noise(t, { dur: 0.5, peak: 0.18, cutoff: 700 }); break;
           case "boss_death":  this._tone(t, { freq: 400, freq2: 50, dur: 0.9, type: "sawtooth", peak: 0.32 });
                               this._noise(t, { dur: 0.7, peak: 0.22, cutoff: 800, delay: 0.05 }); break;
+          // ---- Task 6: footsteps (per surface), gather/mine, quest, UI, portal ----
+          case "step_grass": this._noise(t, { dur: 0.085, peak: 0.07, cutoff: 1100 }); break;
+          case "step_stone": this._noise(t, { dur: 0.07, peak: 0.09, cutoff: 2600 });
+                             this._tone(t, { freq: 150, freq2: 90, dur: 0.06, type: "square", peak: 0.05 }); break;
+          case "step_sand":  this._noise(t, { dur: 0.1, peak: 0.06, cutoff: 700 }); break;
+          case "step_snow":  this._noise(t, { dur: 0.11, peak: 0.06, cutoff: 4200 }); break;
+          case "gather":     this._noise(t, { dur: 0.14, peak: 0.2, cutoff: 1500 });
+                             this._tone(t, { freq: 260, freq2: 150, dur: 0.12, type: "triangle", peak: 0.1 }); break;
+          case "mine":       this._noise(t, { dur: 0.12, peak: 0.22, cutoff: 3000 });
+                             this._tone(t, { freq: 320, freq2: 180, dur: 0.1, type: "square", peak: 0.12 });
+                             this._tone(t, { freq: 120, freq2: 70, dur: 0.16, type: "sine", peak: 0.1, delay: 0.02 }); break;
+          case "quest_accept": [0, 4, 7].forEach((s, i) => this._tone(t, { freq: 392 * Math.pow(2, s / 12), dur: 0.16, type: "triangle", peak: 0.16, delay: i * 0.05 })); break;
+          case "quest_turnin": [0, 4, 7, 12, 16].forEach((s, i) => this._tone(t, { freq: 523.25 * Math.pow(2, s / 12), dur: 0.2, type: "triangle", peak: 0.16, delay: i * 0.06 })); break;
+          case "ui_click":   this._tone(t, { freq: 660, dur: 0.05, type: "square", peak: 0.1 }); break;
+          case "portal":     this._tone(t, { freq: 180, freq2: 720, dur: 0.5, type: "sine", peak: 0.2 });
+                             this._tone(t, { freq: 360, freq2: 1440, dur: 0.45, type: "triangle", peak: 0.08, delay: 0.04 });
+                             this._noise(t, { dur: 0.5, peak: 0.08, cutoff: 1800 }); break;
+          case "lowhp":      this._tone(t, { freq: 880, dur: 0.12, type: "sine", peak: 0.18 });
+                             this._tone(t, { freq: 880, dur: 0.12, type: "sine", peak: 0.18, delay: 0.18 }); break;
           default: break;
         }
       } catch (e) { /* never let a sound break the game */ }
@@ -7486,13 +7619,12 @@
 
     _ensure() {
       if (this.ctx) return true;
+      if (!Mixer.ensure()) return false;
       try {
-        const AC = window.AudioContext || window.webkitAudioContext;
-        if (!AC) return false;
-        this.ctx = new AC();
-        this.master = this.ctx.createGain();
+        this.ctx = Mixer.ctx;
+        this.master = this.ctx.createGain();   // on/off trim under the music bus
         this.master.gain.value = 0.0;
-        this.master.connect(this.ctx.destination);
+        this.master.connect(Mixer.bus.music);
         return true;
       } catch (e) { return false; }
     },
@@ -7552,6 +7684,278 @@
         dom.musicBtn.title = t(this.on ? "btnTitle.muteMusic" : "btnTitle.playMusic");
       }
       return this.on;
+    },
+  };
+
+  // =========================================================================
+  // Ambience — a per-location procedural background bed (Task 6). Each zone gets
+  // its own continuously-synthesised soundscape (no audio files): meadow birds +
+  // breeze, forest wind + creaks, shore waves + gulls, peak wind howl, cavern
+  // drips + a deep drone, thicket insects. Travelling between zones CROSSFADES
+  // one bed out while the next fades in (hooked from ZoneManager) so there are no
+  // clicks or pops. Routes through the Mixer's `ambience` bus. Sparse one-shot
+  // events (chirps, gulls, drips) are scheduled on wall-clock time with
+  // Math.random() — purely cosmetic, so they must NOT touch the seeded gameplay
+  // rng() (that would desync determinism), exactly like Sfx's noise buffer.
+  // Fully headless-safe: with no AudioContext every method no-ops; `bedFor()`
+  // stays a pure, testable mapping.
+  // =========================================================================
+  const Ambience = {
+    ctx: null, bed: null, zoneId: null, _noiseBuf: null,
+
+    // Pure: the recipe for a zone's bed. Each field is a layer the builder knows.
+    BEDS: {
+      meadow:  { wind: { cutoff: 700, level: 0.10 }, drone: { freq: 196, level: 0.022 }, birds: 0.7 },
+      forest:  { wind: { cutoff: 460, level: 0.16 }, drone: { freq: 130, level: 0.03 }, birds: 0.35, creak: 0.18 },
+      shore:   { waves: 0.22, wind: { cutoff: 900, level: 0.06 }, gulls: 0.3 },
+      peaks:   { wind: { cutoff: 1500, level: 0.26, howl: true } },
+      caverns: { drone: { freq: 70, level: 0.05 }, wind: { cutoff: 240, level: 0.05 }, drips: 0.7 },
+      thicket: { insects: 0.16, wind: { cutoff: 420, level: 0.1 }, drone: { freq: 98, level: 0.032 } },
+    },
+    bedFor(zoneId) { return this.BEDS[zoneId] || this.BEDS.meadow; },
+
+    _noise() {
+      const ctx = this.ctx;
+      if (!this._noiseBuf) {
+        const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;  // cosmetic — see header
+        this._noiseBuf = buf;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = this._noiseBuf; src.loop = true;
+      return src;
+    },
+
+    // ---- Continuous layers: each appends its nodes to `bed` and feeds bed.gain.
+    _wind(bed, spec) {
+      const ctx = this.ctx, src = this._noise();
+      const filt = ctx.createBiquadFilter(); filt.type = "lowpass"; filt.frequency.value = spec.cutoff;
+      const g = ctx.createGain(); g.gain.value = spec.level;
+      src.connect(filt); filt.connect(g); g.connect(bed.gain);
+      try { src.start(); } catch (e) {}
+      bed.sources.push(src);
+      if (spec.howl) {                                   // a slow gust LFO on the cutoff
+        const lfo = ctx.createOscillator(); lfo.type = "sine"; lfo.frequency.value = 0.08;
+        const lg = ctx.createGain(); lg.gain.value = spec.cutoff * 0.5;
+        lfo.connect(lg); lg.connect(filt.frequency);
+        try { lfo.start(); } catch (e) {}
+        bed.oscs.push(lfo);
+      }
+    },
+    _waves(bed, level) {
+      const ctx = this.ctx, src = this._noise();
+      const filt = ctx.createBiquadFilter(); filt.type = "bandpass"; filt.frequency.value = 520; filt.Q.value = 0.6;
+      const g = ctx.createGain(); g.gain.value = level * 0.5;
+      src.connect(filt); filt.connect(g); g.connect(bed.gain);
+      const lfo = ctx.createOscillator(); lfo.type = "sine"; lfo.frequency.value = 0.16;  // the swell
+      const lg = ctx.createGain(); lg.gain.value = level * 0.45;
+      lfo.connect(lg); lg.connect(g.gain);
+      try { src.start(); lfo.start(); } catch (e) {}
+      bed.sources.push(src); bed.oscs.push(lfo);
+    },
+    _insects(bed, level) {
+      const ctx = this.ctx, src = this._noise();
+      const filt = ctx.createBiquadFilter(); filt.type = "highpass"; filt.frequency.value = 3200;
+      const g = ctx.createGain(); g.gain.value = level;
+      src.connect(filt); filt.connect(g); g.connect(bed.gain);
+      const lfo = ctx.createOscillator(); lfo.type = "sine"; lfo.frequency.value = 11;     // tremolo chirr
+      const lg = ctx.createGain(); lg.gain.value = level * 0.7;
+      lfo.connect(lg); lg.connect(g.gain);
+      try { src.start(); lfo.start(); } catch (e) {}
+      bed.sources.push(src); bed.oscs.push(lfo);
+    },
+    _drone(bed, spec) {
+      const ctx = this.ctx, osc = ctx.createOscillator(); osc.type = "sine"; osc.frequency.value = spec.freq;
+      const g = ctx.createGain(); g.gain.value = spec.level;
+      osc.connect(g); g.connect(bed.gain);
+      try { osc.start(); } catch (e) {}
+      bed.oscs.push(osc);
+    },
+
+    // ---- One-shot scheduled events (synthesised on the fly; self-disposing).
+    _chirp(bed) {
+      const ctx = this.ctx, t = ctx.currentTime, base = 2200 + Math.random() * 1400;
+      const n = 2 + ((Math.random() * 2) | 0);
+      for (let i = 0; i < n; i++) {
+        const osc = ctx.createOscillator(); osc.type = "sine";
+        const g = ctx.createGain(); const st = t + i * 0.06;
+        osc.frequency.setValueAtTime(base * (1 + i * 0.05), st);
+        osc.frequency.exponentialRampToValueAtTime(base * 1.3, st + 0.05);
+        g.gain.setValueAtTime(0.0001, st);
+        g.gain.exponentialRampToValueAtTime(0.05, st + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, st + 0.07);
+        osc.connect(g); g.connect(bed.gain);
+        try { osc.start(st); osc.stop(st + 0.1); } catch (e) {}
+      }
+    },
+    _gull(bed) {
+      const ctx = this.ctx, t = ctx.currentTime;
+      const osc = ctx.createOscillator(); osc.type = "sawtooth";
+      const g = ctx.createGain();
+      osc.frequency.setValueAtTime(900, t); osc.frequency.linearRampToValueAtTime(520, t + 0.3);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.04, t + 0.04);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+      osc.connect(g); g.connect(bed.gain);
+      try { osc.start(t); osc.stop(t + 0.36); } catch (e) {}
+    },
+    _dripSound(bed) {
+      const ctx = this.ctx, t = ctx.currentTime, f = 900 + Math.random() * 900;
+      const osc = ctx.createOscillator(); osc.type = "sine";
+      const g = ctx.createGain();
+      osc.frequency.setValueAtTime(f, t); osc.frequency.exponentialRampToValueAtTime(f * 0.5, t + 0.12);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.06, t + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+      osc.connect(g); g.connect(bed.gain);
+      try { osc.start(t); osc.stop(t + 0.22); } catch (e) {}
+    },
+    _creakSound(bed) {
+      const ctx = this.ctx, t = ctx.currentTime, f = 70 + Math.random() * 60;
+      const osc = ctx.createOscillator(); osc.type = "sawtooth";
+      const filt = ctx.createBiquadFilter(); filt.type = "lowpass"; filt.frequency.value = 600;
+      const g = ctx.createGain();
+      osc.frequency.setValueAtTime(f, t); osc.frequency.linearRampToValueAtTime(f * 1.4, t + 0.4);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.05, t + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+      osc.connect(filt); filt.connect(g); g.connect(bed.gain);
+      try { osc.start(t); osc.stop(t + 0.5); } catch (e) {}
+    },
+
+    _buildBed(zoneId) {
+      const ctx = this.ctx;
+      const gain = ctx.createGain(); gain.gain.value = 0.0001;
+      gain.connect(Mixer.bus.ambience);
+      const bed = { gain, sources: [], oscs: [], timer: null, zoneId };
+      const r = this.bedFor(zoneId);
+      if (r.wind) this._wind(bed, r.wind);
+      if (r.waves) this._waves(bed, r.waves);
+      if (r.insects) this._insects(bed, r.insects);
+      if (r.drone) this._drone(bed, r.drone);
+      // Fade the bed in (no click).
+      try {
+        const t = ctx.currentTime;
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.linearRampToValueAtTime(1, t + 1.2);
+      } catch (e) { gain.gain.value = 1; }
+      // Sparse one-shot scheduler (birds / gulls / drips / creaks).
+      const tickSec = 0.5;
+      const roll = (rate, fn) => { if (rate && Math.random() < rate * tickSec) fn.call(this, bed); };
+      const tick = () => {
+        roll(r.birds, this._chirp); roll(r.gulls, this._gull);
+        roll(r.drips, this._dripSound); roll(r.creak, this._creakSound);
+      };
+      try { bed.timer = setInterval(tick, tickSec * 1000); } catch (e) {}
+      return bed;
+    },
+
+    _disposeBed(bed, fade) {
+      if (!bed) return;
+      if (bed.timer != null) { try { clearInterval(bed.timer); } catch (e) {} bed.timer = null; }
+      const ctx = this.ctx;
+      try {
+        const t = ctx.currentTime;
+        bed.gain.gain.cancelScheduledValues(t);
+        bed.gain.gain.setValueAtTime(Math.max(0.0001, bed.gain.gain.value || 0.0001), t);
+        bed.gain.gain.linearRampToValueAtTime(0.0001, t + fade);
+      } catch (e) {}
+      const kill = () => {
+        for (const s of bed.sources) { try { s.stop(); } catch (e) {} try { s.disconnect(); } catch (e) {} }
+        for (const o of bed.oscs) { try { o.stop(); } catch (e) {} try { o.disconnect(); } catch (e) {} }
+        try { bed.gain.disconnect(); } catch (e) {}
+      };
+      try { setTimeout(kill, fade * 1000 + 80); } catch (e) { kill(); }
+    },
+
+    // Start the bed for a zone (called once audio is unlocked). Idempotent.
+    start(zoneId) {
+      this.zoneId = zoneId;
+      if (!Mixer.ensure()) return;
+      this.ctx = Mixer.ctx;
+      if (this.bed) { if (this.bed.zoneId !== zoneId) this.crossfadeTo(zoneId); return; }
+      this.bed = this._buildBed(zoneId);
+    },
+    // Swap to a new zone's bed: fade the old out, fade the new in.
+    crossfadeTo(zoneId) {
+      this.zoneId = zoneId;
+      if (!this.ctx) { this.start(zoneId); return; }
+      if (this.bed && this.bed.zoneId === zoneId) return;
+      const old = this.bed;
+      this.bed = this._buildBed(zoneId);
+      this._disposeBed(old, 1.0);
+    },
+    stop() { if (this.bed) { this._disposeBed(this.bed, 0.4); this.bed = null; } },
+  };
+
+  // Pure: which footstep surface a zone walks on (Task 6). Drives the per-surface
+  // step cue. Testable without a device.
+  const ZONE_SURFACE = { meadow: "grass", forest: "grass", thicket: "grass", shore: "sand", peaks: "snow", caverns: "stone" };
+  function surfaceForZone(zoneId) { return ZONE_SURFACE[zoneId] || "grass"; }
+
+  // Footsteps — fire a per-surface step cue in time with the walk stride. The
+  // character's `walkPhase` advances by dt while moving, planting a foot each
+  // half-cycle, so steps stay frame-rate-independent and cadence-matched.
+  const Footsteps = {
+    _idx: 0,
+    update(player, zone) {
+      if (!player) return;
+      if (player.state === "walk") {
+        const idx = Math.floor((player.walkPhase || 0) / Math.PI);
+        if (idx !== this._idx) { this._idx = idx; Sfx.play("step_" + surfaceForZone(zone && zone.id)); }
+      } else {
+        this._idx = Math.floor((player.walkPhase || 0) / Math.PI);  // re-sync so resuming doesn't double-step
+      }
+    },
+  };
+
+  // LowHealth — a warning beep when health drops to a critical share, with
+  // hysteresis (re-arms above the upper bound) so it doesn't spam, then repeats
+  // gently while still critical. dt-driven, so it freezes with the pause menu.
+  const LowHealth = {
+    LOW: 0.25, CLEAR: 0.35, REPEAT: 3.5,
+    _armed: true, _t: 0,
+    update(dt, player) {
+      if (!player || !player.maxHealth) return;
+      const r = player.health / player.maxHealth;
+      if (r > this.CLEAR || player.health <= 0) { this._armed = true; this._t = 0; return; }
+      if (r > this.LOW) return;
+      this._t -= dt;
+      if (this._armed || this._t <= 0) { Sfx.play("lowhp"); this._armed = false; this._t = this.REPEAT; }
+    },
+  };
+
+  // AudioUI — the mixer's player-facing controls (Task 6): four volume sliders
+  // (master / music / effects / ambience) + a mute-all toggle, mirrored on BOTH
+  // the start screen and the pause settings. Each control id is suffixed "" on
+  // the start screen and "P" in the pause menu; both drive the same Mixer
+  // channel and re-sync together. Headless-safe (DOM is feature-detected).
+  const AudioUI = {
+    channels: ["master", "music", "sfx", "ambience"],
+    sliders: {}, mutes: [],
+    init() {
+      Mixer.load();
+      const byId = (id) => { try { return document.getElementById(id); } catch (e) { return null; } };
+      const wire = (suffix) => {
+        for (const ch of this.channels) {
+          const el = byId("vol_" + ch + suffix);
+          if (!el) continue;
+          (this.sliders[ch] = this.sliders[ch] || []).push(el);
+          el.addEventListener("input", () => { Mixer.setVolume(ch, (parseFloat(el.value) || 0) / 100); this.sync(); });
+        }
+        const mb = byId("muteToggle" + suffix);
+        if (mb) { this.mutes.push(mb); mb.addEventListener("click", () => { Mixer.toggleMute(); Sfx.play("ui_click"); this.sync(); }); }
+      };
+      wire(""); wire("P");
+      this.sync();
+    },
+    sync() {
+      for (const ch of this.channels) {
+        const v = Math.round((Mixer.vol[ch] != null ? Mixer.vol[ch] : 0) * 100);
+        for (const el of (this.sliders[ch] || [])) { try { el.value = String(v); } catch (e) {} }
+      }
+      for (const mb of this.mutes) {
+        if (mb.classList) mb.classList.toggle("active", Mixer.muted);
+        mb.textContent = t(Mixer.muted ? "settings.unmute" : "settings.mute");
+      }
     },
   };
 
@@ -7651,25 +8055,28 @@
       if (dom.anvilDone) dom.anvilDone.addEventListener("click", () => Anvil.close());
 
       // Inventory overlay: open via the 🎒 buttons or the "I" key.
-      if (dom.invBtn) dom.invBtn.addEventListener("click", () => Inventory.toggle());
-      if (dom.bagBtn) dom.bagBtn.addEventListener("click", () => Inventory.toggle());
+      if (dom.invBtn) dom.invBtn.addEventListener("click", () => { Sfx.play("ui_click"); Inventory.toggle(); });
+      if (dom.bagBtn) dom.bagBtn.addEventListener("click", () => { Sfx.play("ui_click"); Inventory.toggle(); });
       if (dom.invClose) dom.invClose.addEventListener("click", () => Inventory.close());
       if (dom.invDone) dom.invDone.addEventListener("click", () => Inventory.close());
 
       // Adventure overlays: dialogue, crafting, castle, quest log.
       if (dom.dlgClose) dom.dlgClose.addEventListener("click", () => Dialogue.close());
-      if (dom.craftBtn) dom.craftBtn.addEventListener("click", () => Crafting.toggle());
+      if (dom.craftBtn) dom.craftBtn.addEventListener("click", () => { Sfx.play("ui_click"); Crafting.toggle(); });
       if (dom.craftClose) dom.craftClose.addEventListener("click", () => Crafting.close());
       if (dom.craftDone) dom.craftDone.addEventListener("click", () => Crafting.close());
       if (dom.castleClose) dom.castleClose.addEventListener("click", () => CastleUI.close());
       if (dom.castleDone) dom.castleDone.addEventListener("click", () => CastleUI.close());
-      if (dom.questBtn) dom.questBtn.addEventListener("click", () => QuestLog.toggle());
+      if (dom.questBtn) dom.questBtn.addEventListener("click", () => { Sfx.play("ui_click"); QuestLog.toggle(); });
       if (dom.questLogClose) dom.questLogClose.addEventListener("click", () => QuestLog.close());
       if (dom.questLogDone) dom.questLogDone.addEventListener("click", () => QuestLog.close());
       if (dom.winReplayBtn) dom.winReplayBtn.addEventListener("click", () => window.location.reload());
 
       // Music toggle (🔊 / 🔇).
       if (dom.musicBtn) dom.musicBtn.addEventListener("click", () => Music.toggle());
+
+      // Audio mixer controls (volume sliders + mute) on the start screen + pause.
+      AudioUI.init();
 
       // Start-screen "Load progress" -> pick a file -> reload into the save.
       if (dom.loadBtn && dom.loadFile) {
@@ -7819,6 +8226,8 @@
       equipItem, unequipSlot, recomputeStats, TWO_HANDED, EQUIP_SLOTS,
       potionAdd, potionUse, POTION_SLOTS, enhanceItem, enhanceCost, enhanceMult,
       effectiveStats, featuredForWave, computeWeapon, Sfx, spawnArtifact,
+      // ---- Audio: mixer, per-zone ambience, footsteps (Task 6) ----
+      Mixer, Ambience, AudioUI, Footsteps, LowHealth, surfaceForZone, AUDIO_KEY,
       // ---- Internationalization (Task 7) ----
       I18N, LOCALES, RU, t, plural, applyLocale, LOCALE_KEY, localGet,
       tItemName, tItemDesc, tZoneName, tQuestTitle, tQuestStory, tNpcName, tNpcIntro,
