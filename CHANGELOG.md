@@ -24,6 +24,54 @@ delta it shipped with, since later tasks reference those.
 
 _Nothing pending._
 
+## [2026-06-22] — Task 11 — Brighter, more cheerful art direction + a larger visible play area
+
+Re-graded the world out of its washed-out, faint look and **opened the view up**,
+all through one new pure, data-driven **`ArtDirection`** seam so the whole pass is
+unit-testable without a GPU. No save-schema change (`SAVE_VERSION` stays **6** — the
+grade, fog and draw distance are all derived from the zone + the already-persisted
+graphics tier, so old saves load untouched).
+
+- **Cheerful colour grade.** A gentle, pure HSV lift (`grade()`: saturation ×1.18,
+  value ×1.06, clamped) is applied **once** in the `mat()` / `emat()` helpers, so
+  **every** gameplay/foliage/prop/character/ground material reads lusher and more
+  saturated while already-vivid candy colours barely move (no neon) and **hue is
+  preserved** (each land keeps its identity). The bounce-light (`hemi.groundColor`)
+  is graded to match. The **backdrops** (the unlit sky dome, the sea/river sheen)
+  deliberately **bypass** the grade via the direct `stdMat`/`stdEmat` path, so
+  `DayNight`/`Weather` keep exact control of the sky/fog tint.
+- **The view opens up, tier-gated.** Each land's fog density is now the zone base
+  scaled by the active tier (`fogDensityFor`): **high ×0.58**, medium ×0.74, **low
+  ×0.96**. The meadow's clear-distance roughly **doubles** (fog base 0.006 → 0.0035
+  on high) and the deep woods stop feeling like a wall (forest 0.018 → 0.0104; ~74%
+  → ~36% fogged at its fence); **indoor lairs blend only halfway** toward the open
+  multiplier so caverns/thickets open a little but stay **enclosed + moody**. Phones
+  (low tier) keep ~the old density — a tight, atmospheric radius for frame rate. The
+  camera **draw distance** (`maxZ`) is set per tier to match (high **360** / medium
+  290 / low 210, each clearing its zone's sea-skirt so the opened view never hard-
+  clips; the infiniteDistance sky dome is always drawn), and the third-person camera
+  framing was pulled back a touch (radius 12 → 13, zoom-out cap 18 → 22). Weather now
+  thickens this **graded** fog base, so storms still read on the opened view.
+- **Punchy-but-readable tone mapping.** A small per-tier **exposure** nudge (high
+  1.08 → 1.10, medium 1.02 → 1.05, low 1.00 → 1.02) makes the brighter palette feel
+  sunny without blowing out under ACES; `applyZoneMood` now derives exposure/contrast
+  from the same pure `exposureFor`/`contrastFor` helpers, so the per-zone moods (airy
+  meadow, moody lairs) are a single source of truth.
+- **Readability preserved.** WCAG `luminance`/`contrastRatio` helpers back a new test
+  proving gameplay-critical **markers + enemies stay perceptually distinct** from each
+  brightened ground (by hue as much as brightness), so nothing washes out.
+
+Perf is effectively **neutral**: thinning fog is a per-pixel shader change (it adds no
+geometry — the world is bounded by the zone fence regardless), the grade is a one-time
+material tweak, and `maxZ` is *tighter* than the engine default, so culling only
+improves. The heavy per-tier costs (PBR / shadows / particles) remain gated by Tasks
+3–5. Vitest: **19 → 32 test cases across 5 files** (new `test/artdirection.test.js`,
+13 cases: the grade's purity/clamp/hue-preservation, per-tier fog opening + indoor
+moodiness, draw-distance ordering, the sane ACES exposure/contrast range, marker
+readability, and `buildWorld` applying the graded fog on every tier). Full pipeline
+green (lint · typecheck · test · build · Playwright E2E). Content-hashed build — no
+`?v=` to bump.
+
 ## [2026-06-22] — Task 10 — Fix logical, code & UI bugs + a deeper test net
 
 Hunted down and root-caused the gameplay-correctness defects called out in the

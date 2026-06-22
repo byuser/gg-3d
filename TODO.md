@@ -635,7 +635,17 @@ A task is **done** only when **all** of these are true:
   scratch — these are **fixes**, not new systems.
 
 ### Task 11 — Brighter, more cheerful art direction + a larger visible play area
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-22 · Shipped a pure, data-driven **`ArtDirection`** seam: `grade()`
+  lifts saturation/value on every `mat`/`emat` colour (lush terrain/foliage, candy still pops, hue
+  preserved, clamped) with the sky/sea backdrops bypassing it so `DayNight` keeps exact control;
+  `fogDensityFor(zone, tier)` **opens the fog per tier** (high ×0.58 ≈ doubles the meadow's view,
+  low ×0.96 stays tight; indoor lairs blend halfway → still moody); `view(tier).maxZ` widens the
+  camera draw distance to match (360/290/210) + a small framing pull-back; a per-tier exposure nudge
+  keeps it punchy-but-readable under ACES (`applyZoneMood` now derives from pure `exposureFor`/
+  `contrastFor`); Weather thickens the graded fog base. New `test/artdirection.test.js` (13 cases;
+  Vitest 19 → 32) covers grade purity/clamp/hue, per-tier fog opening + indoor moodiness, draw-
+  distance ordering, sane ACES range, marker readability, and `buildWorld` applying the graded fog.
+  No save-schema change (`SAVE_VERSION` 6). Perf-neutral (fog/grade/exposure aren't geometry).
 - **Depends on:** plays best **with/after Task 4** (lighting) since exposure/tone
   mapping interact; coordinate the two.
 - **Goal.** The world currently reads **faint/washed‑out** and the **visible area

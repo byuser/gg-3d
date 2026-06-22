@@ -135,6 +135,15 @@ runs in English without a browser.
   **motes** in the caverns, **embers** in the thicket) plus wandering **butterflies** by day and
   glowing **fireflies** in the dark, over **gustier, per-zone wind** (windy peaks, sheltered lairs).
   It's all gated by the **graphics tier** and **disposed on travel** (no leaks).
+- **Bright, cheerful art + a wide view:** a warm **colour grade** lifts the whole world out of
+  the washed-out greys — terrain, foliage, water, sweets and props all read **lusher and more
+  saturated** (already-vivid candy stays candy; nothing goes neon), with a small **exposure**
+  nudge so the daylight feels sunny under ACES. The **view opens up** too: the per-land fog is
+  thinned so you can see **much farther** (the meadow's clear-distance roughly doubles; the deep
+  woods and caverns stop feeling like a wall) and the camera draws a **wider** scene. It's all
+  **tier-gated** — high-end desktops open right up, while phones keep a tighter, atmospheric
+  radius for a steady frame rate — and every land keeps its own **mood** (airy meadow, moody
+  lairs), with markers + enemies staying easy to read against the brighter ground.
 - **Impactful hits:** bolts, arrows and melee swings now **knock sweets back** and throw a
   **shower of shards** on impact; bolts also **splat** on the ground and solid scenery. Bombers
   detonate in a shockwave that shoves everything nearby.
@@ -322,7 +331,15 @@ suite (`test/bugfixes.test.js`) that locks in the Task 10 correctness fixes:
 **harvest** through the real interact key (including right after a zone swap),
 **solid castle** collision (player push-out + wand-bolt splat, with a **passable
 gate**) that survives a zone rebuild, and the **swing** landing damage on its
-**strike (impact) frame** in arc + range, exactly once. On top of that, a
+**strike (impact) frame** in arc + range, exactly once, and the **art-direction**
+suite (`test/artdirection.test.js`) that locks in the Task 11 cheerful grade +
+wider view: the **colour grade** is pure (lifts saturation/value, **preserves hue**,
+**clamps**, leaves vivid candy untouched), the **fog opens up per tier** (high
+thins it, low keeps it tight) while indoor lairs stay moodier, the **draw distance**
+(`maxZ`) is **tier-ordered**, per-zone **exposure/contrast** stay in a readable ACES
+range, gameplay-critical **markers/enemies remain perceptually distinct** from each
+brightened ground, and **`buildWorld` applies the graded fog** on every tier without
+throwing. On top of that, a
 **functional** suite (`test/functional.test.js`) boots the assembled game in
 isolation and drives whole flows (start → zone travel → save/reload round-trip),
 and a **Playwright** suite (`test/e2e/boot.spec.js`) loads the built bundle in
@@ -436,6 +453,14 @@ additive, not a rewrite (pure content tables live in `src/data/`, foundations in
   layered tree canopies, craggier rocks and crystal clusters where the budget allows. Backdrop
   materials that need StandardMaterial specifics (the unlit sky dome, the sea/river sheen) stay on
   `stdMat`/`stdEmat`. All of it is feature-detected, tier-gated and disposed on zone teardown.
+- **`ArtDirection`** — the cheerful **colour grade** + **larger, tier-gated view** (Task 11), all
+  pure data-driven helpers: `grade()` lifts saturation/value on every `mat`/`emat` base colour
+  (so muddy greens/browns read lush and candy pops, clamped so nothing blows out);
+  `fogDensityFor(zone, tier)` thins each land's fog per tier (high opens the view; low keeps it
+  tight; indoor lairs blend only halfway, staying moody); `view(tier).maxZ` sets the camera draw
+  distance to match; and `exposureFor`/`contrastFor` (which `applyZoneMood` applies) keep the
+  brighter palette punchy-but-readable under ACES. `luminance`/`contrastRatio` back the readability
+  test. The backdrops bypass the grade so `DayNight`/`Weather` keep exact sky/fog control.
 - **`Burst` / `spawnImpact`** — pooled, self-disposing impact effects + monster **knockback** so
   hits land with weight (feature-detected so it stays headless-safe).
 
@@ -542,4 +567,11 @@ Source: GitHub Actions**.
       passable) restored across zone rebuilds, and a **swing** that lands on its
       **strike (impact) frame** in arc + range — each locked in by a new
       `test/bugfixes.test.js` suite
+- [x] **Brighter art direction + a larger view** — a cheerful, data-driven **colour
+      grade** (`ArtDirection.grade`) lifts saturation/value on every material so the
+      world stops reading washed-out (vivid candy stays vivid, nothing neon), plus a
+      small exposure nudge; the per-land **fog opens up per tier** (`fogDensityFor`)
+      and the camera **draw distance** (`maxZ`) widens to match — **tier-gated** so
+      phones keep a tight, atmospheric radius while desktops open right up — with
+      per-zone moods + marker readability preserved and a new `test/artdirection.test.js` suite
 - [ ] Puzzles (levers, plates, gated doors)
