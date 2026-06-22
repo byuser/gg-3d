@@ -240,7 +240,21 @@ A task is **done** only when **all** of these are true:
   `Weather`, a small post‑process/quality module), `test/harness.js`, `README.md`.
 
 ### Task 5 — More + higher‑quality animation (actions + environment)
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-22 · Shipped a tier‑gated, feature‑detected animation pass. A new
+  pure, frame‑rate‑independent **`Swing`** state machine gives every action a readable
+  **anticipation → impact → recovery** arc (melee arc / ranged thrust / a `gather` chop hooked into
+  `ResourceNode.harvest`); damage now triggers a **flinch** recoil. Both are driven by `player.update`,
+  so they **freeze correctly** with the pause menu. Each zone **breathes**: a pure `ambientSpecFor(zone)`
+  maps every land to drifting particles (meadow pollen, forest spores, sea mist, peak snow, cavern
+  motes, thicket embers) + wandering **butterflies/fireflies**, built by `buildAmbientFX` (BABYLON
+  `ParticleSystem` feature‑detected, density gated by a new `Quality` tier `ambient` knob, motion driven
+  off the clock so it's frame‑rate independent), wired onto the world and **disposed on teardown**
+  (leak‑free — verified by a tracking‑PS smoke). Wind is **gustier** on two offset bands with a new
+  per‑zone `theme.wind` strength (windy peaks, sheltered lairs). New harness suite [32] (23 checks;
+  harness 309 → 332) covers the Swing transitions/timers + frame‑rate independence + pause‑correctness,
+  the flinch/gather triggers, the ambient spec/tier‑gating, and **every zone building + animating +
+  disposing** its ambient FX (incl. the no‑`ParticleSystem` fallback). No save‑schema change
+  (`SAVE_VERSION` untouched — animation is transient). `index.html` `?v=` bumped to **18**.
 - **Depends on:** lighter if done **after Task 3** (animates the better models).
 - **Goal.** Add life and weight: richer **action** animation (attacks, hits,
   gather, idle) and more **ambient/environment** motion (trees rustle/bend in
@@ -414,6 +428,27 @@ and note it; if it's expensive or irreversible, ask me first.
 
 ## 7. Changelog
 
+- 2026-06-22 · **Task 5 — More + higher‑quality animation (actions + environment)**: a tier‑gated,
+  fully feature‑detected animation pass. Combat now reads with clear **anticipation → impact →
+  recovery**: a small, pure **`Swing`** state machine (windup → strike → recover, with leftover time
+  carried across phase edges so it's **frame‑rate independent**) drives the player's melee arc, ranged
+  wand thrust and a new **`gather`** chop (hooked into `ResourceNode.harvest`), while `takeDamage` arms a
+  brief **flinch** recoil. Because both run inside `player.update`, they **pause cleanly** with the menu.
+  Every land **breathes** via a pure `ambientSpecFor(zone)` → `buildAmbientFX(scene, zone, …)` system:
+  drifting particles tuned per zone (meadow **pollen**, forest **spores**, **sea mist**, peak **snow**,
+  cavern **motes**, thicket **embers**) over a few wandering **butterflies** (day) / glowing **fireflies**
+  (dark), all driven off the clock (frame‑rate independent), **feature‑detected** (`BABYLON.ParticleSystem`
+  guarded — degrades to just the critter swarm without it), **density‑gated** by a new `Quality` tier
+  `ambient` knob, and **disposed on zone teardown** (the particle system is freed explicitly; the critter
+  meshes/materials ride buildWorld's existing auto‑stream‑out — a tracking‑PS smoke proved 6/6 systems
+  started + disposed, 0 leaked). Wind is now **gustier** (two offset bands) with an optional per‑zone
+  `theme.wind` strength (windy **peaks** 1.5, breezy **shore** 1.2, sheltered **forest** 0.7). New harness
+  suite **[32]** (23 checks; total 309 → 332) covers the Swing phase transitions/timers, frame‑rate
+  independence, the zero/negative‑dt pause freeze, the flinch + gather triggers, the per‑zone ambient
+  spec + fallback, the tier density gating, and **every zone building + animating + disposing** its
+  ambient FX headless‑safe (incl. the missing‑`ParticleSystem` path). No save‑schema change
+  (`SAVE_VERSION` untouched — animation state is transient). `index.html` `?v=` bumped to **18** (css
+  unchanged at 15).
 - 2026-06-22 · **Graphics‑quality setting (player‑facing tier override)**: the auto‑detected
   graphics tier can now be **overridden from the pause menu**. A new **Pause → Graphics** selector
   (Auto · High · Medium · Low, mirroring the language selector's styling) lets the player force a

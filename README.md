@@ -125,6 +125,15 @@ runs in English without a browser.
   tapered trunks; craggier rocks; clustered crystal spires; Lily now has hands). It's all on the
   same auto-detected **graphics tier** as the lighting (desktop → PBR + the IBL probe + the densest
   meshes; phones stay on lighter geometry, low-end keeps Standard) so it stays smooth everywhere.
+- **Lively animation:** every attack now reads with clear **anticipation → impact → recovery** —
+  Lily winds the blade back and whips it across her body for melee, draws the wand back before a
+  ranged thrust, and gives a deliberate **chop/reach** when harvesting; she also **flinches** when
+  struck. The motion runs through a small, frame-rate-independent **state machine** that freezes
+  cleanly with the pause menu. Each land also **breathes**: drifting ambient particles tuned per
+  zone (meadow **pollen**, forest **spores**, **sea mist**, falling **snow** on the peaks, glowing
+  **motes** in the caverns, **embers** in the thicket) plus wandering **butterflies** by day and
+  glowing **fireflies** in the dark, over **gustier, per-zone wind** (windy peaks, sheltered lairs).
+  It's all gated by the **graphics tier** and **disposed on travel** (no leaks).
 - **Impactful hits:** bolts, arrows and melee swings now **knock sweets back** and throw a
   **shower of shards** on impact; bolts also **splat** on the ground and solid scenery. Bombers
   detonate in a shockwave that shoves everything nearby.
@@ -268,8 +277,12 @@ tearing down its shadow generator** without leaking, the **feature-detected post
 (tone mapping / bloom / SSAO) and the **per-zone light mood**, and the new **higher-fidelity
 models** suite: the **model-fidelity tiers** (PBR / env / mesh-density gating), the **PBR ⇄
 StandardMaterial fallback**, the legacy **diffuse/specular aliases**, the procedural **IBL env
-probe**, and **every zone building + tearing down on the PBR + env tier** without throwing — all
-without a browser:
+probe**, and **every zone building + tearing down on the PBR + env tier** without throwing, and the
+new **animation** suite: the attack **state machine** (anticipation → impact → recovery phase
+transitions + timers, proven **frame-rate independent** and **pause-correct**), the player **flinch**
++ **gather** triggers, the pure **per-zone ambient spec**, **tier-gated** ambient density, and
+**every zone building + animating + disposing its ambient FX** (feature-detected, **leak-free**) —
+all without a browser:
 
 ```bash
 node test/harness.js
@@ -423,6 +436,11 @@ repo as a Pages artifact and publishes it. Enable Pages once in
 - [x] **Bigger world**: an island with a sky dome, surrounding sea, distant mountains and named landmarks
 - [x] **Impact feedback**: knockback + shard bursts on hits, ground/scenery splats, bomber shockwaves
 - [x] Prettier character animation (swinging ponytails + feet, a forward lean and hip sway)
+- [x] **More + higher-quality animation** — attacks read as **anticipation → impact → recovery** via
+      a frame-rate-independent, pause-correct **`Swing`** state machine (melee / ranged / gather), a
+      **flinch** on damage, plus per-zone **ambient FX** (drifting pollen/spores/mist/snow/motes/embers
+      + wandering butterflies & fireflies) over **gustier, per-zone wind** — all tier-gated, feature-
+      detected and disposed on travel; covered by a new headless animation suite
 - [x] Save/load extended to the full adventure state (materials, relics, quests, castle, time, weather)
 - [x] **Russian language support** — full **English + Russian** localization (UI + all data) via a
       `LOCALES`/`t()` i18n layer, switchable on the start screen & in pause settings, applied live
