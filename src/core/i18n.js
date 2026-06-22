@@ -1,0 +1,771 @@
+// Core: internationalization (English + Russian). Holds the LOCALES + RU
+// dictionaries, t()/plural()/interp(), localStorage helpers, and the pure
+// data-table display-name resolvers. The two resolvers that read runtime
+// systems (tWeatherLabel -> Weather, bossDisplayName -> boss archetypes) live
+// in the runtime module instead, to keep this layer dependency-acyclic.
+import { RARITY, SLOT_META, getDef } from "../data/items.js";
+import {
+  MATERIALS, RESOURCE_KINDS, RELICS, CASTLE_PART_BY_ID, LOCATION_BY_ID, NPC_BY_ID,
+} from "../data/content.js";
+import { STORY, CHAPTER_BY_ID } from "../data/story.js";
+import { ZONE_BY_ID } from "../data/zones.js";
+
+  // =========================================================================
+  // INTERNATIONALIZATION (i18n) — English + Russian, switchable live from the
+  // start screen and the pause settings and persisted in localStorage.
+  //
+  // Two layers keep this maintainable and fully testable:
+  //   1. LOCALES = { en, ru } — flat dictionaries of every UI / dynamic string,
+  //      resolved through t(key, params) (with {placeholder} interpolation and
+  //      en fallback). A key-parity test guarantees en and ru stay in lock-step.
+  //   2. The DATA tables (items, zones, quests, NPCs, …) keep their English text
+  //      as the source of truth; Russian lives in the parallel `RU` object and
+  //      is read by the tData / resolver helpers, falling back to the English
+  //      field. A completeness test walks the tables so no data string can ship
+  //      untranslated.
+  // Everything is headless-safe: localStorage is feature-detected, so the Node
+  // harness simply stays in English.
+  // =========================================================================
+  const I18N = { locale: "en" };
+  const LOCALE_KEY = "gg3d_locale";
+
+  // localStorage isn't present in the headless harness / some privacy modes —
+  // fail soft everywhere it's touched (mirrors sessionGet/Set used for saves).
+  function localGet(k) {
+    try { return typeof localStorage !== "undefined" ? localStorage.getItem(k) : null; }
+    catch (e) { return null; }
+  }
+  function localSet(k, v) {
+    try { if (typeof localStorage !== "undefined") localStorage.setItem(k, v); } catch (e) {}
+  }
+
+  const LOCALES = {
+    en: {
+      // ---- boot / start screen ----
+      "hint.loading": "Loading engine…",
+      "hint.ready": "Ready!",
+      "hint.errorPrefix": "Error: ",
+      "start.tagline": "Run with Lily across a living island of <b>separate lands</b> — meadow vale, " +
+        "whispering wood, salt shore, frostpeak trail and the boss lairs. <b>Roaming monsters</b> " +
+        "guard each place and <b>respawn</b> over time; <b>travel</b> between lands through paths, " +
+        "bridges and cave mouths. Follow the <b>chaptered main quest</b> (with optional <b>side quests</b>), " +
+        "<b>gather &amp; craft</b>, raise a <b>castle</b> from five relics, then slay the <b>dragon</b> to win!",
+      "start.startBtn": "Start Adventure",
+      "start.loadBtn": "Load Progress",
+      "settings.language": "Language",
+      "settings.graphics": "Graphics",
+      "settings.gfxAuto": "Auto",
+      "settings.gfxHigh": "High",
+      "settings.gfxMedium": "Medium",
+      "settings.gfxLow": "Low",
+      "settings.gfxAutoIs": "Auto: {tier}",
+      "settings.gfxReload": "Reloads to apply · progress is kept",
+      "settings.audio": "Audio",
+      "settings.volMaster": "Master",
+      "settings.volMusic": "Music",
+      "settings.volSfx": "Effects",
+      "settings.volAmbience": "Ambience",
+      "settings.mute": "Mute all",
+      "settings.unmute": "Unmute",
+      "ctrl.move": "Move", "ctrl.moveKeys": "WASD / Arrows · or the on-screen stick",
+      "ctrl.attack": "Attack", "ctrl.attackKeys": "Space / F · or the ✨ button",
+      "ctrl.interact": "Interact / talk / gather", "ctrl.interactKeys": "E · or the action button",
+      "ctrl.inventory": "Inventory", "ctrl.inventoryKeys": "I · or the 🎒 button",
+      "ctrl.craft": "Craft · Quests", "ctrl.craftKeys": "C · J · or the 🛠️ 📜 buttons",
+      "ctrl.travel": "Travel", "ctrl.travelKeys": "walk into a path / bridge / cave portal",
+      // ---- HUD button titles / aria ----
+      "btnTitle.fullscreen": "Fullscreen", "btnAria.fullscreen": "Toggle fullscreen",
+      "btnTitle.exitFullscreen": "Exit fullscreen",
+      "btnTitle.menu": "Menu (Esc)", "btnAria.menu": "Open menu",
+      "btnTitle.inventory": "Inventory (I)", "btnAria.inventory": "Open inventory",
+      "btnTitle.crafting": "Crafting (C)", "btnAria.crafting": "Open crafting",
+      "btnTitle.questLog": "Quest log (J)", "btnAria.questLog": "Open quest log",
+      "btnTitle.muteMusic": "Mute music (M)", "btnTitle.playMusic": "Play music", "btnAria.music": "Toggle music",
+      "prompt.pressE": "Press <b>E</b>",
+      "prompt.withKey": "{label} · <b>E</b>",
+      // ---- game over / victory ----
+      "over.title": "Game Over 🍭",
+      "over.tagline": "The wild monsters got you! You scored <b>{score}</b> and fell in <b>{where}</b>.",
+      "over.replay": "Play Again",
+      "win.title": "Victory! 🐉🏰",
+      "win.tagline": "The castle stands and the <b>Ancient Dragon</b> is slain! Meadowgate is " +
+        "saved. You finished with <b>{score}</b> points after felling <b>{kills}</b> monsters.",
+      "win.replay": "Play Again",
+      "win.ending": "<b>{title}</b><br>{text}",
+      // ---- pause menu ----
+      "pause.title": "Paused",
+      "pause.stats": "Wave <b>{wave}</b> · Score <b>{score}</b>",
+      "pause.resume": "Resume",
+      "pause.save": "Save Progress",
+      "pause.savedBtn": "Saved! 💾",
+      "pause.applyingGfx": "Applying graphics…",
+      "pause.restart": "Restart",
+      "pause.exit": "Exit to Menu",
+      "pause.confirmYes": "Yes",
+      "pause.confirmNo": "Cancel",
+      "pause.confirmRestart": "Restart the game? Your current progress will be lost unless you've saved it.",
+      "pause.confirmExit": "Exit to the main menu? Your current progress will be lost unless you've saved it.",
+      // ---- shop / inventory / anvil / crafting / castle / quest-log (static) ----
+      "shop.title": "🧙 Travelling Merchant",
+      "shop.tagline": "Buy weapons, armour &amp; accessories — or sell your spare gear.",
+      "shop.coins": "coins",
+      "shop.tabBuy": "Buy", "shop.tabRare": "✨ Rare", "shop.tabSell": "Sell",
+      "shop.done": "Done",
+      "shop.gear": "⚔️ Gear", "shop.potions": "🧪 Potions",
+      "shop.rareNote": "✨ Rare wares — a fresh rotation every wave.",
+      "shop.sellEmpty": "Your bag is empty. Unequip gear in your inventory (🎒) to sell it.",
+      "inv.title": "🎒 Inventory &amp; Equipment",
+      "inv.tagline": "Click a bag item to equip it; click an equipped slot to remove it.",
+      "inv.done": "Done",
+      "inv.twoHanded": "⟵ two-handed",
+      "inv.unequipTitle": "Unequip {name}",
+      "inv.empty": "{icon} empty",
+      "inv.maxHealth": "❤ Max health",
+      "inv.resist": "🛡️ Resist",
+      "inv.speed": "👟 Speed",
+      "inv.lifesteal": "🩸 Lifesteal",
+      "inv.weapon": "⚔️ Weapon",
+      "inv.damage": "💥 Damage",
+      "inv.bag": "🎒 Bag ({n}/{cap})",
+      "inv.bagEmpty": "Empty — buy gear from the merchant or beat a boss for rare loot.",
+      "anvil.title": "🔨 Blacksmith",
+      "anvil.tagline": "Enhance your weapons &amp; equipment. Rarer gear forges further and gains more per level.",
+      "anvil.done": "Done",
+      "anvil.empty": "No gear to enhance. Buy or loot some weapons and armour first.",
+      "anvil.bag": "Bag",
+      "anvil.max": "MAX",
+      "craft.title": "🛠️ Crafting Bench",
+      "craft.tagline": "Turn gathered materials into potions &amp; gear. Cut trees, mine rock, gather herbs and collect water across the land.",
+      "craft.done": "Done",
+      "castleui.title": "🏰 Build the Castle",
+      "castleui.tagline": "Raise the castle from five relics. Find the relics through quests and exploration, then build each part in order.",
+      "castleui.coins": "coins ·",
+      "castleui.done": "Done",
+      "questlog.title": "📜 Quest Log",
+      "questlog.tagline": "Your <b>main story</b> runs in chapters across the lands — follow the tracker from one ❗ giver to the next. <b>Side quests</b> are optional bounties &amp; errands, listed separately.",
+      "questlog.done": "Done",
+      // ---- shared buttons ----
+      "btn.buyCost": "🪙 {cost}",
+      "btn.sellWorth": "Sell 🪙 {worth}",
+      "btn.equip": "Equip",
+      "btn.craft": "Craft 🛠️",
+      "btn.needMats": "Need mats",
+      "btn.build": "Build 🏰",
+      "btn.built": "Built",
+      "btn.locked": "Locked",
+      "btn.close": "Close",
+      "btn.farewell": "Farewell",
+      "btn.continue": "Continue ▶",
+      "btn.beginAdventure": "Begin the adventure ▶",
+      "btn.turnInQuest": "Turn in: {title} ✅",
+      "btn.acceptMain": "Accept: {title} 📜",
+      "btn.acceptSide": "Accept: {title} 🔸",
+      // ---- stat summary ----
+      "stat.healthRestore": "❤️ +{n} health",
+      "stat.buffWrap": "✨ {inner} ({t}s)",
+      "stat.rangedArrow": "🏹 ranged",
+      "stat.rangedBolt": "🔮 ranged",
+      "stat.melee": "⚔️ melee",
+      "stat.dmg": "{n} dmg",
+      "stat.multishot": "×{n}",
+      "stat.pierce": "pierce {n}",
+      "stat.twoHanded": "2-handed",
+      "stat.oneHanded": "1-handed",
+      "stat.hp": "+{n} HP",
+      "stat.resist": "+{n}% resist",
+      "stat.speed": "+{n} speed",
+      "stat.damageBonus": "+{n} dmg",
+      "stat.haste": "+{n}% haste",
+      "stat.lifestealBonus": "+{n} lifesteal",
+      "stat.coinMagnet": "coin magnet",
+      // ---- interactable labels ----
+      "label.shop": "Shop",
+      "label.blacksmith": "Blacksmith",
+      "label.collectArtifact": "Collect artifact",
+      "label.talkTo": "Talk to {name}",
+      "label.turnIn": "✓ {name}: turn in",
+      "label.newQuest": "❗ {name}: new quest",
+      "label.buildCastle": "🏰 Build castle",
+      "label.buildPart": "🏰 Build {part}",
+      "label.castleNeed": "🏰 Castle (need {icon} {part})",
+      "label.castleComplete": "🏰 Castle complete",
+      // ---- objectives ----
+      "obj.hunt": "Defeat sweets — {have}/{need}",
+      "obj.gather": "Gather {icon} {label} — {have}/{need}",
+      "obj.reach": "Reach {name}",
+      "obj.talk": "Speak with {icon} {name}",
+      "obj.defeatBoss": "Defeat 👑 {boss} in {zone}",
+      "obj.build": "Raise the {part} at 🏰 Castle Hill",
+      "obj.defeatDragon": "Slay the 🐉 Ancient Dragon",
+      "obj.lairBoss": "the lair boss",
+      "obj.doneMark": " ✓",
+      // ---- guidance / story flow ----
+      "guide.turnin": "Return to {giver} to turn in",
+      "guide.accept": "Speak with {giver} at {place}",
+      "guide.whereSuffix": " · {where}",
+      "place.meadowgate": "Meadowgate",
+      "quest.kindMission": "Mission",
+      "quest.kindSide": "Side quest",
+      // ---- dialogue ----
+      "dlg.tagMission": "📜 Mission",
+      "dlg.tagSide": "🔸 Side quest",
+      "dlg.greetSettle": "Back already? Let's settle up.",
+      "dlg.greetWorking": "Still on the job? Luck go with you.",
+      "dlg.greetDone": "Thank you, hero — the vale owes you much.",
+      "dlg.questLine": "{tag}: <b>{title}</b>",
+      "dlg.readyTurnIn": " — ready to turn in!",
+      "dlg.newMission": "📜 New mission: <b>{title}</b>",
+      "dlg.sideQuest": "🔸 Side quest: <b>{title}</b>{rep}{done}",
+      "dlg.repeatable": " (repeatable)",
+      "dlg.doneTimes": " · done ×{n}",
+      "dlg.story": "\"{story}\"",
+      "dlg.reward": "Reward: {reward}",
+      // ---- HUD trackers / bars / banners ----
+      "qt.chapter": "Chapter {n} · {title}",
+      "qt.missionTitle": "📜 {title}",
+      "qt.sideTitle": "🔸 {title}",
+      "qt.sideReturn": "✓ return to turn in",
+      "buff.pill": "{icon} {label} <b>{n}s</b>",
+      "potion.slotTitle": "{name} — {desc} (press {key})",
+      "boss.barName": "👑 {name}",
+      "banner.bossWave": "Wave {n} — 👑 {boss}!",
+      "banner.sweepWave": "Wave {n} — {count} sweets!",
+      "banner.theDragon": "The Dragon",
+      "label.zone": "{icon} {name}",
+      // ---- toasts ----
+      "toast.fullHealth": "Already at full health",
+      "toast.potionHeal": "{icon} +{heal} health",
+      "toast.potionBuff": "{icon} {label}!",
+      "toast.noMaterials": "Not enough materials",
+      "toast.beltFull": "Potion belt full (3 kinds)",
+      "toast.bagFull": "Bag full",
+      "toast.crafted": "🛠️ Crafted {icon} {name}",
+      "toast.gathered": "{icon} +{n} {label}",
+      "toast.summonMinions": "👹 The Tyrant summons minions!",
+      "toast.incomingBombs": "💣 Incoming bombs!",
+      "toast.hydraSplits": "🦠 The Hydra splits!",
+      "toast.partRaised": "🏰 {part} raised!",
+      "toast.castleComplete": "🐉 The castle is complete... the DRAGON awakens!",
+      "toast.dragonDives": "🐉 The dragon dives!",
+      "toast.dragonBreath": "🔥 Dragon's breath!",
+      "toast.artifact": "Artifact! +{score}{extra}",
+      "toast.artifactHeal": " · +{n} ❤",
+      "toast.artifactCoin": " · 🪙 +{n}",
+      "toast.noCoins": "Not enough coins",
+      "toast.bought": "{icon} Bought {name}",
+      "toast.sold": "Sold {name} for 🪙 {worth}",
+      "toast.maxEnhance": "Already at max enhancement",
+      "toast.forged": "🔨 {name} forged!",
+      "toast.questAccepted": "📜 {kind}: {title}",
+      "toast.questComplete": "✅ {title} complete! {bits}",
+      "toast.reached": "📍 Reached {name}",
+      "toast.chapterBegin": "📖 Chapter {n}: {title}",
+      "toast.lairIntro": "⚔️ {intro}",
+      "toast.bossDefeated": "👑 {boss} defeated! Dropped {item}!",
+      "toast.pickedUp": "✨ Picked up {item}!",
+      "toast.bagFullDrop": "Bag full — drop something!",
+      "toast.coinPickup": "🪙 +{n}",
+      "toast.nothingToSave": "Nothing to save yet",
+      "toast.saved": "Progress saved! 💾",
+      "toast.saveFailed": "Save failed",
+      "toast.invalidSave": "That file isn't a valid Good Game 3D save.",
+      "toast.readError": "Couldn't read that file.",
+      "toast.loaded": "Progress loaded! 🎮",
+      // ---- castle build panel ----
+      "castle.built": "✅ Built",
+      "castle.lockedPrev": "🔒 Build the previous part first",
+      "castle.needs": "Needs {relic} · {coins}",
+      "castle.relicHave": "{icon} ✓",
+      "castle.relicNeed": "{icon} {name} ✗",
+      "castle.coinsHave": "🪙 {cost} ✓",
+      "castle.coinsNeed": "🪙 {cost} ✗",
+      "castle.complete": "The castle stands! The dragon stirs…",
+      "castle.progress": "{built}/{total} {word} raised",
+      "castle.partWord": { one: "part", other: "parts" },
+      // ---- quest log ----
+      "log.mainStory": "📜 Main Story",
+      "log.sideQuests": "🔸 Side Quests",
+      "log.now": "<b>Chapter {n}: {title}</b><br>{text}",
+      "log.allDone": "The castle stands and the Ancient Dragon is slain — the vale is saved! 🏰🐉",
+      "log.chapterRow": "{icon} Chapter {n}: {title}",
+      "log.returnTo": " — return to {giver}",
+      "log.speakAt": "Speak with {giver} at {place}",
+      "log.sideNone": "None yet — visit the ❗ folk for optional bounties &amp; errands.",
+      "log.sideFrom": "from {icon} {name}{ret} · reward {reward}",
+      "log.sideReturn": " · return to turn in",
+      "log.sideCompleted": "Completed side quests",
+    },
+    ru: {
+      // ---- boot / start screen ----
+      "hint.loading": "Загрузка движка…",
+      "hint.ready": "Готово!",
+      "hint.errorPrefix": "Ошибка: ",
+      "start.tagline": "Бегите за Лили по живому острову из <b>отдельных земель</b> — луговая долина, " +
+        "шепчущий лес, солёный берег, морозный перевал и логова боссов. <b>Бродячие монстры</b> " +
+        "охраняют каждое место и со временем <b>возрождаются</b>; <b>путешествуйте</b> между землями по тропам, " +
+        "мостам и пещерам. Следуйте за <b>главным сюжетом по главам</b> (и необязательными <b>побочными заданиями</b>), " +
+        "<b>собирайте и мастерите</b>, возведите <b>замок</b> из пяти реликвий, а затем сразите <b>дракона</b> ради победы!",
+      "start.startBtn": "Начать приключение",
+      "start.loadBtn": "Загрузить прогресс",
+      "settings.language": "Язык",
+      "settings.graphics": "Графика",
+      "settings.gfxAuto": "Авто",
+      "settings.gfxHigh": "Высокое",
+      "settings.gfxMedium": "Среднее",
+      "settings.gfxLow": "Низкое",
+      "settings.gfxAutoIs": "Авто: {tier}",
+      "settings.gfxReload": "Применится после перезагрузки · прогресс сохранится",
+      "settings.audio": "Звук",
+      "settings.volMaster": "Общий",
+      "settings.volMusic": "Музыка",
+      "settings.volSfx": "Эффекты",
+      "settings.volAmbience": "Атмосфера",
+      "settings.mute": "Выключить звук",
+      "settings.unmute": "Включить звук",
+      "ctrl.move": "Движение", "ctrl.moveKeys": "WASD / стрелки · или экранный джойстик",
+      "ctrl.attack": "Атака", "ctrl.attackKeys": "Пробел / F · или кнопка ✨",
+      "ctrl.interact": "Действие / разговор / сбор", "ctrl.interactKeys": "E · или кнопка действия",
+      "ctrl.inventory": "Инвентарь", "ctrl.inventoryKeys": "I · или кнопка 🎒",
+      "ctrl.craft": "Ремесло · Задания", "ctrl.craftKeys": "C · J · или кнопки 🛠️ 📜",
+      "ctrl.travel": "Путешествие", "ctrl.travelKeys": "войдите в тропу / мост / пещеру",
+      // ---- HUD button titles / aria ----
+      "btnTitle.fullscreen": "Во весь экран", "btnAria.fullscreen": "Переключить полноэкранный режим",
+      "btnTitle.exitFullscreen": "Выйти из полноэкранного режима",
+      "btnTitle.menu": "Меню (Esc)", "btnAria.menu": "Открыть меню",
+      "btnTitle.inventory": "Инвентарь (I)", "btnAria.inventory": "Открыть инвентарь",
+      "btnTitle.crafting": "Ремесло (C)", "btnAria.crafting": "Открыть ремесло",
+      "btnTitle.questLog": "Журнал заданий (J)", "btnAria.questLog": "Открыть журнал заданий",
+      "btnTitle.muteMusic": "Выключить музыку (M)", "btnTitle.playMusic": "Включить музыку", "btnAria.music": "Переключить музыку",
+      "prompt.pressE": "Нажмите <b>E</b>",
+      "prompt.withKey": "{label} · <b>E</b>",
+      // ---- game over / victory ----
+      "over.title": "Игра окончена 🍭",
+      "over.tagline": "Дикие монстры одолели вас! Вы набрали <b>{score}</b> и пали в <b>{where}</b>.",
+      "over.replay": "Играть снова",
+      "win.title": "Победа! 🐉🏰",
+      "win.tagline": "Замок стоит, а <b>Древний Дракон</b> повержен! Лугоград спасён. " +
+        "Вы завершили с <b>{score}</b> очками, сразив <b>{kills}</b> монстров.",
+      "win.replay": "Играть снова",
+      "win.ending": "<b>{title}</b><br>{text}",
+      // ---- pause menu ----
+      "pause.title": "Пауза",
+      "pause.stats": "Волна <b>{wave}</b> · Очки <b>{score}</b>",
+      "pause.resume": "Продолжить",
+      "pause.save": "Сохранить прогресс",
+      "pause.savedBtn": "Сохранено! 💾",
+      "pause.applyingGfx": "Применение настроек…",
+      "pause.restart": "Заново",
+      "pause.exit": "Выйти в меню",
+      "pause.confirmYes": "Да",
+      "pause.confirmNo": "Отмена",
+      "pause.confirmRestart": "Начать игру заново? Текущий прогресс будет потерян, если вы его не сохранили.",
+      "pause.confirmExit": "Выйти в главное меню? Текущий прогресс будет потерян, если вы его не сохранили.",
+      // ---- shop / inventory / anvil / crafting / castle / quest-log (static) ----
+      "shop.title": "🧙 Странствующий торговец",
+      "shop.tagline": "Покупайте оружие, броню и аксессуары — или продавайте лишнее снаряжение.",
+      "shop.coins": "монет",
+      "shop.tabBuy": "Купить", "shop.tabRare": "✨ Редкое", "shop.tabSell": "Продать",
+      "shop.done": "Готово",
+      "shop.gear": "⚔️ Снаряжение", "shop.potions": "🧪 Зелья",
+      "shop.rareNote": "✨ Редкие товары — обновляются каждую волну.",
+      "shop.sellEmpty": "Ваша сумка пуста. Снимите снаряжение в инвентаре (🎒), чтобы продать его.",
+      "inv.title": "🎒 Инвентарь и снаряжение",
+      "inv.tagline": "Нажмите на предмет в сумке, чтобы надеть его; нажмите на занятый слот, чтобы снять.",
+      "inv.done": "Готово",
+      "inv.twoHanded": "⟵ двуручное",
+      "inv.unequipTitle": "Снять: {name}",
+      "inv.empty": "{icon} пусто",
+      "inv.maxHealth": "❤ Макс. здоровье",
+      "inv.resist": "🛡️ Защита",
+      "inv.speed": "👟 Скорость",
+      "inv.lifesteal": "🩸 Вампиризм",
+      "inv.weapon": "⚔️ Оружие",
+      "inv.damage": "💥 Урон",
+      "inv.bag": "🎒 Сумка ({n}/{cap})",
+      "inv.bagEmpty": "Пусто — купите снаряжение у торговца или одолейте босса ради редкой добычи.",
+      "anvil.title": "🔨 Кузнец",
+      "anvil.tagline": "Улучшайте оружие и снаряжение. Чем реже предмет, тем дальше его можно усилить и тем больше прирост за уровень.",
+      "anvil.done": "Готово",
+      "anvil.empty": "Нечего улучшать. Сначала купите или добудьте оружие и броню.",
+      "anvil.bag": "Сумка",
+      "anvil.max": "МАКС",
+      "craft.title": "🛠️ Верстак",
+      "craft.tagline": "Превращайте собранные материалы в зелья и снаряжение. Рубите деревья, добывайте камень, собирайте травы и воду по всей земле.",
+      "craft.done": "Готово",
+      "castleui.title": "🏰 Построить замок",
+      "castleui.tagline": "Возведите замок из пяти реликвий. Добудьте реликвии заданиями и исследованием, затем стройте части по порядку.",
+      "castleui.coins": "монет ·",
+      "castleui.done": "Готово",
+      "questlog.title": "📜 Журнал заданий",
+      "questlog.tagline": "Ваш <b>главный сюжет</b> идёт по главам через земли — следуйте за трекером от одного ❗ дарителя к другому. <b>Побочные задания</b> — необязательные награды и поручения, перечислены отдельно.",
+      "questlog.done": "Готово",
+      // ---- shared buttons ----
+      "btn.buyCost": "🪙 {cost}",
+      "btn.sellWorth": "Продать 🪙 {worth}",
+      "btn.equip": "Надеть",
+      "btn.craft": "Создать 🛠️",
+      "btn.needMats": "Нужны материалы",
+      "btn.build": "Строить 🏰",
+      "btn.built": "Готово",
+      "btn.locked": "Закрыто",
+      "btn.close": "Закрыть",
+      "btn.farewell": "Прощайте",
+      "btn.continue": "Продолжить ▶",
+      "btn.beginAdventure": "Начать приключение ▶",
+      "btn.turnInQuest": "Сдать: {title} ✅",
+      "btn.acceptMain": "Принять: {title} 📜",
+      "btn.acceptSide": "Принять: {title} 🔸",
+      // ---- stat summary ----
+      "stat.healthRestore": "❤️ +{n} здоровья",
+      "stat.buffWrap": "✨ {inner} ({t}с)",
+      "stat.rangedArrow": "🏹 дальний бой",
+      "stat.rangedBolt": "🔮 дальний бой",
+      "stat.melee": "⚔️ ближний бой",
+      "stat.dmg": "{n} ур.",
+      "stat.multishot": "×{n}",
+      "stat.pierce": "пробой {n}",
+      "stat.twoHanded": "двуручное",
+      "stat.oneHanded": "одноручное",
+      "stat.hp": "+{n} ОЗ",
+      "stat.resist": "+{n}% защиты",
+      "stat.speed": "+{n} скорости",
+      "stat.damageBonus": "+{n} ур.",
+      "stat.haste": "+{n}% скорости атаки",
+      "stat.lifestealBonus": "+{n} вампиризма",
+      "stat.coinMagnet": "магнит для монет",
+      // ---- interactable labels ----
+      "label.shop": "Торговец",
+      "label.blacksmith": "Кузнец",
+      "label.collectArtifact": "Подобрать артефакт",
+      "label.talkTo": "Поговорить: {name}",
+      "label.turnIn": "✓ {name}: сдать",
+      "label.newQuest": "❗ {name}: новое задание",
+      "label.buildCastle": "🏰 Строить замок",
+      "label.buildPart": "🏰 Строить: {part}",
+      "label.castleNeed": "🏰 Замок (нужно {icon} {part})",
+      "label.castleComplete": "🏰 Замок достроен",
+      // ---- objectives ----
+      "obj.hunt": "Победите сладости — {have}/{need}",
+      "obj.gather": "Соберите {icon} {label} — {have}/{need}",
+      "obj.reach": "Дойдите до {name}",
+      "obj.talk": "Поговорите с {icon} {name}",
+      "obj.defeatBoss": "Одолейте 👑 {boss} в {zone}",
+      "obj.build": "Возведите {part} на 🏰 Замковом холме",
+      "obj.defeatDragon": "Сразите 🐉 Древнего Дракона",
+      "obj.lairBoss": "босса логова",
+      "obj.doneMark": " ✓",
+      // ---- guidance / story flow ----
+      "guide.turnin": "Вернитесь к {giver}, чтобы сдать",
+      "guide.accept": "Поговорите с {giver} в {place}",
+      "guide.whereSuffix": " · {where}",
+      "place.meadowgate": "Лугоград",
+      "quest.kindMission": "Задание",
+      "quest.kindSide": "Побочное задание",
+      // ---- dialogue ----
+      "dlg.tagMission": "📜 Задание",
+      "dlg.tagSide": "🔸 Побочное задание",
+      "dlg.greetSettle": "Уже вернулись? Давайте рассчитаемся.",
+      "dlg.greetWorking": "Всё ещё за делом? Удачи вам.",
+      "dlg.greetDone": "Спасибо, герой — долина в долгу перед вами.",
+      "dlg.questLine": "{tag}: <b>{title}</b>",
+      "dlg.readyTurnIn": " — можно сдавать!",
+      "dlg.newMission": "📜 Новое задание: <b>{title}</b>",
+      "dlg.sideQuest": "🔸 Побочное задание: <b>{title}</b>{rep}{done}",
+      "dlg.repeatable": " (повторяемое)",
+      "dlg.doneTimes": " · сдано ×{n}",
+      "dlg.story": "«{story}»",
+      "dlg.reward": "Награда: {reward}",
+      // ---- HUD trackers / bars / banners ----
+      "qt.chapter": "Глава {n} · {title}",
+      "qt.missionTitle": "📜 {title}",
+      "qt.sideTitle": "🔸 {title}",
+      "qt.sideReturn": "✓ вернитесь, чтобы сдать",
+      "buff.pill": "{icon} {label} <b>{n}с</b>",
+      "potion.slotTitle": "{name} — {desc} (нажмите {key})",
+      "boss.barName": "👑 {name}",
+      "banner.bossWave": "Волна {n} — 👑 {boss}!",
+      "banner.sweepWave": "Волна {n} — сладостей: {count}!",
+      "banner.theDragon": "Дракон",
+      "label.zone": "{icon} {name}",
+      // ---- toasts ----
+      "toast.fullHealth": "Здоровье уже полное",
+      "toast.potionHeal": "{icon} +{heal} здоровья",
+      "toast.potionBuff": "{icon} {label}!",
+      "toast.noMaterials": "Недостаточно материалов",
+      "toast.beltFull": "Пояс зелий полон (3 вида)",
+      "toast.bagFull": "Сумка полна",
+      "toast.crafted": "🛠️ Создано: {icon} {name}",
+      "toast.gathered": "{icon} +{n} {label}",
+      "toast.summonMinions": "👹 Тиран призывает прислужников!",
+      "toast.incomingBombs": "💣 Летят бомбы!",
+      "toast.hydraSplits": "🦠 Гидра делится!",
+      "toast.partRaised": "🏰 {part} возведена!",
+      "toast.castleComplete": "🐉 Замок достроен... ДРАКОН пробуждается!",
+      "toast.dragonDives": "🐉 Дракон пикирует!",
+      "toast.dragonBreath": "🔥 Дыхание дракона!",
+      "toast.artifact": "Артефакт! +{score}{extra}",
+      "toast.artifactHeal": " · +{n} ❤",
+      "toast.artifactCoin": " · 🪙 +{n}",
+      "toast.noCoins": "Недостаточно монет",
+      "toast.bought": "{icon} Куплено: {name}",
+      "toast.sold": "Продано: {name} за 🪙 {worth}",
+      "toast.maxEnhance": "Уже максимальное улучшение",
+      "toast.forged": "🔨 {name} выковано!",
+      "toast.questAccepted": "📜 {kind}: {title}",
+      "toast.questComplete": "✅ {title} — выполнено! {bits}",
+      "toast.reached": "📍 Достигнуто: {name}",
+      "toast.chapterBegin": "📖 Глава {n}: {title}",
+      "toast.lairIntro": "⚔️ {intro}",
+      "toast.bossDefeated": "👑 {boss} повержен! Выпало: {item}!",
+      "toast.pickedUp": "✨ Подобрано: {item}!",
+      "toast.bagFullDrop": "Сумка полна — что-нибудь выбросьте!",
+      "toast.coinPickup": "🪙 +{n}",
+      "toast.nothingToSave": "Пока нечего сохранять",
+      "toast.saved": "Прогресс сохранён! 💾",
+      "toast.saveFailed": "Не удалось сохранить",
+      "toast.invalidSave": "Этот файл не является сохранением Good Game 3D.",
+      "toast.readError": "Не удалось прочитать файл.",
+      "toast.loaded": "Прогресс загружен! 🎮",
+      // ---- castle build panel ----
+      "castle.built": "✅ Построено",
+      "castle.lockedPrev": "🔒 Сначала постройте предыдущую часть",
+      "castle.needs": "Нужно {relic} · {coins}",
+      "castle.relicHave": "{icon} ✓",
+      "castle.relicNeed": "{icon} {name} ✗",
+      "castle.coinsHave": "🪙 {cost} ✓",
+      "castle.coinsNeed": "🪙 {cost} ✗",
+      "castle.complete": "Замок стоит! Дракон пробуждается…",
+      "castle.progress": "{word}: {built}/{total}",
+      "castle.partWord": { one: "Возведена часть", few: "Возведено частей", many: "Возведено частей" },
+      // ---- quest log ----
+      "log.mainStory": "📜 Главный сюжет",
+      "log.sideQuests": "🔸 Побочные задания",
+      "log.now": "<b>Глава {n}: {title}</b><br>{text}",
+      "log.allDone": "Замок стоит, а Древний Дракон повержен — долина спасена! 🏰🐉",
+      "log.chapterRow": "{icon} Глава {n}: {title}",
+      "log.returnTo": " — вернитесь к {giver}",
+      "log.speakAt": "Поговорите с {giver} в {place}",
+      "log.sideNone": "Пока ничего — навестите ❗ людей ради необязательных наград и поручений.",
+      "log.sideFrom": "от {icon} {name}{ret} · награда {reward}",
+      "log.sideReturn": " · вернитесь, чтобы сдать",
+      "log.sideCompleted": "Выполненные побочные задания",
+    },
+  };
+
+  // Russian translations for the DATA tables (English stays in the tables as the
+  // source + fallback). Keyed by the same ids the tables use. A completeness
+  // test walks the tables and fails if any of these is missing.
+  const RU = {
+    item: {
+      magic_wand: { name: "Волшебная палочка", desc: "Надёжный метатель зарядов." },
+      short_bow: { name: "Короткий лук", desc: "Двуручный. Быстрые пробивающие стрелы, летящие по дуге." },
+      apprentice_staff: { name: "Посох ученика", desc: "Двуручный. Бьёт веером из 3 зарядов." },
+      iron_dagger: { name: "Железный кинжал", desc: "Одноручный. Быстрые короткие удары — хорош в паре." },
+      iron_sword: { name: "Железный меч", desc: "Одноручный. Сбалансированный удар ближнего боя." },
+      war_axe: { name: "Боевой топор", desc: "Одноручный. Медленный, но тяжёлый, с широким взмахом." },
+      leather_cap: { name: "Кожаный шлем", desc: "+15 к макс. здоровью." },
+      iron_helm: { name: "Железный шлем", desc: "+25 здоровья, +4% защиты." },
+      leather_vest: { name: "Кожаный жилет", desc: "+20 здоровья, +4% защиты." },
+      iron_plate: { name: "Железные латы", desc: "+35 здоровья, +10% защиты." },
+      leather_boots: { name: "Кожаные сапоги", desc: "+0,8 к скорости." },
+      iron_greaves: { name: "Железные поножи", desc: "+0,4 скорости, +5% защиты." },
+      amulet_vigor: { name: "Амулет бодрости", desc: "+25 к макс. здоровью." },
+      coin_amulet: { name: "Подвеска-магнит", desc: "Притягивает монеты издалека." },
+      ring_power: { name: "Кольцо мощи", desc: "+1 к урону оружия." },
+      ring_swift: { name: "Кольцо проворства", desc: "Атака на 12% быстрее." },
+      ring_guard: { name: "Кольцо защиты", desc: "+6% к сопротивлению урону." },
+      excalibur: { name: "Экскалибур", desc: "Двуручный меч. Разрушительный широкий взмах." },
+      storm_bow: { name: "Грозовой лук", desc: "Двуручный. Выпускает 3 пробивающие стрелы." },
+      archmage_wand: { name: "Жезл архимага", desc: "Одноручный. Буря из 3 пробивающих зарядов." },
+      twin_fang: { name: "Клинок-клык", desc: "Одноручный. Стремительные удары, крадущие жизнь." },
+      thunder_hammer: { name: "Громовой молот", desc: "Двуручный. Сокрушительный, с огромным взмахом." },
+      dragon_helm: { name: "Драконий шлем", desc: "+40 здоровья, +10% защиты." },
+      aegis_plate: { name: "Латы Эгиды", desc: "+55 здоровья, +16% защиты." },
+      winged_boots: { name: "Крылатые сапоги", desc: "+1,4 скорости, +5% защиты." },
+      vampiric_ring: { name: "Вампирское кольцо", desc: "+3 к здоровью за убийство." },
+      titan_pendant: { name: "Подвеска титана", desc: "+45 здоровья, +8% защиты, +2 урона." },
+      void_scythe: { name: "Коса пустоты", desc: "Двуручная. Жатва по дуге, крадущая жизнь." },
+      sunfire_staff: { name: "Посох солнечного огня", desc: "Двуручный. Палящий веер из 5 зарядов." },
+      phoenix_plate: { name: "Латы феникса", desc: "+75 здоровья, +20% защиты." },
+      seraph_ring: { name: "Кольцо серафима", desc: "+3 урона, +5 вампиризма." },
+      world_ender: { name: "Крушитель миров", desc: "Двуручный. Катастрофическое, всё сметающее разрушение." },
+      astral_bow: { name: "Астральный лук", desc: "Двуручный. Буря из 5 пробивающих стрел." },
+      crown_eternal: { name: "Вечная корона", desc: "+90 здоровья, +18% защиты, +3 урона." },
+      minor_potion: { name: "Малое зелье здоровья", desc: "Восстанавливает 30 здоровья." },
+      health_potion: { name: "Зелье здоровья", desc: "Восстанавливает 65 здоровья." },
+      greater_potion: { name: "Большое зелье здоровья", desc: "Восстанавливает 140 здоровья." },
+      elixir_might: { name: "Эликсир мощи", desc: "+4 урона на 18 с.", label: "Мощь" },
+      elixir_swift: { name: "Эликсир проворства", desc: "+2,5 скорости на 18 с.", label: "Проворство" },
+      fists: { name: "Кулаки" },
+    },
+    rarity: { normal: "Обычное", rare: "Редкое", epic: "Эпическое", legendary: "Легендарное" },
+    slot: { helmet: "Шлем", breastplate: "Нагрудник", boots: "Сапоги", necklace: "Ожерелье",
+            ring: "Кольцо", hand1: "Основная рука", hand2: "Вторая рука" },
+    material: { wood: "Дерево", stone: "Камень", water: "Вода", herb: "Трава", fiber: "Волокно", crystal: "Кристалл" },
+    resource: { tree: "Срубить дерево", rock: "Добыть камень", herb: "Собрать травы",
+                water: "Набрать воды", fiber: "Срезать волокна", crystal: "Добыть кристалл" },
+    relic: {
+      relic_foundation: { name: "Камень основания", desc: "Огромный краеугольный камень, испещрённый рунами." },
+      relic_walls: { name: "Руны стен", desc: "Камни, помнящие, как стоять стенами." },
+      relic_towers: { name: "Кристалл башен", desc: "Кристалл, что поёт шпили в бытие." },
+      relic_gate: { name: "Ключ от золотых врат", desc: "Великий ключ, что творит несокрушимые врата." },
+      relic_keep: { name: "Печать дракона", desc: "Печать старой цитадели — и внимание дракона." },
+    },
+    castlePart: {
+      foundation: { name: "Основание", desc: "Заложите великий краеугольный камень." },
+      walls: { name: "Стены", desc: "Возведите крепостные стены." },
+      towers: { name: "Башни", desc: "Сотворите угловые шпили." },
+      gate: { name: "Надвратная башня", desc: "Навесьте золотые врата." },
+      keep: { name: "Цитадель", desc: "Увенчайте цитадель — и разбудите дракона." },
+    },
+    boss: {
+      charger: "Желейный король", caster: "Шоколадный властелин", summoner: "Леденцовый тиран",
+      stomper: "Кексовый колосс", bomber: "Военачальник-карамель", splitter: "Желатиновая гидра",
+    },
+    lairBoss: { caverns: "Подземельный Гамлорд", thicket: "Колючая Гидра" },
+    lairIntro: {
+      caverns: "Колоссальный конфетный голем правит Хрустальными пещерами. Сразите его!",
+      thicket: "Колючая Гидра свернулась в глубокой чаще, делясь, когда падает. Покончите с ней!",
+    },
+    zone: {
+      meadow: "Долина Лугоград", forest: "Глубь Шепчущего леса", shore: "Соляное побережье",
+      peaks: "Морозная тропа", caverns: "Хрустальные пещеры", thicket: "Колючая чаща",
+    },
+    location: {
+      village: "Деревня Лугоград", grove: "Роща Шепчущего леса", seaside: "Соляной берег",
+      mountain: "Морозный перевал", ruins: "Затонувшие руины", castle: "Замковый холм",
+    },
+    npc: {
+      mayor: { name: "Мэр Слива", intro: "Лугоград осаждают живые сладости! Говорят, когда-то долину защищал замок. Помогите нам возвести его вновь, герой." },
+      herbalist: { name: "Мудрая Ива", intro: "Шепчущий лес щедр к тем, кто умеет слушать. Собирайте со мной, и я поделюсь старыми тайнами." },
+      fisher: { name: "Старый Брин", intro: "Ха! Сухопутный гость на моём берегу. Море хранит Кристалл башен — заслужите его, и он ваш." },
+      smith2: { name: "Праматерь-кузнец Това", intro: "Морозное железо — лучшее из всех. Докажите силу руки, и я выкую вам Ключ от врат." },
+      hermit: { name: "Отшельник", intro: "Ищете Печать дракона? Немногие готовы. Сначала поговорите с мэром, затем возвращайтесь ко мне." },
+    },
+    quest: {
+      m_cull: { title: "Привкус битвы", story: "Истребите сладости, рыщущие по нашим полям, и покажите долине, что есть надежда.", where: "Долина Лугоград" },
+      m_cornerstone: { title: "Краеугольный камень", story: "Камень основания лежит в Затонувших руинах на востоке. Отыщите его." },
+      m_foundation: { title: "Заложить краеугольный камень", story: "Отнесите Камень основания на Замковый холм и заложите наш краеугольный камень." },
+      m_poultice: { title: "Зелёные руки", story: "Соберите травы в роще, чтобы я мог варить припарки для ополчения.", where: "Роща Шепчущего леса" },
+      m_stone: { title: "Камни для стен", story: "Стенам нужен добрый камень. Добудьте его в холмах и высоких скалах.", where: "Морозный перевал и холмы" },
+      m_walls: { title: "Возвести валы", story: "С Рунами стен в руках возведите наши крепостные стены." },
+      m_water: { title: "Свежая вода", story: "Принесите чистой воды из реки для моих сетей, и я расскажу вам о глубоких пещерах.", where: "Река и Соляное побережье" },
+      m_caverns: { title: "Глубины внизу", story: "Конфетный голем хранит Кристалл башен в Хрустальных пещерах, через морскую пещеру за моим берегом. Покончите с ним!", where: "Хрустальные пещеры (через Соляное побережье)" },
+      m_towers: { title: "Сотворить шпили", story: "Впойте Кристалл башен в угловые шпили замка." },
+      m_ore: { title: "Руда для горна", story: "Принесите мне кристалл из высоких скал, чтобы разжечь горн.", where: "Морозная тропа" },
+      m_gatekey: { title: "Золотые врата", story: "Перебейте сладости, бродящие по морозному перевалу, и заберите выкованный Ключ от врат.", where: "Морозная тропа" },
+      m_gate: { title: "Навесить золотые врата", story: "Навесьте золотые врата и запечатайте наши стены." },
+      m_word: { title: "Слово из долины", story: "Поговорите с мэром Сливой, чтобы он поручился за вас, затем возвращайтесь ко мне." },
+      m_thicket: { title: "Сердце чащи", story: "Колючая Гидра свернулась в глубокой чаще за Шепчущим лесом. Вырвите её сердце — и Печать дракона ваша.", where: "Колючая чаща (через Шепчущий лес)" },
+      m_keep: { title: "Увенчать цитадель", story: "Установите Печать дракона и увенчайте цитадель — хотя это наверняка разбудит зверя внизу." },
+      m_dragon: { title: "Сразить Древнего Дракона", story: "Древний Дракон пробудился. Встретьте его перед новым замком и положите конец долгой осаде.", where: "Замковый холм" },
+      sq_pests: { title: "Борьба с вредителями", story: "Сладости всё забредают на площадь. Проредите их — за это есть монеты, и так часто, как пожелаете." },
+      sq_supplies: { title: "Запасы целителя", story: "Пополните мои полки травами, и я выделю вам тоник." },
+      sq_nets: { title: "Починить сети", story: "Мои сети в лохмотьях. Принесите волокно, и я с вами поделюсь." },
+      sq_forgefuel: { title: "Топливо для горна", story: "Горн жаждет кристалла. Накормите его и заберите этот клинок." },
+      sq_relics: { title: "Испытания павших", story: "Докажите свою сталь против дикой стаи и заслужите мой старый оберег." },
+      sq_wilds: { title: "Проредить дикарей", story: "За дикие сладости назначена постоянная награда — приносите подсчёт в любое время." },
+    },
+    chapter: {
+      ch1: { title: "Долина в осаде", blurb: "Ответьте на зов Лугограда и заложите первый камень замка." },
+      ch2: { title: "Камень и сталь", blurb: "Закалите ополчение и возведите крепостные стены." },
+      ch3: { title: "Хрустальный прилив", blurb: "Дерзните в морские пещеры за Кристаллом башен." },
+      ch4: { title: "Золотые врата", blurb: "Выкуйте Ключ от врат в огне Морозного перевала." },
+      ch5: { title: "Печать дракона", blurb: "Завладейте Печатью дракона, увенчайте цитадель и покончите со зверем." },
+    },
+    story: {
+      title: "Замок Лугограда",
+      introTitle: "📜 Сказание о Лугограде",
+      introText: "Давным-давно великий замок защищал эту долину — пока он не рухнул, и земли не наполнились живыми сладостями. " +
+        "Вы — Лили, герой, о котором молился Лугоград. Соберите пять утраченных реликвий, возведите замок заново и " +
+        "встретьте Древнего Дракона, что спит под цитаделью. " +
+        "Следуйте за светящимися ❗ людьми и трекером заданий — каждое дело ведёт к следующему. Долина в ваших руках.",
+      endingTitle: "🏰 Рассвет над долиной",
+      endingText: "Древний Дракон повержен, и замок стоит увенчанный навстречу рассвету. Сладости разбегаются по диким землям, " +
+        "жители Лугограда распахивают двери, и ваше имя воспевают от рощи до берега. Долина спасена — отлично, герой.",
+    },
+    weather: { clear: "Ясно", cloudy: "Облачно", fog: "Туман", rain: "Дождь", storm: "Гроза" },
+    dragon: { name: "Древний Дракон" },
+  };
+
+  // {placeholder} interpolation; missing params are left intact so a bad key is
+  // visible rather than silently blanked.
+  function interp(s, p) {
+    return s.replace(/\{(\w+)\}/g, (m, k) => (p && p[k] != null) ? String(p[k]) : m);
+  }
+  // The core lookup: current locale → English fallback → the key itself.
+  function t(key, params) {
+    const L = LOCALES[I18N.locale] || LOCALES.en;
+    let s = (L && L[key] != null) ? L[key] : LOCALES.en[key];
+    if (s == null) s = key;
+    return (params && typeof s === "string") ? interp(s, params) : s;
+  }
+  // Pick a plural form. English: one/other; Russian: one/few/many by the usual
+  // Slavic rule. `forms` is e.g. { one, few, many } (or { one, other } for en).
+  function plural(n, forms) {
+    if (I18N.locale === "ru") {
+      const a = n % 10, b = n % 100;
+      if (a === 1 && b !== 11) return forms.one;
+      if (a >= 2 && a <= 4 && (b < 12 || b > 14)) return forms.few != null ? forms.few : forms.many;
+      return forms.many != null ? forms.many : forms.one;
+    }
+    return n === 1 ? forms.one : (forms.other != null ? forms.other : forms.many);
+  }
+
+  // ---- Data-table resolvers (RU override → English table field) -------------
+  const _ruGroup = (g) => (I18N.locale === "ru" && RU[g]) ? RU[g] : null;
+  function tField(group, id, field, fallback) {
+    const g = _ruGroup(group); const e = g && g[id];
+    return (e && e[field] != null) ? e[field] : fallback;
+  }
+  function tFlat(group, id, fallback) {
+    const g = _ruGroup(group);
+    return (g && g[id] != null) ? g[id] : fallback;
+  }
+  const tItemName = (d) => d ? tField("item", d.id, "name", d.name) : "";
+  const tItemDesc = (d) => d ? tField("item", d.id, "desc", d.desc || "") : "";
+  const tPotionLabel = (id) => {
+    const d = getDef(id); const base = (d && d.potion && d.potion.label) || (d && d.name) || id;
+    return tField("item", id, "label", base);
+  };
+  const tRarityLabel = (r) => tFlat("rarity", r, (RARITY[r] || RARITY.normal).label);
+  const tSlotLabel = (slot) => tFlat("slot", (slot === "ring1" || slot === "ring2") ? "ring" : slot, (SLOT_META[slot] || {}).label || slot);
+  const tMaterialLabel = (id) => tFlat("material", id, (MATERIALS[id] || {}).label || id);
+  const tResourceLabel = (k) => tFlat("resource", k, (RESOURCE_KINDS[k] || {}).label || k);
+  const tRelicName = (id) => tField("relic", id, "name", (RELICS[id] || {}).name || id);
+  const tCastlePartName = (id) => tField("castlePart", id, "name", (CASTLE_PART_BY_ID[id] || {}).name || id);
+  const tCastlePartDesc = (id) => tField("castlePart", id, "desc", (CASTLE_PART_BY_ID[id] || {}).desc || "");
+  const tZoneName = (z) => z ? tFlat("zone", z.id, z.name) : "";
+  const tLocationName = (id) => tFlat("location", id, (LOCATION_BY_ID[id] || {}).name || id);
+  const tNpcName = (id) => tField("npc", id, "name", (NPC_BY_ID[id] || {}).name || id);
+  const tNpcIntro = (id) => tField("npc", id, "intro", (NPC_BY_ID[id] || {}).intro || "");
+  const tQuestTitle = (q) => tField("quest", q.id, "title", q.title);
+  const tQuestStory = (q) => tField("quest", q.id, "story", q.story);
+  const tQuestWhere = (q) => q.where ? tField("quest", q.id, "where", q.where) : "";
+  const tChapterTitle = (id) => tField("chapter", id, "title", (CHAPTER_BY_ID[id] || {}).title || id);
+  const tChapterBlurb = (id) => tField("chapter", id, "blurb", (CHAPTER_BY_ID[id] || {}).blurb || "");
+  const tDragonName = () => (I18N.locale === "ru" && RU.dragon) ? RU.dragon.name : "Ancient Dragon";
+  const _ruStory = (field) => (I18N.locale === "ru" && RU.story && RU.story[field] != null) ? RU.story[field] : null;
+  const tStoryTitle = () => _ruStory("title") || STORY.title;
+  const tStoryIntroTitle = () => _ruStory("introTitle") || STORY.intro.title;
+  const tStoryIntroText = () => _ruStory("introText") || STORY.intro.text;
+  const tStoryEndingTitle = () => _ruStory("endingTitle") || STORY.ending.title;
+  const tStoryEndingText = () => _ruStory("endingText") || STORY.ending.text;
+  // The lair-boss name comes from the zone table (English) with an RU override.
+  const tLairBossName = (zoneId) => {
+    const z = ZONE_BY_ID[zoneId]; const base = (z && z.boss) ? z.boss.name : t("obj.lairBoss");
+    return tFlat("lairBoss", zoneId, base);
+  };
+  const tLairBossIntro = (zoneId) => {
+    const z = ZONE_BY_ID[zoneId]; const base = (z && z.boss) ? z.boss.intro : "";
+    return tFlat("lairIntro", zoneId, base);
+  };
+
+export {
+  I18N, LOCALES, LOCALE_KEY, RU, _ruGroup, _ruStory, interp, localGet, localSet, plural, t,
+  tCastlePartDesc, tCastlePartName, tChapterBlurb, tChapterTitle, tDragonName, tField, tFlat,
+  tItemDesc, tItemName, tLairBossIntro, tLairBossName, tLocationName, tMaterialLabel,
+  tNpcIntro, tNpcName, tPotionLabel, tQuestStory, tQuestTitle, tQuestWhere, tRarityLabel,
+  tRelicName, tResourceLabel, tSlotLabel, tStoryEndingText, tStoryEndingTitle,
+  tStoryIntroText, tStoryIntroTitle, tStoryTitle, tZoneName,
+};
