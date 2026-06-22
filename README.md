@@ -255,22 +255,35 @@ static-hosted game that needs to grow into a small RPG.
 ## Project layout
 
 ```
-index.html              # markup, overlays, HUD, CDN script tags
+index.html              # markup, overlays, HUD, CDN script tags, module entry
 css/style.css           # HUD, overlays, touch controls, responsive styling
-js/game.js              # engine, systems, gameplay
-test/harness.js         # headless Node harness that exercises the gameplay logic
+src/main.js             # composition root (Vite entry → imports the game)
+src/core/               # config (RNG + CONFIG), i18n (EN/RU)
+src/data/               # pure content tables: items, content, story, zones
+src/game.js             # the runtime: entities, world, systems, UI, save/load
+test/setup/stubs.js     # Babylon + DOM + Web Audio stubs for the Vitest suites
+test/*.test.js          # Vitest unit/logic (ported harness) + functional flows
+test/e2e/               # Playwright real-browser boot smoke
+vite.config.js          # build → hashed static bundle in dist/ (Babylon stays CDN)
+eslint.config.js .prettierrc.json tsconfig.json   # lint / format / typecheck
+ARCHITECTURE.md         # module map + data flow + toolchain (read this first)
 CHANGELOG.md            # release history (Keep a Changelog format)
 TODO.md                 # agent task backlog + per-task acceptance criteria
-.github/workflows/      # GitHub Pages deploy on push
-.nojekyll               # serve files as-is (skip Jekyll processing)
+.github/workflows/      # CI (lint→typecheck→test→build→E2E) + Pages deploy
+public/.nojekyll        # copied into dist/ so Pages serves files as-is
 ```
 
-Release history lives in [`CHANGELOG.md`](./CHANGELOG.md).
+The site is **built** from the `src/**` ES-module tree by **Vite** into a hashed
+static `dist/` bundle (Babylon is loaded from its CDN, so it isn't bundled). See
+[`ARCHITECTURE.md`](./ARCHITECTURE.md). Release history lives in
+[`CHANGELOG.md`](./CHANGELOG.md).
 
 ### Tests
 
-`test/harness.js` stubs Babylon + the DOM (with faithful vector math) so the real
-gameplay code can run in Node — verifying collision, the river barrier, the
+The suite is layered. The Vitest unit/logic suite (`test/harness.test.js` — the
+former `test/harness.js` ported **verbatim**, ~360 checks) stubs Babylon + the
+DOM (with faithful vector math) so the real gameplay modules run in Node —
+verifying collision, the river barrier, the
 **boss archetypes** (caster bolts, summoned minions, scaling, rare drops), the
 **gear economy** (buy / equip / dual-wield / sell), **projectile physics** (gravity arc
 + finite life), the seeded RNG, the **save/load round-trip** and the **pause menu** — plus
@@ -302,15 +315,25 @@ recipes, the **mixer** volume **clamping** + channel validation + **master mute*
 SFX cue** firing, and **ambience crossfade** through all zones (plus stride-cadenced footstep
 wiring), and a **docs doc-lint** suite that asserts `CHANGELOG.md` parses as the expected
 Keep a Changelog structure (title + a single `[Unreleased]` section atop the migrated dated
-entries) and that `TODO.md` no longer carries the release log — all without a browser:
+entries) and that `TODO.md` no longer carries the release log. On top of that, a
+**functional** suite (`test/functional.test.js`) boots the assembled game in
+isolation and drives whole flows (start → zone travel → save/reload round-trip),
+and a **Playwright** suite (`test/e2e/boot.spec.js`) loads the built bundle in
+real headless Chromium and asserts the canvas boots with **no console errors**
+and the core overlays open:
 
 ```bash
-node test/harness.js
+npm ci          # once
+npm test        # Vitest: ported harness + functional + smoke
+npm run test:e2e  # Playwright: real-browser boot smoke (needs a browser)
+npm run verify  # lint + typecheck + test + build (the fast CI path)
 ```
 
 ### Architecture
 
-`js/game.js` is organised as small systems so features are additive, not a rewrite:
+The runtime in `src/game.js` is organised as small systems so features are
+additive, not a rewrite (pure content tables live in `src/data/`, foundations in
+`src/core/`; see [`ARCHITECTURE.md`](./ARCHITECTURE.md)):
 
 - **`Interactable` / `InteractionSystem`** — a reusable "walk up + press E" contract;
   artifacts and the **merchant NPC** use it (puzzle levers will too).
@@ -409,22 +432,29 @@ node test/harness.js
 - **`Burst` / `spawnImpact`** — pooled, self-disposing impact effects + monster **knockback** so
   hits land with weight (feature-detected so it stays headless-safe).
 
-The bottom of `game.js` documents the remaining seam for **PuzzleSystem**.
+The bottom of `src/game.js` documents the remaining seam for **PuzzleSystem**.
 
 ## Run locally
 
-It's a static site — any static server works:
+The game is built with Vite. With Node 20+ installed:
 
 ```bash
-python3 -m http.server 8000
-# then open http://localhost:8000
+npm ci            # install dev dependencies (once)
+npm run dev       # HMR dev server → http://localhost:5173
+# or build + preview the production bundle exactly as Pages serves it:
+npm run build && npm run preview   # → http://localhost:4173
 ```
+
+Babylon is fetched from its CDN at runtime, so an internet connection is needed
+the first time a page loads.
 
 ## Deployment
 
-Pushing to the deploy branch triggers `.github/workflows/deploy-pages.yml`, which uploads the
-repo as a Pages artifact and publishes it. Enable Pages once in
-**Settings → Pages → Build and deployment → Source: GitHub Actions**.
+Pushing to `master` triggers `.github/workflows/deploy-pages.yml`, which runs the
+verify pipeline (lint + typecheck + tests), **builds the static `dist/` bundle**,
+and publishes that to GitHub Pages (content-hashed assets — no cache-buster to
+bump). Enable Pages once in **Settings → Pages → Build and deployment →
+Source: GitHub Actions**.
 
 ## Roadmap
 
@@ -491,4 +521,11 @@ repo as a Pages artifact and publishes it. Enable Pages once in
       howl, drips/drone, insects) that **crossfades** on travel, all behind a small **mixer**
       (Master · Music · Effects · Ambience + **Mute all**) on the start screen + pause settings that
       **persists** (`localStorage`); fully procedural (no audio files), feature-detected + unit-tested
+- [x] **Modular codebase + build/test/CI toolchain** — the single `js/game.js`
+      IIFE split into an ES-module tree (`src/core` + `src/data` + `src/game.js`,
+      composed by `src/main.js`), built by **Vite** into a hashed static bundle
+      (Babylon stays CDN-externalized), with **ESLint** + **Prettier** +
+      **`tsc --checkJs`**, a layered test suite (**Vitest** logic + functional +
+      **Playwright** real-browser smoke), and staged **CI** — behavior unchanged
+      (the full legacy harness ported verbatim still passes)
 - [ ] Puzzles (levers, plates, gated doors)

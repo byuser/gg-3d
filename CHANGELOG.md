@@ -5,24 +5,72 @@ All notable changes to **Good Game 3D** are recorded here. The format follows
 `## [Unreleased]` section at the top for work that has landed but is not yet
 described under a dated heading.
 
-**Versioning.** The game ships as a single static bundle on GitHub Pages, so
-releases are keyed to the monotonic **`?v=` cache-buster** in `index.html`:
-entries that change the playable bundle carry the build they shipped at — e.g.
-`## [v19] — 2026-06-22 — …`. Entries that touch only docs/process (no bundle
-change) are keyed by **date** — e.g. `## [2026-06-22] — …`. Each entry keeps the
-task name, the `?v=` note and the harness-count delta it shipped with, since
-later tasks reference those.
+**Versioning.** Through **Task 8** the game shipped as a single static file keyed
+to the monotonic **`?v=` cache-buster** in `index.html`, so historical entries
+carry the build they shipped at — e.g. `## [v19] — 2026-06-22 — …`. **Task 9**
+replaced that single file with a **Vite build** whose assets are **content-hashed**
+(no more `?v=` to bump), so from Task 9 on, entries are keyed by **date** — e.g.
+`## [2026-06-22] — …`. Each entry keeps the task name and the harness/test-count
+delta it shipped with, since later tasks reference those.
 
 > **For future runs:** when you finish a task, append your release note here
 > (not to `TODO.md`). Add a new `##` heading at the top of the dated list below
-> `## [Unreleased]`, tagged with the build (`[v20]`, …) if you bumped the
-> `?v=` cache-buster, or the date if the change was docs/process only.
+> `## [Unreleased]`, keyed by the **date** (the content-hashed build needs no
+> version tag).
 
 ---
 
 ## [Unreleased]
 
 _Nothing pending._
+
+## [2026-06-22] — Task 9 — Modularize the codebase + a production build/test/CI toolchain
+
+Split the 8.3k-line `js/game.js` IIFE into an **ES-module source tree** under
+`src/` — `core/config.js` (RNG + CONFIG + PALETTE) and `core/i18n.js` (EN/RU +
+`t()` + resolvers); the pure content tables `data/items.js`, `data/content.js`,
+`data/story.js`, `data/zones.js`; the runtime monolith `src/game.js`; and the
+`src/main.js` composition root — all wired with **explicit `import`/`export`** and
+an acyclic dependency graph (data ← i18n ← game ← main). The move was
+**mechanical and byte-for-byte**, so behavior is unchanged: the **entire legacy
+headless harness (~360 checks) was ported verbatim to Vitest** (`test/harness.test.js`)
+and stays green, proving parity.
+
+Stood up the toolchain the rest of the backlog builds on:
+
+- **Build — Vite.** `npm run build` emits a **content-hashed static bundle** into
+  `dist/` (served by Pages — the hashing replaces the old `?v=` cache-buster);
+  `npm run dev` is an HMR server, `npm run preview` serves the build. **Babylon
+  stays on its CDN** (externalized as the `BABYLON` global, never bundled), so the
+  published site is still 100% static and the runtime is identical to before.
+  `index.html` now loads `src/main.js` as a module.
+- **Lint/format — ESLint (flat) + Prettier.** `no-undef` guards every module
+  boundary (a missed cross-module import is a hard error); baseline is clean (0
+  errors).
+- **Types — `tsc --checkJs`.** The clean `core/` + `data/` modules are
+  type-checked; the legacy runtime opts out with `@ts-nocheck` (slated for finer,
+  individually-typed splits in follow-up runs).
+- **Tests — layered.** Vitest **unit/logic** (the ported harness) + **functional**
+  flows (`test/functional.test.js`: start → zone travel → save/reload round-trip in
+  an isolated boot) + **smoke**, all against faithful Babylon/DOM/Web-Audio stubs
+  (`test/setup/stubs.js`); plus a **Playwright** real-browser suite
+  (`test/e2e/boot.spec.js`) that boots the built bundle in headless Chromium and
+  asserts the canvas comes up with **no console errors** and the core overlays open.
+- **CI/CD.** `.github/workflows/ci.yml` runs **install → lint → typecheck → test →
+  build → Playwright E2E** (npm cache); the Pages workflow re-runs verify, builds
+  `dist/`, and publishes the **built** artifact.
+- **Agent ergonomics.** New `ARCHITECTURE.md` (module map + data flow + toolchain)
+  and per-directory READMEs; `npm run verify` mirrors the CI fast path.
+
+Revised **Golden Rules 1, 3, 4 & 7** in `CLAUDE.md` + `TODO.md` § 1 to the
+module-tree / build-step / Vitest-Playwright-pipeline / content-hashing reality
+(per Task 9's *Note on Golden Rules*). No save-schema change (`SAVE_VERSION`
+untouched). Test coverage: the ~360 legacy checks are preserved 1:1 in Vitest,
+plus 4 new functional/smoke checks and the Playwright boot assertion.
+
+_Follow-up (noted, out of scope here):_ finer single-responsibility splits of the
+`src/game.js` runtime into `entities/`, `systems/`, `ui/`, `world/`; and
+auto-generating the changelog from commits.
 
 ## [2026-06-22] — Task 8 — Extract the changelog into its own `CHANGELOG.md`
 

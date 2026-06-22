@@ -50,21 +50,26 @@ The repo-wide **Golden Rules** live in [`CLAUDE.md`](./CLAUDE.md) (auto-loaded b
 Claude Code) so they apply to every run from a single source of truth. **Read
 `CLAUDE.md` before starting any task.**
 
-In short: Babylon.js only (no rewrite; the **published** site stays static on
-GitHub Pages); works on desktop + mobile without freezing; the test suite
-(today `node test/harness.js`; the npm/Vitest/Playwright pipeline once Task 9
-lands) must stay green and **feature-detect** all browser-only APIs;
-additive style; determinism + save/load round-trip; procedural-first
-perf/asset budget with disposal on zone teardown; bump the cache-buster while it
-exists; one task per run; i18n-aware; ask before large/irreversible ambiguity.
+In short: Babylon.js only (no rewrite; Babylon stays on its CDN; the
+**published** site stays static on GitHub Pages — now as a Vite-built,
+content-hashed `dist/` bundle); works on desktop + mobile without freezing;
+**develop in the `src/**` ES-module tree** (see `ARCHITECTURE.md`) with explicit
+imports; the full pipeline — `npm run lint && npm run typecheck && npm test &&
+npm run build && npm run test:e2e` (Vitest + Playwright) — must stay green and
+**feature-detect** all browser-only APIs; additive/modular style; determinism +
+save/load round-trip; procedural-first perf/asset budget with disposal on zone
+teardown; cache-busting is automatic (content hashing — no `?v=` to bump); one
+task per run; i18n-aware; ask before large/irreversible ambiguity.
 
 > **Task-level overrides.** A few backlog tasks deliberately **revise** specific
-> Golden Rules — e.g. **Task 9** replaces the single-file / no-build-step rules
-> with a module tree + a build step (whose output is still static on Pages), and
-> **Task 15** adds an opt-in external (Google Drive) dependency. Each such task
-> carries a **"Note on Golden Rules"**; for that task, its note **wins**, and
-> updating `CLAUDE.md` + this file to the new rule is part of the task. Until a
-> rule is revised, it holds as written.
+> Golden Rules. **Task 9 has landed** and already replaced the single-file /
+> no-build-step rules (Golden Rules 1 & 4) with the module tree + Vite build
+> above (output still static on Pages) and the layered Vitest/Playwright pipeline
+> (Rule 3); `CLAUDE.md` + this file are updated to match. **Task 15** still adds
+> an opt-in external (Google Drive) dependency. Each such task carries a **"Note
+> on Golden Rules"**; for that task, its note **wins**, and updating `CLAUDE.md` +
+> this file to the new rule is part of the task. Until a rule is revised, it
+> holds as written.
 
 ---
 
@@ -448,7 +453,18 @@ A task is **done** only when **all** of these are true:
   commits (a future nicety — note it as a follow‑up).
 
 ### Task 9 — Modularize the codebase + a production build/test/CI toolchain for agentic edits
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-22 · Split the 8.3k-line `js/game.js` IIFE into an ES-module tree
+  under `src/` (`core/config`+`core/i18n`, `data/items`+`content`+`story`+`zones`, the runtime
+  `game.js`, composed by `main.js`) with explicit imports and **zero behavioral change** — the
+  full legacy harness (~360 checks) was ported verbatim to **Vitest** and stays green, proving
+  parity. Added a **Vite** build (Babylon stays CDN-externalized; output is a hashed static
+  `dist/` for Pages — content hashing replaces the `?v=` cache-buster), **ESLint** (flat,
+  `no-undef` guards the module seams) + **Prettier**, **`tsc --checkJs`** typechecking (the clean
+  `core/`+`data/` modules are checked; the legacy runtime opts out, slated for finer splits),
+  a layered test suite (Vitest **unit/logic** + **functional** flows + **Playwright** real-browser
+  boot smoke with no console errors), a staged **CI** (lint→typecheck→test→build→E2E) and a
+  build-and-publish **deploy** workflow, plus `ARCHITECTURE.md` + per-dir READMEs and the npm
+  scripts that mirror CI. Golden Rules 1/3/4/7 revised in `CLAUDE.md` + §1. No save-schema change.
 - **Depends on:** none, but it is **foundational** — doing it early makes every
   later task smaller, more targeted, and safer to edit/build/test autonomously.
 - **Note on Golden Rules (IMPORTANT — this task revises them):** the current
