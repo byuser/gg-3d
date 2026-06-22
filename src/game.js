@@ -2588,13 +2588,13 @@ import {
     // only the desktop "high" tier adds triangles + PBR + the IBL probe.
     TIERS: {
       high:   { shadowMap: 2048, shadowFilter: "contact", csm: true,  bloom: true,  ssao: true,
-                shadowDarkness: 0.34, exposure: 1.08, contrast: 1.12, bloomWeight: 0.20, shadowMaxZ: 220,
+                shadowDarkness: 0.34, exposure: 1.10, contrast: 1.12, bloomWeight: 0.20, shadowMaxZ: 220,
                 pbr: true,  env: true,  seg: 14, tess: 20, rockSub: 2, foliage: 1.0, ambient: 1.0 },
       medium: { shadowMap: 1024, shadowFilter: "pcf",     csm: false, bloom: true,  ssao: false,
-                shadowDarkness: 0.40, exposure: 1.02, contrast: 1.08, bloomWeight: 0.15, shadowMaxZ: 160,
+                shadowDarkness: 0.40, exposure: 1.05, contrast: 1.08, bloomWeight: 0.15, shadowMaxZ: 160,
                 pbr: true,  env: false, seg: 12, tess: 16, rockSub: 1, foliage: 0.6, ambient: 0.7 },
       low:    { shadowMap: 1024, shadowFilter: "blur",    csm: false, bloom: false, ssao: false,
-                shadowDarkness: 0.46, exposure: 1.00, contrast: 1.04, bloomWeight: 0.00, shadowMaxZ: 120,
+                shadowDarkness: 0.46, exposure: 1.02, contrast: 1.04, bloomWeight: 0.00, shadowMaxZ: 120,
                 pbr: false, env: false, seg: 10, tess: 12, rockSub: 1, foliage: 0.3, ambient: 0.45 },
     },
     settings() { return this.TIERS[this.tier] || this.TIERS.high; },
@@ -2655,6 +2655,130 @@ import {
       } catch (e) {}
       this.tier = this.pick(info);
       return this.tier;
+    },
+  };
+
+  // =========================================================================
+  // Art direction (Task 11) — a brighter, more cheerful colour grade + a
+  // larger, tier-gated view distance. Every knob here is a PURE, data-driven
+  // function (per zone + per tier) so the look is unit-testable without a GPU:
+  //
+  //   • grade()        — a gentle saturation/value lift applied to every
+  //                      mat()/emat() base colour, so muted greens/browns/greys
+  //                      read lush and candy colours pop, without going neon
+  //                      (already-vivid colours barely move once clamped). The
+  //                      backdrop materials (sky dome, sea/river sheen) bypass
+  //                      it via stdMat/stdEmat so DayNight keeps exact control.
+  //   • fogDensityFor()— the graded fog density for a zone: its base scaled by
+  //                      the active tier's fogMul. Low/mobile keeps fog dense
+  //                      (a tight, cheap radius); high opens the world up.
+  //                      Indoor lairs blend only halfway so they stay moody.
+  //   • view().maxZ    — the camera far plane (draw distance), tier-gated to
+  //                      match the opened fog (generous on high, tighter on low).
+  //   • exposureFor() / contrastFor() — the per-zone tone-mapping grade (the
+  //                      tier base nudged by the zone's mood), mirrored by
+  //                      applyZoneMood so a brighter palette reads punchy, not
+  //                      blown out under ACES.
+  //   • luminance() / contrastRatio() — WCAG-ish readability helpers so a test
+  //                      can prove gameplay-critical markers/enemies still stand
+  //                      out against the brightened ground.
+  // =========================================================================
+
+  // Pure RGB↔HSV colour math (0..1 channels), so the grade needs no engine.
+  function rgbToHsv(r, g, b) {
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+    let h = 0;
+    if (d > 1e-6) {
+      if (mx === r) h = ((g - b) / d) % 6;
+      else if (mx === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60; if (h < 0) h += 360;
+    }
+    return { h, s: mx <= 1e-6 ? 0 : d / mx, v: mx };
+  }
+  function hsvToRgb(h, s, v) {
+    const c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) { r = c; g = x; }
+    else if (h < 120) { r = x; g = c; }
+    else if (h < 180) { g = c; b = x; }
+    else if (h < 240) { g = x; b = c; }
+    else if (h < 300) { r = x; b = c; }
+    else { r = c; b = x; }
+    return { r: r + m, g: g + m, b: b + m };
+  }
+  // Hex (or a {r,g,b} 0..1 colour) → {r,g,b}; and {r,g,b} → "#rrggbb".
+  function rgbOf(input) {
+    if (typeof input !== "string") return { r: input.r || 0, g: input.g || 0, b: input.b || 0 };
+    let h = input.replace("#", "");
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    const n = parseInt(h, 16) || 0;
+    return { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 };
+  }
+  function rgbToHex(o) {
+    const f = (x) => Math.max(0, Math.min(255, Math.round(x * 255))).toString(16).padStart(2, "0");
+    return "#" + f(o.r) + f(o.g) + f(o.b);
+  }
+
+  const ArtDirection = {
+    // Global grade strength: push saturation up, lift value gently. Subtle so it
+    // lifts the muddy floor without turning the candy world garish.
+    GRADE: { sat: 1.18, val: 1.06 },
+
+    // Per-tier VIEW knobs: the camera far plane (draw distance) + a multiplier on
+    // every zone's base fog density. high opens the view; low keeps it tight/cheap.
+    // (maxZ stays above the farthest real geometry on each tier so the opened
+    // view never hard-clips; the sky dome is infiniteDistance and always drawn.)
+    VIEW: {
+      high:   { maxZ: 360, fogMul: 0.58 },
+      medium: { maxZ: 290, fogMul: 0.74 },
+      low:    { maxZ: 210, fogMul: 0.96 },
+    },
+    view(tier) { return this.VIEW[tier || Quality.tier] || this.VIEW.high; },
+
+    // Pure: the graded fog density for a zone at a tier (base × tier fogMul,
+    // clamped to the engine ceiling). Indoor lairs only blend halfway toward the
+    // open multiplier, so caverns/thickets open up a little but stay enclosed.
+    fogDensityFor(zone, tier) {
+      const base = (zone && zone.theme && zone.theme.fogDensity) || 0.006;
+      let mul = this.view(tier).fogMul;
+      if (zone && zone.indoor) mul = 1 + (mul - 1) * 0.5;
+      return Math.max(0, Math.min(0.06, base * mul));
+    },
+
+    // Pure: the per-zone tone-mapping grade — the tier base (Quality) nudged by
+    // the zone's optional mood multipliers. applyZoneMood applies exactly this.
+    exposureFor(zone, tier) {
+      const q = Quality.TIERS[tier || Quality.tier] || Quality.TIERS.high;
+      const th = (zone && zone.theme) || {}, indoor = !!(zone && zone.indoor);
+      return q.exposure * (th.expMul != null ? th.expMul : (indoor ? 0.92 : 1));
+    },
+    contrastFor(zone, tier) {
+      const q = Quality.TIERS[tier || Quality.tier] || Quality.TIERS.high;
+      const th = (zone && zone.theme) || {}, indoor = !!(zone && zone.indoor);
+      return q.contrast * (th.conMul != null ? th.conMul : (indoor ? 1.06 : 1));
+    },
+
+    // Pure colour grade: hex|Color3 → a brighter, more saturated BABYLON.Color3.
+    grade(input) {
+      const c = rgbOf(input), hsv = rgbToHsv(c.r, c.g, c.b);
+      const out = hsvToRgb(hsv.h, Math.min(1, hsv.s * this.GRADE.sat), Math.min(1, hsv.v * this.GRADE.val));
+      return new BABYLON.Color3(out.r, out.g, out.b);
+    },
+    gradeHex(hex) {
+      const c = rgbOf(hex), hsv = rgbToHsv(c.r, c.g, c.b);
+      return rgbToHex(hsvToRgb(hsv.h, Math.min(1, hsv.s * this.GRADE.sat), Math.min(1, hsv.v * this.GRADE.val)));
+    },
+
+    // WCAG relative luminance (0..1) + contrast ratio (≥1), for readability tests.
+    luminance(input) {
+      const c = rgbOf(input);
+      const lin = (u) => (u <= 0.03928 ? u / 12.92 : Math.pow((u + 0.055) / 1.055, 2.4));
+      return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+    },
+    contrastRatio(a, b) {
+      const la = this.luminance(a), lb = this.luminance(b);
+      return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
     },
   };
 
@@ -2770,12 +2894,8 @@ import {
   function applyZoneMood(scene, zone) {
     try {
       const ip = scene && scene.imageProcessingConfiguration; if (!ip) return;
-      const q = Quality.settings(), th = (zone && zone.theme) || {};
-      const indoor = !!(zone && zone.indoor);
-      const expMul = th.expMul != null ? th.expMul : (indoor ? 0.92 : 1);
-      const conMul = th.conMul != null ? th.conMul : (indoor ? 1.06 : 1);
-      ip.exposure = q.exposure * expMul;
-      ip.contrast = q.contrast * conMul;
+      ip.exposure = ArtDirection.exposureFor(zone, Quality.tier);
+      ip.contrast = ArtDirection.contrastFor(zone, Quality.tier);
     } catch (e) {}
   }
 
@@ -2854,10 +2974,13 @@ import {
     scene.clearColor = BABYLON.Color3.FromHexString(T.sky).toColor4(1);
     scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
     scene.fogColor = BABYLON.Color3.FromHexString(T.fog);
-    scene.fogDensity = T.fogDensity;
+    // Task 11: open the view — the fog density is the zone's base scaled by the
+    // active tier (high thins it so the world reads farther; low keeps it tight
+    // for fps). Weather then layers on top of this graded base.
+    scene.fogDensity = ArtDirection.fogDensityFor(zone, Quality.tier);
 
     const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0.2, 1, 0.1), scene);
-    hemi.intensity = indoor ? 0.7 : 1.0; hemi.groundColor = BABYLON.Color3.FromHexString(T.hemi);
+    hemi.intensity = indoor ? 0.7 : 1.0; hemi.groundColor = ArtDirection.grade(T.hemi);
     const sd = T.sunDir || [-0.5, -1, -0.4];
     const sun = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(sd[0], sd[1], sd[2]), scene);
     sun.position = new BABYLON.Vector3(-sd[0] * 120, 90, -sd[2] * 120); sun.intensity = 1.0;
@@ -3616,8 +3739,9 @@ import {
       }
       const st = this.STATES[this.state];
       const w = this.world;
-      // Layer weather on top of each zone's own fog base (denser underground).
-      const baseFog = (w && w.zone && w.zone.theme.fogDensity) || 0.0019;
+      // Layer weather on top of each zone's GRADED fog base (Task 11 opens the
+      // view per tier; denser underground), so a storm thickens the opened fog.
+      const baseFog = (w && w.zone && ArtDirection.fogDensityFor(w.zone, Quality.tier)) || 0.0019;
       const indoor = !!(w && w.zone && w.zone.indoor);
       if (sceneRef) sceneRef.fogDensity = Math.min(0.06, baseFog * (indoor ? 1 : st.fog));
       if (!indoor && st.dark > 0) {
@@ -5111,10 +5235,14 @@ import {
     Quality.detect();   // choose a graphics tier before the first zone is built
     makeEnvironment(scene);  // procedural IBL probe (tier-gated; feeds PBR reflections)
 
-    const camera = new BABYLON.ArcRotateCamera("cam", -Math.PI / 2, 1.05, 12, new BABYLON.Vector3(0, 1.4, 12), scene);
-    camera.lowerRadiusLimit = 6; camera.upperRadiusLimit = 18;
+    const camera = new BABYLON.ArcRotateCamera("cam", -Math.PI / 2, 1.05, 13, new BABYLON.Vector3(0, 1.4, 12), scene);
+    camera.lowerRadiusLimit = 6; camera.upperRadiusLimit = 22;
     camera.lowerBetaLimit = 0.35; camera.upperBetaLimit = 1.45;
     camera.wheelDeltaPercentage = 0.01; camera.panningSensibility = 0;
+    // Task 11: a tier-gated draw distance to match the opened-up fog (generous on
+    // high, tighter on low/mobile). The sky dome is infiniteDistance, so the
+    // horizon is always drawn regardless of this near/far clip.
+    try { camera.maxZ = ArtDirection.view(Quality.tier).maxZ; camera.minZ = 0.5; } catch (e) {}
     camera.attachControl(dom.canvas, true);
     camera.inputs.removeByType("ArcRotateCameraKeyboardMoveInput");
 
@@ -6854,21 +6982,24 @@ import {
   // markers, …) onto the PBR channels so every existing build/animation path keeps
   // working untouched. Backdrop materials that lean on StandardMaterial specifics
   // (the unlit sky dome, the sea/river sheen) call stdMat/stdEmat directly.
-  function stdMat(scene, name, hex) {
+  // Accept either a hex string or a ready BABYLON.Color3 (so mat()/emat() can
+  // hand down the Task-11 graded colour while the raw backdrop callers pass hex).
+  function colOf(x) { return typeof x === "string" ? BABYLON.Color3.FromHexString(x) : x; }
+  function stdMat(scene, name, col) {
     const m = new BABYLON.StandardMaterial(name, scene);
-    m.diffuseColor = BABYLON.Color3.FromHexString(hex);
+    m.diffuseColor = colOf(col);
     m.specularColor = new BABYLON.Color3(0.08, 0.08, 0.08);
     return m;
   }
-  function stdEmat(scene, name, hex, emissive) {
-    const m = stdMat(scene, name, hex);
-    m.emissiveColor = BABYLON.Color3.FromHexString(hex).scale(emissive);
+  function stdEmat(scene, name, col, emissive) {
+    const m = stdMat(scene, name, col);
+    m.emissiveColor = colOf(col).scale(emissive);
     return m;
   }
-  function pbrMat(scene, name, hex) {
+  function pbrMat(scene, name, col) {
     const m = new BABYLON.PBRMaterial(name, scene);
     m._ggPBR = true;
-    m.albedoColor = BABYLON.Color3.FromHexString(hex);
+    m.albedoColor = colOf(col);
     m.metallic = 0.0; m.roughness = 0.82;
     m.environmentIntensity = ENV_ON ? 0.6 : 0.0;
     // Legacy aliases: lots of code still writes .diffuseColor / .specularColor.
@@ -6887,14 +7018,17 @@ import {
     } catch (e) {}
     return m;
   }
-  function pbrEmat(scene, name, hex, emissive) {
-    const m = pbrMat(scene, name, hex);
-    m.emissiveColor = BABYLON.Color3.FromHexString(hex).scale(emissive);
+  function pbrEmat(scene, name, col, emissive) {
+    const m = pbrMat(scene, name, col);
+    m.emissiveColor = colOf(col).scale(emissive);
     return m;
   }
   function usePBR() { return !!(BABYLON.PBRMaterial && Quality.settings().pbr); }
-  function mat(scene, name, hex) { return usePBR() ? pbrMat(scene, name, hex) : stdMat(scene, name, hex); }
-  function emat(scene, name, hex, emissive) { return usePBR() ? pbrEmat(scene, name, hex, emissive) : stdEmat(scene, name, hex, emissive); }
+  // mat()/emat() apply the Task-11 cheerful colour grade once, here, so every
+  // gameplay/foliage/prop/character material is lifted in one place (backdrops
+  // that call stdMat/stdEmat directly stay ungraded for DayNight's exact tints).
+  function mat(scene, name, hex) { const c = ArtDirection.grade(hex); return usePBR() ? pbrMat(scene, name, c) : stdMat(scene, name, c); }
+  function emat(scene, name, hex, emissive) { const c = ArtDirection.grade(hex); return usePBR() ? pbrEmat(scene, name, c, emissive) : stdEmat(scene, name, c, emissive); }
 
   // Give a material a polished finish (candy sheen, gem facets, blades). PBR:
   // tighten roughness + optional metalness; Standard: a crisp tight specular.
@@ -6966,6 +7100,8 @@ import {
       Swing, SWING_DUR, ambientSpecFor, buildAmbientFX, AMBIENT_SPECS,
       // ---- Lighting / shadows / quality tier (Task 4) ----
       Quality, makeSunShadows, setupPostFX, applyZoneMood,
+      // ---- Art direction: cheerful grade + larger tier-gated view (Task 11) ----
+      ArtDirection,
       // ---- Higher-fidelity models / materials (Task 3) ----
       makeEnvironment, mat, emat, stdMat, stdEmat, pbrMat, pbrEmat, gloss, usePBR,
       get envOn() { return ENV_ON; },
