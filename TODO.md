@@ -374,9 +374,480 @@ A task is **done** only when **all** of these are true:
 
 ---
 
+## 4b. The backlog (Tasks 8–15) — production hardening & RPG depth
+
+> Tasks 8–15 were added to take *Good Game 3D* from "feature‑complete demo" to
+> **production‑grade, agent‑maintainable RPG**. They are written to the same bar
+> as Tasks 2–7 (each is one end‑to‑end release‑ready run) but several are
+> **foundational** and deliberately **revise the Golden Rules** — read each
+> task's *Note on Golden Rules* before starting. Recommended ordering is in
+> [§ 5](#5-recommended-order).
+
+### Task 8 — Extract the changelog into its own `CHANGELOG.md`
+- **Status:** `[ ]`
+- **Depends on:** none. **Do this first** — it is cheap, unblocks every later
+  run (no more 100‑line diffs to `TODO.md` just to log a release), and large
+  projects with good reviews universally keep history out of the planning doc.
+- **Goal.** Move the release history out of `TODO.md` § 7 into a dedicated,
+  conventional **`CHANGELOG.md`** at the repo root, and rewire the run workflow so
+  future runs append there instead of growing the backlog file.
+- **Scope (build this):**
+  - Create **`CHANGELOG.md`** following the *Keep a Changelog* convention
+    (reverse‑chronological, an `## [Unreleased]` section at the top, dated
+    `## [x] — YYYY‑MM‑DD` entries below). Migrate **every** existing entry from
+    `TODO.md` § 7 verbatim (preserve dates, task names, the `?v=` notes and the
+    harness‑count deltas — they are referenced by later tasks).
+  - Adopt a lightweight, human‑ + agent‑readable **versioning scheme**. Since the
+    site is a single static bundle, key entries to the `index.html` `?v=`
+    cache‑buster (already monotonic) and/or a semver line — pick one, document it
+    at the top of `CHANGELOG.md`, and apply it consistently.
+  - In `TODO.md`: replace § 7's body with a one‑line pointer to `CHANGELOG.md`
+    (keep the heading so existing links don't 404). Update the **Run prompt**
+    (§ 6 step 5) and **Standard workflow** (§ 3) so "add a Changelog entry" now
+    means *append to `CHANGELOG.md`*, not edit `TODO.md`.
+  - Update `CLAUDE.md` and `README.md` to reference `CHANGELOG.md` as the source
+    of release history; add it to the *Project layout* list.
+- **Acceptance criteria:**
+  - `CHANGELOG.md` exists, contains **all** prior entries with no content loss,
+    and renders correctly on GitHub.
+  - `TODO.md` no longer carries the full log; § 6's run prompt directs future runs
+    to `CHANGELOG.md`. No dangling internal links anywhere (`grep` for `#7`,
+    `Changelog`).
+  - This task's own entry is recorded **in `CHANGELOG.md`** (dog‑foods the new
+    flow), proving the loop works.
+- **Tests to add:** a tiny doc‑lint check in the harness (or a standalone Node
+  script wired into CI) that asserts `CHANGELOG.md` exists, parses as the expected
+  heading structure, and that `TODO.md` no longer contains dated changelog
+  entries — so the split can't silently regress.
+- **Files:** new `CHANGELOG.md`, `TODO.md` (§ 3, § 6, § 7), `CLAUDE.md`,
+  `README.md`, `test/harness.js` (or a new `test/docs.test.js`), CI workflow if a
+  new script is added.
+- **Out of scope:** rewriting git tags/releases; auto‑generating the log from
+  commits (a future nicety — note it as a follow‑up).
+
+### Task 9 — Modularize the codebase + a production build/test/CI toolchain for agentic edits
+- **Status:** `[ ]`
+- **Depends on:** none, but it is **foundational** — doing it early makes every
+  later task smaller, more targeted, and safer to edit/build/test autonomously.
+- **Note on Golden Rules (IMPORTANT — this task revises them):** the current
+  Golden Rules 1 & 4 mandate a *single 8k‑line IIFE in `js/game.js`* with *no
+  build step* so GitHub Pages serves it raw. That single‑file constraint is the
+  #1 obstacle to **targeted, controllable AI edits** (every change risks a huge
+  file; merge conflicts are constant; blast radius is the whole game). This task
+  **supersedes** those two rules with a **module architecture + a build step
+  whose published output is still 100% static files on GitHub Pages**. Update
+  `CLAUDE.md` and `TODO.md` § 1 to the new rules as part of the run. Everything
+  else (determinism, save round‑trip, headless‑safety, perf/asset budget,
+  feature detection, mobile support) **still applies**.
+- **Goal.** Split `js/game.js` into a clear **ES‑module** source tree by system,
+  add a **modern build system** that bundles to a hashed static artifact for
+  Pages, and stand up a **robust, multi‑layer test framework** (unit + logic +
+  functional/integration + real‑browser UI) so an agent can fix one module,
+  rebuild, and prove the change in isolation.
+- **Scope (build this):**
+  - **Module split.** Carve the IIFE into cohesive ES modules under `src/`
+    mirroring the architecture quick‑map — e.g. `src/core/` (`config`, `rng`,
+    `save`, `i18n`, `quality`), `src/world/` (`zones`, `buildWorld`,
+    `ZoneManager`, `SpawnDirector`, `ResourceNode`), `src/entities/` (`Player`,
+    `Monster`, `Boss`, `Dragon`, `Projectile`), `src/systems/` (`Quests`/`Story`,
+    `Inventory`/`Shop`/`Anvil`, `Crafting`, `DayNight`, `Weather`,
+    `Sfx`/`Music`/`Mixer`), `src/ui/` (HUD, overlays, `Pause`, settings),
+    `src/main.js` (composition root). Keep each module **single‑responsibility**
+    with explicit `import`/`export` (no hidden globals); preserve the test seam
+    (`window.__GG_TEST__`) as an explicit export surface.
+  - **Build system.** Add **Vite** (or esbuild — pick one, justify it briefly)
+    producing a hashed, minified static bundle into `dist/` that GitHub Pages
+    serves. `npm run dev` = HMR dev server; `npm run build` = production bundle;
+    `npm run preview` = serve `dist/`. Keep Babylon on the CDN (externalized) **or**
+    bundle it — decide and document. The deploy workflow must publish the **built**
+    artifact; the cache‑buster (`?v=`) is replaced by content hashing.
+  - **Type safety (lightweight).** Add **JSDoc + `tsc --checkJs`** type checking
+    (no rewrite to TS required) or migrate hot modules to `.ts` — pick
+    the lowest‑friction path that gives editors/agents real type errors. Wire a
+    `npm run typecheck` into CI.
+  - **Lint/format.** Add **ESLint + Prettier** with a config tuned for this code,
+    plus an `npm run lint`. Fix existing violations so the baseline is clean.
+  - **Test framework, layered (how shipped games do it):**
+    - **Unit/logic:** migrate the bespoke `test/harness.js` checks to **Vitest**
+      (keeps Node speed, gives watch mode, coverage, parallelism, rich asserts).
+      Preserve every existing assertion (≈350+ checks) — no coverage loss.
+    - **Functional/integration:** boot the assembled game against the
+      Babylon/DOM stubs and drive whole flows (travel between zones, accept→turn
+      in a quest, craft→equip, save→reload round‑trip) as black‑box tests.
+    - **Real‑browser UI/E2E:** add **Playwright** smoke + UI tests that launch
+      the built site headless‑Chromium, assert the canvas boots with **no console
+      errors/exceptions**, the start screen + pause menu + inventory open, and a
+      scripted input sequence runs without throwing. Gate it so CI can run it on
+      a runner with a browser.
+  - **CI.** Expand `.github/workflows/ci.yml` into stages: install → lint →
+    typecheck → unit/logic (Vitest) → build → Playwright E2E against the build.
+    Cache `node_modules`. Keep it green and fast; fail the deploy on any red.
+  - **Agent ergonomics.** Add a top‑level `ARCHITECTURE.md` (module map + data
+    flow) and per‑directory `README`s so an agent can locate the right module
+    instantly. Add `npm` scripts that mirror exactly what CI runs so a run can
+    self‑verify locally.
+- **Acceptance criteria:**
+  - The game **plays identically** to today (no gameplay/visual/audio regression,
+    saves still load) but is now built from `src/**` modules into a static `dist/`
+    that deploys to Pages with **no behavioral change** for players.
+  - `npm ci && npm run lint && npm run typecheck && npm test && npm run build &&
+    npm run test:e2e` all pass locally and in CI from a clean checkout.
+  - Editing **one module** and rebuilding is sufficient to ship a fix — verified
+    by making a trivial isolated change and showing only that module + the bundle
+    hash change.
+  - All prior harness assertions survive the migration (document the count
+    before/after; no silent drops).
+- **Tests to add:** the migrated Vitest suites (parity with the old harness), the
+  new functional flow tests, the Playwright boot/UI smoke, and a CI job that
+  proves the built `dist/` runs error‑free in a browser.
+- **Files:** new `src/**` tree, `vite.config.*`/`esbuild` script, `package.json`
+  (+ scripts, devDeps), `tsconfig.json`/`jsconfig.json`, `.eslintrc`,
+  `.prettierrc`, `playwright.config.*`, `test/**` (Vitest + E2E), reworked
+  `.github/workflows/*.yml`, `CLAUDE.md` + `TODO.md` § 1 (revised rules),
+  `ARCHITECTURE.md`, `README.md`, `index.html` (module entry).
+- **Out of scope:** rewriting gameplay logic while moving it (move first, refactor
+  later in separate runs); adopting a UI framework (React/etc. — not needed);
+  server‑side anything.
+- **Hints:** do the split **mechanically first** (move code, wire imports, keep
+  behavior byte‑for‑byte) and let the test suite prove parity *before* any
+  cleanup. Keep Babylon feature‑detection intact across module boundaries.
+
+### Task 10 — Fix logical, code & UI bugs (pathing, resource caps, pickup, collision, projectiles, swing) + a deeper test net
+- **Status:** `[ ]`
+- **Depends on:** none. Lighter to land **after Task 9** (smaller modules =
+  surgical fixes), but must not wait on it.
+- **Goal.** Hunt down and fix the gameplay correctness bugs below — and any
+  others surfaced while researching — then expand the **logic, code and UI test**
+  coverage so each fix is locked in and can't regress.
+- **Scope (fix these specific defects, root‑cause not band‑aid):**
+  - **Roads/paths must not cross water without a bridge.** Today the meadow river
+    has bridges (`onBridge`/`inRiver`/`clearOfRiver` in `buildWorld`) but road
+    generation and the path/portal layout can lay a road *through* open water
+    where there is no bridge. Make road routing **bridge‑aware**: a road may only
+    cross a river band at a bridge gap (snap crossings to a bridge, or spawn a
+    bridge where a road must cross). Audit every zone with water. Verify the
+    player never walks a road into water and that `inRiver` blocks correctly along
+    the whole crossing.
+  - **Cap world resources (no infinite accumulation).** Resource nodes currently
+    spawn at fixed per‑zone counts and respawn in place (`populateAdventure`/
+    `populateWildResources`/`ResourceNode.respawn`), but there is **no global cap**
+    and respawn logic should be audited for any path that can grow node count over
+    time (e.g. zone re‑entry, save/load re‑population). Add an explicit
+    `CONFIG.maxResourceNodes` (per‑zone and/or global) and enforce it at spawn and
+    respawn so the live count can never exceed the cap. Make depletion/respawn feel
+    intentional (a believable cooldown, not instant infinite supply).
+  - **Fix "can't pick up resources."** Reproduce and root‑cause the interaction
+    failure (likely `gatherRange`/`Interactable` registration, the `respawn>0`
+    guard, `it.enabled` toggling, or a stale interactable after travel). Ensure
+    walking up + pressing the interact key **always** harvests an enabled node,
+    and that the prompt accurately reflects availability.
+  - **Castle must be solid once built.** Castle parts (`CastleSite`,
+    walls/towers/gate) are decorative and **not registered in the `obstacles`
+    collision set** used by `moveActor`, so the player walks through them. Register
+    each built part as solid collision (walls as segments/boxes, towers as
+    circles, gate as a passable opening) and update collision when parts are built
+    or restored from save. Make sure monsters respect it too where appropriate.
+  - **Projectiles must not pass through the castle (and other solids).** The magic
+    wand `Projectile` ignores the castle and likely other scenery. Give
+    projectiles **collision against solids/the castle** (stop/impact on hit) so you
+    can't shoot through walls. Keep it cheap (reuse the `{x,z,r}` obstacle set).
+  - **"The swing must be correct."** Audit the Task 5 `Swing` state machine and the
+    melee/ranged/gather hit windows: the attack arc, the active‑frame damage
+    window, range/arc of effect, and the visual must line up (no hits landing
+    outside the swing, no dead frames, no double‑hits, correct facing). Fix timing
+    and hit registration so combat reads true.
+  - **Sweep for more.** While in the code, look for adjacent logic/code/UI bugs
+    (off‑by‑one in damage windows, stuck interactables after zone travel, UI
+    elements that don't re‑localize, NaN/edge cases in `moveActor`, leaks on
+    teardown) and fix what you find; list anything deferred.
+- **Acceptance criteria:**
+  - No road/path leads the player into water except across a bridge, in **every**
+    zone; verified by a deterministic test over seeded layouts.
+  - Live resource‑node count is provably bounded by the configured cap across
+    spawn, respawn, travel and reload.
+  - Every enabled resource node is reliably harvestable; the regression that
+    blocked pickup is covered by a test.
+  - The player and wand bolts **collide with built castle parts** (no walk‑through,
+    no shoot‑through); the gate stays passable.
+  - The swing's damage window matches its animation/arc/range; tests assert hit
+    timing and that out‑of‑arc/out‑of‑range targets are not hit.
+  - Headless harness green; **new UI tests** (run the menus/inventory/quest log and
+    assert no exceptions) pass.
+- **Tests to add:** seeded road‑vs‑water pathing assertions; resource‑cap
+  invariants (spawn/respawn/reload); a pickup regression test; collision tests for
+  built castle parts (player push‑out + projectile stop); `Swing` hit‑window/arc
+  tests; UI smoke for the affected overlays.
+- **Files:** `js/game.js` (`buildWorld` road/river gen, `CONFIG`, `populate*`,
+  `ResourceNode`, `Interactable`, `CastleSite`, `moveActor`/`obstacles`,
+  `Projectile`, `Swing`), `test/harness.js` (+ UI tests), `index.html`/`css` (if a
+  prompt/marker needs fixing, bump `?v=`), `README.md`.
+- **Out of scope:** redesigning the resource economy or rebuilding combat from
+  scratch — these are **fixes**, not new systems.
+
+### Task 11 — Brighter, more cheerful art direction + a larger visible play area
+- **Status:** `[ ]`
+- **Depends on:** plays best **with/after Task 4** (lighting) since exposure/tone
+  mapping interact; coordinate the two.
+- **Goal.** The world currently reads **faint/washed‑out** and the **visible area
+  is small** (tight camera + heavy fog). Re‑grade the palette to a vivid, cheerful
+  stylized look (think the warm, saturated readability of well‑reviewed
+  stylized adventures) and **open up the view distance** without tanking phones.
+- **Scope (build this):**
+  - **Palette & saturation pass.** Raise base saturation/value across terrain,
+    foliage, water, sweets/monsters and props; pick a cohesive cheerful key
+    (warm sun, lush greens, candy‑bright accents). Keep per‑zone identity (meadow
+    airy, caverns moody) but lift the floor so nothing looks grey/faint. Drive it
+    through the existing `mat`/`emat` helpers, `theme` colors and `applyZoneMood`
+    (`expMul`/`conMul`) rather than one‑off recolors.
+  - **Open the view.** Increase the camera draw distance and **reduce fog
+    density / push fog start** so the visible radius grows substantially; tune
+    `DayNight`/`Weather` fog tints so distance reads as atmosphere, not a wall.
+    Where the world fence is closer than the new view, ensure the horizon/sky and
+    distant scenery still look intentional.
+  - **Tone mapping/exposure.** Coordinate with Task 4's ACES tone mapping so the
+    brighter palette doesn't blow out; nudge exposure/contrast for a punchy but
+    readable image at day/dusk/night.
+  - **Perf & accessibility.** Keep the larger view **tier‑gated** (mobile/low tier
+    keeps a tighter radius/denser fog for fps; high tier opens up). Verify
+    readability/contrast for gameplay‑critical elements (interactables, markers,
+    enemies) stays high; provide sensible defaults, no eye‑strain neon.
+- **Acceptance criteria:**
+  - The world is visibly **brighter and more cheerful** and the player can see
+    **noticeably farther**; document the before/after fog + draw‑distance numbers
+    and the fps you measured per tier.
+  - Mid‑range phone holds ~45–60 fps with the new view (lower tier tightens the
+    radius automatically); high tier opens up. Nothing throws headless.
+  - Per‑zone moods are preserved (each zone still feels distinct); markers/enemies
+    remain easy to read against the brighter ground.
+- **Tests to add:** the palette/exposure/fog config is a **pure, testable**
+  data‑driven function (per zone + per tier); tier‑gating of view distance is
+  unit‑tested; DayNight/Weather still pass; a check that gameplay‑critical colors
+  meet a minimum contrast threshold.
+- **Files:** `js/game.js` (`mat`/`emat`, zone `theme`s, `applyZoneMood`, camera
+  setup, fog in `buildWorld`/`DayNight`/`Weather`, `Quality` tier knobs),
+  `css` (any UI tint), `test/harness.js`, `README.md`; bump `?v=`.
+- **Out of scope:** new meshes/textures (that's Task 3) — this is **color, light
+  grade and view distance**, not modeling.
+
+### Task 12 — Deep item & equipment system (Skyrim‑grade) with visible worn gear + a real inventory
+- **Status:** `[ ]`
+- **Depends on:** none; pairs naturally with **Task 14** (skills/levels share the
+  stat‑recompute pipeline) — keep the data layer compatible.
+- **Goal.** Research how large RPGs (Skyrim/The Elder Scrolls, Diablo‑likes)
+  structure items and build a **robust analog**: more item kinds and slots, gear
+  that is **visibly worn and animated on the character**, and a proper
+  **inventory** that also stores resources and potions.
+- **Scope (build this):**
+  - **Research → design doc.** Briefly document the target model (item categories,
+    rarity tiers, affixes/enchantments, weight/value, equip slots, set bonuses)
+    and how it maps onto the existing `ITEM_DB`/`Inventory`/`EQUIP_SLOTS`/
+    `recomputeStats`/`enhance*` pipeline. Keep it data‑driven and headless‑safe.
+  - **Expand & upgrade items.** Rebalance/upgrade current items and add new ones
+    across **more kinds** — weapons (1‑h/2‑h/ranged/staff), armor (helmet,
+    chest, gloves, boots, pauldrons, cloak, belt), jewelry (rings, amulet),
+    and consumables. Add **rarity tiers** (common→legendary) with scaling stats,
+    **enchantments/affixes** (prefix/suffix modifiers), and optional **set
+    bonuses**. Extend the enhancement/anvil system to the new model.
+  - **More wear slots.** Add equipment slots beyond today's 8 (e.g. gloves,
+    pauldrons, cloak, belt, second ring already exists) with clear slot rules
+    (2‑handed occupies both hands, etc.). Recompute stats from the full loadout.
+  - **Visible, animated worn gear.** Render equipped gear **on Lily's procedural
+    body** — boots, hat/helmet, chest piece, gloves, cloak, weapon in hand — that
+    swap when equipment changes and **animate with the character** (cloak sway,
+    weapon follows the swing, boots move with the legs). Build procedurally
+    (no asset bloat), tier‑gated, and **dispose on teardown / re‑equip** (no
+    leaks). Headless‑safe.
+  - **Real inventory UI.** A grid/list inventory that holds gear **and** stores
+    **resources and potions** (move materials/potions out of ad‑hoc state into the
+    inventory model), with sort/filter by type/rarity, equip/unequip, compare
+    tooltips (stat deltas vs equipped), drink/consume, and drop/sell hooks into the
+    existing Shop. Stack consumables/materials; show weight/value if adopted.
+  - **Persistence.** Serialize the full inventory + equipped loadout + new fields
+    in `serializeGame`/`applySave`; bump `SAVE_VERSION`; keep older saves loading
+    (migrate gracefully).
+- **Acceptance criteria:**
+  - The player can loot/buy/craft items across the expanded kinds, equip them into
+    the expanded slots, and **see the gear on the character**, animating with
+    actions, swapping on equip/unequip — with no leaks across travel.
+  - Stats recompute correctly from the full loadout incl. rarity/affixes/sets; the
+    inventory stores resources + potions and consuming/equipping works.
+  - Inventory + equipment + materials/potions **round‑trip through save/load**;
+    old saves still load.
+  - Headless‑safe; harness green; nothing throws on low tier.
+- **Tests to add:** item/affix/rarity stat math; equip/unequip slot rules
+  (2‑handed, set bonuses); inventory add/stack/consume/sort; worn‑gear build +
+  dispose (no leak) headless; **save/load round‑trip** of the new schema +
+  migration from the prior version.
+- **Files:** `js/game.js` (`ITEM_DB`, `Inventory`, `EQUIP_SLOTS`, `recomputeStats`,
+  `enhance*`/`Anvil`/`Shop`, `Player._build`/update for worn gear + animation,
+  inventory UI, `serializeGame`/`applySave`, `SAVE_VERSION`), `index.html`/`css`
+  (inventory UI; bump `?v=`), `test/harness.js`, `README.md`.
+- **Out of scope:** a full crafting‑tree overhaul, durability/repair economy
+  (note as follow‑ups if you don't include them), imported 3D art.
+- **Hints:** keep items **declarative**; resolve display names/descriptions
+  through i18n (Golden Rule 9); reuse the existing enhancement multipliers.
+
+### Task 13 — Minimap + full‑screen world map with locations, NPCs, search & a guided waypoint
+- **Status:** `[ ]`
+- **Depends on:** none (reads `ZONES`/`LOCATIONS`/`NPC_DATA`); complements the
+  story tracker from Task 2.
+- **Goal.** Add a corner **minimap** and a **full‑screen world/zone map** showing
+  all locations and NPCs, with **search** and a **guide system** that points the
+  player toward any selected city/point/NPC (on‑screen direction + map waypoint),
+  the way large open‑world RPGs do.
+- **Scope (build this):**
+  - **Minimap (HUD).** A live corner map of the current zone: player position +
+    facing, nearby NPCs/landmarks/resource nodes/portals/monsters, north
+    indicator, and the active quest objective. Cheap to render (2D canvas/SVG
+    over the scene, not a second 3D view); toggleable; mobile‑friendly.
+  - **Full map (overlay).** A pannable/zoomable full‑screen map. Two levels: the
+    **current zone** (detailed) and a **world overview** of all zones and how they
+    connect (the portal graph), with discovered/undiscovered (fog‑of‑war) state if
+    feasible. Icons for cities/landmarks (`LOCATIONS`), NPCs (`NPC_DATA`), the
+    castle, shops, portals.
+  - **Search.** A search box that filters/locates any city/point/NPC by name
+    (i18n‑aware), jumping the map to it and offering "guide me there."
+  - **Guide/waypoint system.** Selecting a target sets a **waypoint**: an
+    on‑screen **compass/direction arrow** (and a world marker/beam) pointing the
+    way, with distance, and — across zones — which **portal** to take next
+    (route through the zone graph). Clears on arrival.
+  - **Persistence.** Persist discovered locations + the active waypoint in
+    save/load; bump `SAVE_VERSION` if needed; old saves default sanely.
+- **Acceptance criteria:**
+  - The minimap correctly shows the player and nearby points of interest and
+    updates live; the full map shows all zones/locations/NPCs and their links.
+  - Searching for a city/NPC locates it; selecting it shows a clear on‑screen
+    direction (and the next portal when it's in another zone) and distance; the
+    guide clears on arrival.
+  - Works on desktop + mobile, never freezes, headless‑safe; discovered/waypoint
+    state round‑trips through save/load.
+- **Tests to add:** the world‑graph/route‑finding (next‑portal toward a target
+  zone) is a pure, tested function; bearing/distance math is unit‑tested;
+  discovered‑location + waypoint **save/load round‑trip**; map data derives from
+  `ZONES`/`LOCATIONS`/`NPC_DATA` (no hard‑coded duplication).
+- **Files:** `js/game.js` (a `Map`/`Minimap`/`Waypoint` module, route‑finder over
+  `ZONES` portals, HUD hooks, `serializeGame`/`applySave`),
+  `index.html`/`css` (map/minimap UI, compass; bump `?v=`), `test/harness.js`,
+  `README.md`.
+- **Out of scope:** real cartographic terrain rendering or a 3D worldmap — a
+  clean stylized 2D map is the target.
+
+### Task 14 — Skill & leveling system (Skyrim‑grade) with 3‑skill fusion, a quick‑access bar & boss‑only skills
+- **Status:** `[ ]`
+- **Depends on:** pairs with **Task 12** (shared stat pipeline); benefits from the
+  Task 13 HUD for the toolbar. Keep save schema coordinated with Task 12.
+- **Goal.** Research how large RPGs (Skyrim and peers) model **skills and
+  character progression** and build a robust analog: a leveling system, an active
+  **skill** roster, a **fusion** mechanic (combine up to 3 skills into one),
+  a **quick‑access toolbar** by the shoot button, and **rare skills that drop only
+  from boss loot**.
+- **Scope (build this):**
+  - **Research → design doc.** Document the target model (XP sources, level curve,
+    perks/skill trees, active vs passive skills, cooldowns/costs) and map it onto
+    the existing combat/stat pipeline (`Player`, `recomputeStats`, `Projectile`,
+    the `Swing` actions). Keep it declarative and headless‑safe.
+  - **Leveling.** Award **XP** for combat/quests/gathering; a tuned level curve
+    grants points (stat/perk) on level‑up; show level + XP in the HUD with a
+    level‑up beat. Persist level/XP.
+  - **Skill roster.** A `SKILL_DB` of active skills (and passives), each with
+    effect, cost (mana/cooldown/resource), and tags/attributes used by fusion.
+    Wire skills into combat (the wand/shoot path + melee), respecting cooldowns.
+  - **Skill fusion (the marquee feature).** Let the player **combine up to 3
+    skills** into a **new fused skill** whose characteristics are a deterministic
+    blend of the inputs' attributes (damage/element/AoE/cooldown/etc.). Fusion
+    **consumes money / artifacts / resources** per a defined recipe; the result is
+    a real, equippable, savable skill. Make the blend rules **pure and tested**.
+  - **Quick‑access toolbar.** A bar of **up to 3 skill slots** next to the shoot
+    button (mobile‑friendly tap targets + desktop hotkeys 1/2/3); assign/clear
+    slots from the skill UI; show cooldowns. Activating uses the slotted skill.
+  - **Boss‑loot skills.** A pool of powerful skills obtainable **only** from boss
+    drops (deterministic via seeded `rng()`), surfaced as loot and added to the
+    roster on pickup.
+  - **Persistence.** Serialize level/XP, owned skills (incl. fused), slotted
+    toolbar skills, and boss‑skill unlocks; bump `SAVE_VERSION`; migrate older
+    saves gracefully.
+- **Acceptance criteria:**
+  - The player gains XP and levels up; can learn skills, **fuse up to 3** into a
+    new one (consuming the right money/artifacts/resources), **slot up to 3** on
+    the quick bar, and use them in combat with cooldowns.
+  - Boss‑only skills drop solely from bosses (seeded, reproducible) and enter the
+    roster.
+  - All of it (level, XP, owned/fused/slotted skills, boss unlocks) **round‑trips
+    through save/load**; old saves still load. Headless‑safe; harness green.
+- **Tests to add:** the level curve + XP math; the **fusion blend** rules and cost
+  consumption (pure, deterministic); cooldown logic; toolbar assign/activate;
+  boss‑drop determinism under a fixed seed; **save/load round‑trip** of the new
+  schema + migration.
+- **Files:** `js/game.js` (new `Skills`/`SKILL_DB`/`Leveling`/fusion module,
+  `Player`/combat hooks, boss loot tables, HUD toolbar, `serializeGame`/
+  `applySave`, `SAVE_VERSION`), `index.html`/`css` (skill + toolbar UI; bump
+  `?v=`), `test/harness.js`, `README.md`.
+- **Out of scope:** a sprawling multi‑tree perk web (ship one coherent, tested
+  system; note extensions as follow‑ups); PvP/balance tuning beyond sane defaults.
+- **Hints:** keep skills **declarative** and i18n the names/descriptions (Golden
+  Rule 9); make fusion a pure function of input attributes so it's fully testable.
+
+### Task 15 — Cloud saves to Google Drive (manual + 5‑min autosave via `appDataFolder`, rolling 1‑hour history)
+- **Status:** `[ ]`
+- **Depends on:** the existing `serializeGame`/`applySave` + `SAVE_VERSION`; do it
+  **after** any task that changes the save schema (so the cloud format is stable).
+- **Note on Golden Rules:** this adds an **external network dependency** and OAuth.
+  It must stay **opt‑in** and **degrade gracefully** to the existing
+  `localStorage` save when the player isn't signed in, is offline, or runs
+  headless — the game must never block on the cloud. Requires a **Google API
+  OAuth client ID** (document setup; read it from config, don't hard‑code
+  secrets; the Drive JS client loads from Google's CDN, keeping the site static).
+- **Goal.** Let the player **sign in with Google** and save game progress to their
+  own Drive using the private **`appDataFolder`** space — both **manual save** and
+  an **autosave every 5 minutes** — keeping a **rolling history of the last
+  hour** of autosaves.
+- **Scope (build this):**
+  - **Auth.** Google Identity Services OAuth (drive.appdata scope), opt‑in from a
+    settings/pause UI: sign‑in/sign‑out, signed‑in indicator. Tokens handled per
+    Google's guidance; never persist secrets in the repo.
+  - **Save/load to Drive `appDataFolder`.** Write the same serialized save JSON the
+    local system uses into the user's hidden `appDataFolder` (invisible to other
+    apps, no Drive clutter). Manual **"Save to Drive"** + **"Load from Drive"** that
+    lists/loads available cloud saves. Reuse `serializeGame`/`applySave` verbatim so
+    cloud and local formats match and versioning/migration just works.
+  - **Autosave every 5 minutes.** A timer that writes an autosave to Drive every
+    5 min while signed in (and on key beats — zone travel, chapter complete),
+    pausing when the tab is hidden/idle; debounced; never blocks the main thread;
+    surfaces quiet success/failure toasts.
+  - **Rolling 1‑hour history.** Keep the **last hour** of autosaves (≈ up to 12
+    timestamped slots), pruning older ones automatically. Let the player browse +
+    restore any of the retained autosaves.
+  - **Conflict & resilience.** Handle offline/expired‑token/quota errors
+    gracefully (fall back to local, retry with backoff, clear messaging); reconcile
+    local vs cloud on load (offer the newer, don't silently clobber).
+- **Acceptance criteria:**
+  - A signed‑in player can manually save to and load from their Drive
+    `appDataFolder`; an autosave lands every ~5 minutes; the **last hour** of
+    autosaves is retained and restorable, older ones pruned.
+  - Signed‑out / offline / headless: the feature is cleanly disabled and the
+    existing local save still works — **nothing throws**, nothing blocks.
+  - Cloud saves use the **same schema** as local and respect `SAVE_VERSION`
+    migration; a cloud save round‑trips back into a running game.
+- **Tests to add:** the autosave **scheduler** (5‑min cadence, pause‑when‑hidden,
+  debounce) and the **retention/pruning** policy (keep last hour) are pure, tested
+  functions; serialize↔deserialize parity between local and cloud payloads; the
+  Drive client is **feature‑detected/injectable** so tests run against a stub with
+  no real network; offline/error fallback paths are covered. Headless harness
+  stays green with no Google client present.
+- **Files:** `js/game.js` (a `CloudSave`/`Drive` module wrapping
+  `serializeGame`/`applySave`, the autosave scheduler + retention, settings hooks),
+  `index.html`/`css` (sign‑in + cloud‑saves UI; bump `?v=`), config for the OAuth
+  client ID, `test/harness.js`, `README.md` (setup + privacy note).
+- **Out of scope:** a custom backend/server, cross‑device real‑time sync,
+  cloud saves for non‑Google providers (note as follow‑ups).
+
+---
+
 ## 5. Recommended order
 
-Tasks are mostly independent, but this order minimizes rework:
+Tasks are mostly independent, but this order minimizes rework.
+
+**Tasks 2–7 (visual/content pass — all shipped):**
 
 1. **Task 7 — Russian/i18n** *(first: later tasks then add bilingual strings)*
 2. **Task 4 — Lighting & shadows** *(visual foundation)*
@@ -385,8 +856,23 @@ Tasks are mostly independent, but this order minimizes rework:
 5. **Task 6 — Audio & per‑zone ambience**
 6. **Task 2 — Story, missions & side quests** *(content capstone)*
 
+**Tasks 8–15 (production hardening & RPG depth) — recommended order:**
+
+1. **Task 8 — Changelog → `CHANGELOG.md`** *(cheap; unblocks the run workflow)*
+2. **Task 9 — Modularize + build/test/CI toolchain** *(foundational: revises the
+   Golden Rules and makes every later task smaller, safer & agent‑editable)*
+3. **Task 10 — Bug fixes + deeper test net** *(land correctness on the new, more
+   testable structure)*
+4. **Task 11 — Brighter palette + larger view** *(coordinate with Task 4 lighting)*
+5. **Task 12 — Item & equipment system** *(shares the stat pipeline with Task 14)*
+6. **Task 14 — Skill & leveling system** *(builds on the Task 12 stat/loadout work)*
+7. **Task 13 — Minimap & world map** *(complements the Task 2 story tracker)*
+8. **Task 15 — Google Drive cloud saves** *(last: after the save schema settles)*
+
 If you skip ahead, still obey Golden Rule 9 (route new strings through i18n once
-it exists) and the shared Definition of Done.
+it exists) and the shared Definition of Done. For Tasks 9 & 15, read each task's
+*Note on Golden Rules* first — they intentionally revise the single‑file /
+no‑build‑step / no‑external‑dependency rules.
 
 ---
 
