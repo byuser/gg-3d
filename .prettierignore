@@ -1,0 +1,17 @@
+# The gameplay source was moved verbatim out of the legacy single file during
+# the Task 9 modularization (byte-for-byte, so the test suite proves parity).
+# Reformatting it would defeat that, so Prettier only governs new tooling files.
+dist/
+node_modules/
+js/
+src/core/
+src/data/
+src/game.js
+# The ported harness is the legacy suite moved verbatim (so it proves parity) —
+# reformatting it would obscure that it is byte-for-byte the old checks.
+test/harness.test.js
+CHANGELOG.md
+TODO.md
+package-lock.json
+playwright-report/
+test-results/

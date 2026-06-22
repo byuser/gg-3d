@@ -1,0 +1,13 @@
+# dependencies + build output (the built bundle is produced in CI / deploy)
+node_modules/
+dist/
+
+# test + tooling artifacts
+playwright-report/
+test-results/
+coverage/
+*.log
+
+# editor / OS noise
+.DS_Store
+.vscode/
