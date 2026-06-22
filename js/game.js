@@ -653,7 +653,7 @@
     {
       id: "forest", name: "Whisperwood Deep", icon: "🌲", level: 3, radius: 64,
       theme: { sky: "#3f6b4a", fog: "#2f5238", fogDensity: 0.018, ground: "#356b39",
-               hemi: "#24401f", sun: "#cfe6b0", sunDir: [-0.35, -1, -0.5], expMul: 0.97, conMul: 1.04 },
+               hemi: "#24401f", sun: "#cfe6b0", sunDir: [-0.35, -1, -0.5], expMul: 0.97, conMul: 1.04, wind: 0.7 },
       scenery: { trees: 120, rocks: 18, bushes: 50, toadstools: 40, flowers: 60 },
       spawn: { count: 9, kinds: ["gummy", "jellybean", "marshmallow", "macaron"], abilities: ["chaser", "runner", "jumper", "brute"] },
       portals: [
@@ -664,7 +664,7 @@
     {
       id: "shore", name: "Saltmarsh Strand", icon: "🌊", level: 2, radius: 70,
       theme: { sky: "#bfe6ff", fog: "#bfe0ef", fogDensity: 0.009, ground: "#cdbb84",
-               hemi: "#7a8a5a", sun: "#fff0d0", sunDir: [-0.6, -1, -0.2], expMul: 1.05 },
+               hemi: "#7a8a5a", sun: "#fff0d0", sunDir: [-0.6, -1, -0.2], expMul: 1.05, wind: 1.2 },
       scenery: { trees: 8, rocks: 26, bushes: 14, flowers: 30, palms: 22 },
       spawn: { count: 8, kinds: ["icecream", "donut", "lollipop", "candycane"], abilities: ["chaser", "runner", "shooter"] },
       portals: [
@@ -675,7 +675,7 @@
     {
       id: "peaks", name: "Frostpeak Trail", icon: "⛰️", level: 4, radius: 66,
       theme: { sky: "#cfe0f5", fog: "#dfe9f7", fogDensity: 0.014, ground: "#dde7f2",
-               hemi: "#8a99ad", sun: "#eef4ff", sunDir: [-0.4, -1, -0.45], expMul: 1.06, conMul: 1.05 },
+               hemi: "#8a99ad", sun: "#eef4ff", sunDir: [-0.4, -1, -0.45], expMul: 1.06, conMul: 1.05, wind: 1.5 },
       scenery: { trees: 22, rocks: 60, bushes: 8, crystals: 16, snow: true },
       spawn: { count: 9, kinds: ["candycane", "marshmallow", "chocbar", "pretzel"], abilities: ["chaser", "brute", "jumper", "shooter"] },
       portals: [
@@ -2026,6 +2026,53 @@
   }
 
   // =========================================================================
+  // Swing — a tiny, dt-driven attack/gather animation state machine. It gives
+  // every action a readable ANTICIPATION → IMPACT → RECOVERY arc by owning only
+  // the timing (phase + elapsed time); the Player maps the phase onto limb poses.
+  // The combat hit still lands the instant tryCast() fires, so this only changes
+  // how an action LOOKS, never when it deals damage. Pure, frame-rate independent
+  // (carries leftover time across phase edges) and headless-safe — no DOM/Babylon.
+  // =========================================================================
+  const SWING_DUR = {
+    melee:  { windup: 0.11, strike: 0.12, recover: 0.21 }, // a wide weapon arc
+    ranged: { windup: 0.07, strike: 0.07, recover: 0.16 }, // a quick wand thrust
+    gather: { windup: 0.16, strike: 0.14, recover: 0.24 }, // a deliberate chop/reach
+  };
+  const SWING_PHASES = ["windup", "strike", "recover"];
+  class Swing {
+    constructor() { this.kind = null; this.phase = "idle"; this.t = 0; }
+    // Begin an action; an unknown kind defaults to a melee arc.
+    trigger(kind) {
+      this.kind = SWING_DUR[kind] ? kind : "melee";
+      this.phase = "windup"; this.t = 0;
+      return this;
+    }
+    // Advance the machine by dt, rolling leftover time into the next phase so the
+    // total timing is exact at any frame rate. Returns the (possibly new) phase.
+    update(dt) {
+      if (this.phase === "idle") return "idle";
+      const d = SWING_DUR[this.kind];
+      this.t += (dt > 0 ? dt : 0);
+      let guard = 8; // can't cross more than 3 edges; guard against a huge dt
+      while (this.phase !== "idle" && this.t >= d[this.phase] && guard-- > 0) {
+        this.t -= d[this.phase];
+        const i = SWING_PHASES.indexOf(this.phase);
+        this.phase = SWING_PHASES[i + 1] || "idle";
+      }
+      if (this.phase === "idle") { this.t = 0; this.kind = null; }
+      return this.phase;
+    }
+    get busy() { return this.phase !== "idle"; }
+    get striking() { return this.phase === "strike"; }
+    // 0..1 progress through the CURRENT phase (0 when idle).
+    progress() {
+      if (this.phase === "idle") return 0;
+      const dur = SWING_DUR[this.kind][this.phase] || 1;
+      return Math.max(0, Math.min(1, this.t / dur));
+    }
+  }
+
+  // =========================================================================
   // Player — Lily, with a magic wand, casting, locomotion + pick-up states.
   // =========================================================================
   class Player {
@@ -2040,7 +2087,8 @@
       this.onPicked = null;      // callback once the relic reaches the hands
       this.carried = null;       // collectible mesh that flies up + poofs
       this.castCooldown = 0;     // counts down to 0 when ready to cast
-      this.castAnim = 0;         // 0..1 quick wand-thrust animation
+      this.swing = new Swing();  // anticipation→impact→recovery action animation
+      this.flinch = 0;           // 1→0 recoil timer set when struck
       // Base stats before any gear. recomputeStats() layers equipment on top.
       this.base = { maxHealth: CONFIG.maxHealth, speed: CONFIG.moveSpeed };
       this.maxHealth = CONFIG.maxHealth;
@@ -2243,6 +2291,10 @@
     }
     get busy() { return this.state === "pickup"; }
 
+    // A quick chop/reach when harvesting a resource node (purely cosmetic — the
+    // material is already credited). Ignored while picking up or mid-swing.
+    gather() { if (!this.busy && !this.swing.busy) this.swing.trigger("gather"); }
+
     // Trigger an attack with the active weapon. Returns a descriptor the loop
     // turns into projectiles or a melee sweep, or null if on cooldown / busy.
     //   ranged → { type:"ranged", shots:[{origin,dir}], weapon }
@@ -2251,9 +2303,8 @@
       if (this.castCooldown > 0 || this.busy) return null;
       const w = this.weapon;
       this.castCooldown = w.cooldown;
-      this.castAnim = 1;
+      this.swing.trigger(w.ranged ? "ranged" : "melee");
       if (!w.ranged) {
-        this.meleeAnim = 1; // drives the swing animation
         const dir = new BABYLON.Vector3(Math.sin(this.facing), 0, Math.cos(this.facing)).normalize();
         return { type: "melee", origin: this.root.position.clone(), dir, weapon: w };
       }
@@ -2273,28 +2324,64 @@
 
     update(dt, camera) {
       if (this.castCooldown > 0) this.castCooldown -= dt;
-      if (this.castAnim > 0) this.castAnim = Math.max(0, this.castAnim - dt / 0.22);
-      if (this.meleeAnim > 0) this.meleeAnim = Math.max(0, this.meleeAnim - dt / 0.26);
+      this.swing.update(dt);
+      if (this.flinch > 0) this.flinch = Math.max(0, this.flinch - dt / 0.32);
 
       if (this.state === "pickup") { this._updatePickup(dt); }
       else { this._updateMove(dt, camera); }
 
-      // A melee swing arcs the whole arm across the body; a ranged cast thrusts
-      // the wand forward. Both layer on top of the locomotion pose.
-      if (this.meleeAnim > 0) {
-        const sw = Math.sin(this.meleeAnim * Math.PI); // 0->1->0
-        this.armR.rotation.x = lerp(this.armR.rotation.x, -1.4, sw);
-        this.armR.rotation.z = lerp(this.armR.rotation.z || 0, 1.1 * sw, 0.6);
-      } else if (this.castAnim > 0) {
-        const thrust = Math.sin(this.castAnim * Math.PI); // 0->1->0
-        this.armR.rotation.x = lerp(this.armR.rotation.x, -1.9, thrust);
+      // Layer the active action pose (wind-up → strike → follow-through) on top of
+      // the locomotion pose, then a brief recoil when struck.
+      this._animateAction();
+      if (this.flinch > 0) {
+        this.lean.rotation.x = lerp(this.lean.rotation.x, -0.34, this.flinch);
+        this.lean.position.y += this.flinch * 0.05;
       }
-      // Pulse the wand crystal.
+
+      // Pulse the wand crystal; flare it on the ranged strike frame.
       const pulse = 0.85 + Math.sin(performance.now() / 120) * 0.15;
       this.wandHalo.scaling.setAll(pulse);
-      this.wandGlow.intensity = 0.4 + (this.castAnim > 0 ? 0.8 : 0) + pulse * 0.1;
+      const rangedStrike = this.swing.kind === "ranged" && this.swing.striking;
+      this.wandGlow.intensity = 0.4 + (rangedStrike ? 0.9 : 0) + pulse * 0.1;
 
       this.yaw.rotation.y = this.facing;
+    }
+
+    // Map the Swing state machine onto limb poses. Each phase eases toward a
+    // target pose, so an action reads as anticipation → impact → recovery.
+    _animateAction() {
+      const sw = this.swing;
+      if (!sw.busy) { this.lean.rotation.y = lerp(this.lean.rotation.y || 0, 0, 0.2); return; }
+      const ph = sw.phase;
+      if (sw.kind === "melee") {
+        if (ph === "windup") {            // cock the blade up + twist away
+          this.armR.rotation.x = lerp(this.armR.rotation.x, 0.8, 0.4);
+          this.armR.rotation.z = lerp(this.armR.rotation.z || 0, -0.7, 0.4);
+          this.lean.rotation.y = lerp(this.lean.rotation.y || 0, -0.35, 0.35);
+        } else if (ph === "strike") {     // whip it across the body — the hit
+          this.armR.rotation.x = lerp(this.armR.rotation.x, -1.5, 0.55);
+          this.armR.rotation.z = lerp(this.armR.rotation.z || 0, 1.2, 0.55);
+          this.lean.rotation.y = lerp(this.lean.rotation.y || 0, 0.45, 0.5);
+        } else {                          // recover — settle back to rest
+          this.armR.rotation.z = lerp(this.armR.rotation.z || 0, 0, 0.25);
+          this.lean.rotation.y = lerp(this.lean.rotation.y || 0, 0, 0.2);
+        }
+      } else if (sw.kind === "ranged") {
+        if (ph === "windup") this.armR.rotation.x = lerp(this.armR.rotation.x, 0.35, 0.45); // draw back
+        else if (ph === "strike") this.armR.rotation.x = lerp(this.armR.rotation.x, -1.9, 0.7); // thrust
+        else this.lean.rotation.y = lerp(this.lean.rotation.y || 0, 0, 0.2);
+      } else {                            // gather — a downward chop with the free hand
+        if (ph === "windup") {
+          this.armL.rotation.x = lerp(this.armL.rotation.x, -0.7, 0.4);
+          this.lean.rotation.x = lerp(this.lean.rotation.x, 0.15, 0.3);
+        } else if (ph === "strike") {
+          this.armL.rotation.x = lerp(this.armL.rotation.x, 1.3, 0.6);
+          this.lean.rotation.x = lerp(this.lean.rotation.x, 0.5, 0.4);
+        } else {
+          this.armL.rotation.x = lerp(this.armL.rotation.x, 0, 0.25);
+          this.lean.rotation.x = lerp(this.lean.rotation.x, 0, 0.25);
+        }
+      }
     }
 
     _updateMove(dt, camera) {
@@ -2398,6 +2485,7 @@
     // Returns true if the hit actually landed (i.e. wasn't on bite-cooldown).
     takeDamage(amount) {
       this.health = Math.max(0, this.health - amount);
+      if (amount > 0) this.flinch = 1; // a quick recoil reads the hit
       return this.health;
     }
 
@@ -3449,6 +3537,7 @@
       const [lo, hi] = this.def.amount;
       const n = lo + ((rng() * (hi - lo + 1)) | 0);
       addMaterial(this.player, this.def.mat, n);
+      if (this.player && this.player.gather) this.player.gather(); // chop/reach motion
       spawnImpact(this.state, this.root.position, "#cfe0b0", { y: 0.8, count: 7, spread: 3 });
       Sfx.play("hit");
       toast(t("toast.gathered", { icon: MATERIALS[this.def.mat].icon, n, label: tMaterialLabel(this.def.mat) }));
@@ -3816,18 +3905,19 @@
     //   tess   — cylinder/disc tessellation
     //   rockSub— icosphere subdivisions for rocks (craggier facets)
     //   foliage— extra-detail budget (0..1): layered canopies / rock + crystal clusters
+    //   ambient— ambient-FX density (0..1): drifting-particle emit rate (Task 5)
     // The mobile tiers never exceed the old geometry density (phones stay smooth);
     // only the desktop "high" tier adds triangles + PBR + the IBL probe.
     TIERS: {
       high:   { shadowMap: 2048, shadowFilter: "contact", csm: true,  bloom: true,  ssao: true,
                 shadowDarkness: 0.34, exposure: 1.08, contrast: 1.12, bloomWeight: 0.20, shadowMaxZ: 220,
-                pbr: true,  env: true,  seg: 14, tess: 20, rockSub: 2, foliage: 1.0 },
+                pbr: true,  env: true,  seg: 14, tess: 20, rockSub: 2, foliage: 1.0, ambient: 1.0 },
       medium: { shadowMap: 1024, shadowFilter: "pcf",     csm: false, bloom: true,  ssao: false,
                 shadowDarkness: 0.40, exposure: 1.02, contrast: 1.08, bloomWeight: 0.15, shadowMaxZ: 160,
-                pbr: true,  env: false, seg: 12, tess: 16, rockSub: 1, foliage: 0.6 },
+                pbr: true,  env: false, seg: 12, tess: 16, rockSub: 1, foliage: 0.6, ambient: 0.7 },
       low:    { shadowMap: 1024, shadowFilter: "blur",    csm: false, bloom: false, ssao: false,
                 shadowDarkness: 0.46, exposure: 1.00, contrast: 1.04, bloomWeight: 0.00, shadowMaxZ: 120,
-                pbr: false, env: false, seg: 10, tess: 12, rockSub: 1, foliage: 0.3 },
+                pbr: false, env: false, seg: 10, tess: 12, rockSub: 1, foliage: 0.3, ambient: 0.45 },
     },
     settings() { return this.TIERS[this.tier] || this.TIERS.high; },
 
@@ -4621,9 +4711,16 @@
       return new BABYLON.Vector3(tx, cur.y, tz);
     }
 
+    // Ambient life: drifting particles + a few wandering critters so the zone
+    // breathes (Task 5). Built in buildWorld's scope so its meshes/materials are
+    // auto-streamed out; its particle system is disposed explicitly below.
+    const ambient = buildAmbientFX(scene, zone, RADIUS, indoor);
+
     // A gentle shimmer (water + sea) and a bob for beacon/portal orbs, plus a
-    // soft sway driven through the WIND animator so foliage feels alive.
-    const windAmp = indoor ? 0.4 : 1.0;
+    // soft sway driven through the WIND animator so foliage feels alive. Wind
+    // strength is per-zone (windy peaks, sheltered indoor lairs) and gusts on two
+    // offset bands for a more natural, less metronomic rustle.
+    const windAmp = (zone.theme && zone.theme.wind != null) ? zone.theme.wind : (indoor ? 0.4 : 1.0);
     const _windObs = scene.onBeforeRenderObservable.add(() => {
       const t = performance.now() / 1000;
       if (water) {
@@ -4632,13 +4729,15 @@
       }
       seaMat.emissiveColor = BABYLON.Color3.FromHexString(seaCol).scale((indoor ? 0.05 : 0.12) + Math.sin(t * 0.8) * 0.03);
       for (const b of animated) b.orb.position.y = b.y + Math.sin(t * 1.5 + b.orb.uniqueId) * 0.4;
-      // Wind: foliage crowns lean and rustle on two offset sine bands.
-      const gust = 1 + Math.sin(t * 0.5) * 0.5;
+      // Wind: foliage crowns lean and rustle on offset sine bands; the gust ebbs
+      // and swells on two slow bands so no two trees move in lockstep.
+      const gust = 1 + Math.sin(t * 0.5) * 0.4 + Math.sin(t * 0.23 + 1.3) * 0.25;
       for (const s of swayers) {
         const a = Math.sin(t * 1.6 + s.phase) * s.amp * windAmp * gust;
         s.mesh.rotation.z = a;
         s.mesh.rotation.x = Math.cos(t * 1.3 + s.phase) * s.amp * 0.6 * windAmp * gust;
       }
+      ambient.update(t);
     });
 
     // Everything this zone added — used by dispose() to stream the zone out
@@ -4648,6 +4747,7 @@
     const _newMat = (scene.materials || []).filter((m) => !_bMat.has(m));
     function dispose() {
       try { scene.onBeforeRenderObservable.remove(_windObs); } catch (e) {}
+      try { ambient.dispose(); } catch (e) {}   // stop + free the particle system
       for (const m of _newMesh) { try { m.dispose(); } catch (e) {} }
       for (const n of _newTN) { try { n.dispose(); } catch (e) {} }
       try { if (shadow && shadow.dispose) shadow.dispose(); } catch (e) {}
@@ -4657,7 +4757,7 @@
     }
 
     return { shadow, onRoad, obstacles, inRiver, moveActor, water, waterMat,
-             hemi, sun, sky, skyMat, seaMat, ground, portals, zone, radius: RADIUS, dispose };
+             hemi, sun, sky, skyMat, seaMat, ground, portals, zone, radius: RADIUS, ambient, dispose };
   }
 
   // =========================================================================
@@ -4842,6 +4942,140 @@
       _dotTex = tex;
     } catch (e) { _dotTex = null; }
     return _dotTex;
+  }
+
+  // =========================================================================
+  // Ambient life (Task 5) — a slow drift of particles (pollen / spores / snow /
+  // glowing motes / embers) plus a few wandering CRITTERS (butterflies by day,
+  // glowing fireflies in the dark) so every zone feels alive, not static. The
+  // per-zone spec is pure data (testable); the build is feature-detected and
+  // disposed on zone teardown. Motion is driven by absolute clock time, so it's
+  // frame-rate independent (and the critter meshes are auto-cleaned by buildWorld
+  // since they're created in its scope; the particle system is disposed here).
+  // =========================================================================
+  const AMBIENT_SPECS = {
+    meadow:  { kind: "pollen", color: "#fff3b0", rate: 24, critter: "butterfly", critters: 6 },
+    forest:  { kind: "spore",  color: "#bfe89a", rate: 26, critter: "firefly",   critters: 7 },
+    shore:   { kind: "mist",   color: "#dff1ff", rate: 18, critter: "butterfly", critters: 4 },
+    peaks:   { kind: "snow",   color: "#ffffff", rate: 34, critter: null,        critters: 0 },
+    caverns: { kind: "mote",   color: "#b79cff", rate: 22, critter: "firefly",   critters: 8 },
+    thicket: { kind: "ember",  color: "#ffb060", rate: 20, critter: "firefly",   critters: 6 },
+  };
+  const AMBIENT_FALLBACK = { kind: "mote", color: "#ffffff", rate: 16, critter: null, critters: 0 };
+  // Pure: map a zone to its ambient spec (used by buildAmbientFX + the tests).
+  function ambientSpecFor(zone) {
+    return (zone && AMBIENT_SPECS[zone.id]) || AMBIENT_FALLBACK;
+  }
+
+  // Build the ambient particle drift + critter swarm for a zone. Headless-safe
+  // (ParticleSystem is feature-detected; critter meshes use the standard helpers,
+  // which the harness stubs). Returns { update(t), dispose() }.
+  function buildAmbientFX(scene, zone, radius, indoor) {
+    const spec = ambientSpecFor(zone);
+    const dens = (Quality.settings().ambient != null) ? Quality.settings().ambient : 1;
+    const span = (radius || 60) * 0.92;
+    const critters = [];   // { node, cx, cz, rx, rz, baseY, spd, ph, wingL, wingR, mesh }
+    let ps = null;
+
+    // ---- Wandering critters (cheap tiny meshes; shared materials per type). ----
+    if (spec.critters > 0) {
+      const c3 = (h) => { try { return BABYLON.Color3.FromHexString(h); } catch (e) { return null; } };
+      let critMat = null, wingMat = null, bodyMat = null;
+      if (spec.critter === "firefly") {
+        critMat = emat(scene, "ambFireM_" + zone.id, spec.color, 1.0);
+      } else {
+        wingMat = emat(scene, "ambWingM_" + zone.id, spec.color, 0.25);
+        if (wingMat) try { wingMat.alpha = 0.92; } catch (e) {}
+        bodyMat = mat(scene, "ambBodyM_" + zone.id, "#4a3a2a");
+      }
+      for (let i = 0; i < spec.critters; i++) {
+        // Placement draws rng UNCONDITIONALLY so the world layout stays identical
+        // across graphics tiers (the count never varies by tier).
+        const a = rng() * Math.PI * 2, rr = 6 + rng() * span;
+        const cx = Math.cos(a) * rr, cz = Math.sin(a) * rr;
+        const baseY = (indoor ? 1.4 : 1.8) + rng() * (indoor ? 2.2 : 2.6);
+        const orbit = 1.2 + rng() * 2.4, spd = 0.25 + rng() * 0.5, ph = rng() * Math.PI * 2;
+        const node = new BABYLON.TransformNode("critter", scene);
+        node.position.set(cx, baseY, cz);
+        const ent = { node, cx, cz, rx: orbit, rz: orbit * (0.6 + rng() * 0.6), baseY, spd, ph,
+                      bobPh: rng() * Math.PI * 2 };
+        if (spec.critter === "firefly") {
+          const g = tinySphere(scene, "ffly", 0.16, critMat);
+          g.parent = node; g.isPickable = false; ent.mesh = g;
+        } else {
+          const b = tinySphere(scene, "bbody", 0.14, bodyMat);
+          b.parent = node; b.isPickable = false;
+          const wl = box(scene, "bwing", 0.36, 0.02, 0.26, wingMat); wl.parent = node;
+          wl.position.x = -0.18; wl.isPickable = false;
+          const wr = box(scene, "bwing", 0.36, 0.02, 0.26, wingMat); wr.parent = node;
+          wr.position.x = 0.18; wr.isPickable = false;
+          ent.wingL = wl; ent.wingR = wr;
+        }
+        critters.push(ent);
+      }
+    }
+
+    // ---- Drifting particle field (feature-detected; gated by the quality tier). ----
+    if (BABYLON.ParticleSystem) {
+      try {
+        const snow = spec.kind === "snow";
+        const cap = Math.max(20, Math.round(spec.rate * (snow ? 7 : 9) * dens));
+        const emitter = new BABYLON.TransformNode("ambEmit", scene);
+        emitter.position.set(0, indoor ? 7 : 13, 0);
+        ps = new BABYLON.ParticleSystem("ambient_" + zone.id, cap, scene);
+        const tex = particleTexture(scene); if (tex) ps.particleTexture = tex;
+        ps.emitter = emitter;
+        ps.minEmitBox = new BABYLON.Vector3(-span, indoor ? -3 : 0, -span);
+        ps.maxEmitBox = new BABYLON.Vector3(span, 1, span);
+        const col = BABYLON.Color3.FromHexString(spec.color);
+        ps.color1 = new BABYLON.Color4(col.r, col.g, col.b, snow ? 0.85 : 0.55);
+        ps.color2 = new BABYLON.Color4(col.r, col.g, col.b, snow ? 0.6 : 0.3);
+        ps.colorDead = new BABYLON.Color4(col.r, col.g, col.b, 0.0);
+        ps.minSize = snow ? 0.1 : 0.06; ps.maxSize = snow ? 0.24 : 0.16;
+        ps.minLifeTime = snow ? 5 : 6; ps.maxLifeTime = snow ? 8 : 11;
+        ps.emitRate = Math.round(spec.rate * dens);
+        if (snow) {
+          ps.gravity = new BABYLON.Vector3(0, -1.6, 0);     // gentle falling snow
+          ps.direction1 = new BABYLON.Vector3(-0.6, -1.2, -0.6);
+          ps.direction2 = new BABYLON.Vector3(0.6, -0.6, 0.6);
+          ps.minEmitPower = 0.4; ps.maxEmitPower = 1.0;
+        } else {
+          ps.gravity = new BABYLON.Vector3(0, spec.kind === "ember" ? 0.5 : -0.15, 0); // near-weightless drift
+          ps.direction1 = new BABYLON.Vector3(-0.4, spec.kind === "ember" ? 0.4 : -0.2, -0.4);
+          ps.direction2 = new BABYLON.Vector3(0.4, spec.kind === "ember" ? 0.9 : 0.2, 0.4);
+          ps.minEmitPower = 0.2; ps.maxEmitPower = 0.7;
+        }
+        if (BABYLON.ParticleSystem.BLENDMODE_STANDARD != null && !snow) {
+          ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE; // additive glow for motes/embers
+        }
+        ps.updateSpeed = 0.02;
+        ps.start();
+      } catch (e) { ps = null; }
+    }
+
+    return {
+      spec, critters, particles: ps ? [ps] : [],
+      // Drive critter motion off absolute clock time (frame-rate independent).
+      update(t) {
+        for (const c of critters) {
+          c.node.position.x = c.cx + Math.cos(t * c.spd + c.ph) * c.rx;
+          c.node.position.z = c.cz + Math.sin(t * c.spd * 0.85 + c.ph) * c.rz;
+          c.node.position.y = c.baseY + Math.sin(t * 1.6 + c.bobPh) * 0.5;
+          if (c.wingL) {                       // butterflies flap
+            const flap = Math.sin(t * 16 + c.ph) * 0.9;
+            c.wingL.rotation.z = flap; c.wingR.rotation.z = -flap;
+            c.node.rotation.y = Math.atan2(-Math.sin(t * c.spd + c.ph), Math.cos(t * c.spd * 0.85 + c.ph));
+          } else if (c.mesh) {                 // fireflies twinkle (per-mesh scale pulse)
+            const tw = 0.7 + (0.5 + 0.5 * Math.sin(t * 3 + c.ph)) * 0.6;
+            c.mesh.scaling.setAll(tw);
+          }
+        }
+      },
+      dispose() {
+        if (ps) { try { ps.stop(); } catch (e) {} try { ps.dispose(); } catch (e) {} }
+        if (ps && ps.emitter && ps.emitter.dispose) { try { ps.emitter.dispose(); } catch (e) {} }
+      },
+    };
   }
 
   // =========================================================================
@@ -7600,6 +7834,8 @@
       // ---- RPG world / zones ----
       ZONES, ZONE_BY_ID, HUB_ZONE, SpawnDirector, ZoneManager, buildWorld,
       setupZoneContent, teardownZone,
+      // ---- Animation (Task 5) ----
+      Swing, SWING_DUR, ambientSpecFor, buildAmbientFX, AMBIENT_SPECS,
       // ---- Lighting / shadows / quality tier (Task 4) ----
       Quality, makeSunShadows, setupPostFX, applyZoneMood,
       // ---- Higher-fidelity models / materials (Task 3) ----
