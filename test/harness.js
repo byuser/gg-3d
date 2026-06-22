@@ -139,7 +139,7 @@ const localStorage = (() => {
   };
 })();
 
-const sandbox = { BABYLON, document, window, localStorage, console, performance: { now: () => Date.now() }, setTimeout: () => 0, clearTimeout: () => {}, requestAnimationFrame: () => 0 };
+const sandbox = { BABYLON, document, window, localStorage, console, performance: { now: () => Date.now() }, setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {}, requestAnimationFrame: () => 0 };
 sandbox.global = sandbox;
 
 const code = fs.readFileSync(path.join(__dirname, "..", "js", "game.js"), "utf8");
@@ -1270,6 +1270,126 @@ ok(w32.ambient && typeof w32.ambient.update === "function" && typeof w32.ambient
    "buildWorld exposes the zone's ambient FX handle");
 let disposeErr = null; try { w32.dispose(); } catch (e) { disposeErr = e && e.message; }
 ok(!disposeErr, "disposing the world tears the ambient FX down without throwing");
+
+console.log("\n[33] audio — mixer buses/volumes/persistence, per-zone ambience, footsteps");
+const MX = T.Mixer, AMB = T.Ambience;
+// ---- Pure: footstep surface per zone (no device needed). ----
+ok(T.surfaceForZone("meadow") === "grass" && T.surfaceForZone("forest") === "grass" &&
+   T.surfaceForZone("thicket") === "grass", "grassy zones map to the grass footstep surface");
+ok(T.surfaceForZone("shore") === "sand" && T.surfaceForZone("peaks") === "snow" &&
+   T.surfaceForZone("caverns") === "stone", "shore→sand, peaks→snow, caverns→stone");
+ok(T.surfaceForZone("nowhere") === "grass", "an unknown zone falls back to a safe (grass) surface");
+
+// ---- Pure: every zone resolves a distinct ambience bed recipe. ----
+let bedOk = true; const beds = new Set();
+for (const z of T.ZONES) {
+  const r = AMB.bedFor(z.id);
+  if (!r || typeof r !== "object") bedOk = false; else beds.add(z.id);
+}
+ok(bedOk, "every zone resolves an ambience bed recipe");
+ok(AMB.bedFor("void") === AMB.bedFor("meadow"), "an unknown zone falls back to the meadow bed");
+ok(AMB.BEDS.shore.waves > 0 && AMB.BEDS.peaks.wind.howl === true && AMB.BEDS.caverns.drips > 0,
+   "beds carry distinct layers (shore waves, peak howl, cavern drips)");
+
+// ---- Pure: mixer volume clamping + channel validation. ----
+const savedVol = JSON.parse(JSON.stringify(MX.vol)), savedMuted = MX.muted;
+MX.setVolume("music", 2, false);   ok(MX.vol.music === 1, "setVolume clamps above-range to 1");
+MX.setVolume("music", -1, false);  ok(MX.vol.music === 0, "setVolume clamps below-range to 0");
+MX.setVolume("music", 0.5, false); ok(MX.vol.music === 0.5, "setVolume stores an in-range value");
+const beforeMaster = MX.vol.master; MX.setVolume("bogus", 0.1, false);
+ok(MX.vol.master === beforeMaster && MX.vol.bogus === undefined, "setVolume rejects an unknown channel");
+ok(MX.isChannel("ambience") && !MX.isChannel("nope"), "isChannel guards the four real channels");
+
+// ---- Persistence round-trip through (stubbed) localStorage — survives reload. ----
+const AUDIO_KEY_T = "gg3d_audio";   // mirrors AUDIO_KEY inside the IIFE
+localStorage.removeItem(AUDIO_KEY_T);
+MX.setVolume("master", 0.42, true); MX.setVolume("ambience", 0.13, true); MX.setMuted(true, true);
+ok(localStorage.getItem(AUDIO_KEY_T) !== null, "mixer settings persist to localStorage");
+// Simulate a reload: scramble in-memory state, then load() from storage.
+MX.vol.master = 1; MX.vol.ambience = 1; MX.muted = false; MX._loaded = false;
+MX.load();
+ok(Math.abs(MX.vol.master - 0.42) < 1e-9 && Math.abs(MX.vol.ambience - 0.13) < 1e-9 && MX.muted === true,
+   "persisted volumes + mute round-trip through load() (survive reload)");
+// Garbage in storage never crashes the boot.
+localStorage.setItem(AUDIO_KEY_T, "{not json"); MX._loaded = false; let loadThrew = false;
+try { MX.load(); } catch (e) { loadThrew = true; }
+ok(!loadThrew, "a corrupt audio setting is ignored without throwing");
+localStorage.removeItem(AUDIO_KEY_T);
+
+// ---- Headless: with no AudioContext the whole stack no-ops (the real harness). ----
+let noCtxThrew = false;
+try {
+  MX.ensure(); MX._apply(); MX.toggleMute(); MX.setVolume("sfx", 0.6, false);
+  AMB.start("meadow"); AMB.crossfadeTo("shore"); AMB.stop();
+  T.Footsteps.update({ state: "walk", walkPhase: 10 }, T.ZONE_BY_ID.meadow);
+  T.LowHealth.update(0.1, { health: 10, maxHealth: 100 });
+} catch (e) { noCtxThrew = true; }
+ok(!noCtxThrew && MX.ctx === null, "audio stack no-ops cleanly with no Web Audio context");
+
+// ---- With an injected Web Audio stub: the graph actually builds + crossfades. ----
+function fakeParam() {
+  return { value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {}, linearRampToValueAtTime() {}, setTargetAtTime() {}, cancelScheduledValues() {} };
+}
+function fakeNode(extra) {
+  return Object.assign({ connect() {}, disconnect() {}, start() {}, stop() {}, gain: fakeParam() }, extra || {});
+}
+function FakeAC() {
+  this.currentTime = 0; this.sampleRate = 44100; this.destination = {}; this.state = "running";
+  this.resume = () => {};
+  this.createGain = () => fakeNode();
+  this.createOscillator = () => fakeNode({ type: "sine", frequency: fakeParam() });
+  this.createBufferSource = () => fakeNode({ buffer: null, loop: false, playbackRate: fakeParam() });
+  this.createBiquadFilter = () => fakeNode({ type: "lowpass", frequency: fakeParam(), Q: fakeParam() });
+  this.createBuffer = (ch, len) => ({ getChannelData: () => new Float32Array(len) });
+}
+window.AudioContext = FakeAC;
+// Reset the lazily-built handles so ensure() rebuilds against the stub.
+MX.ctx = null; MX.master = null; MX.bus = { music: null, sfx: null, ambience: null };
+T.Sfx.ctx = null; T.Sfx.master = null; T.Sfx._noiseBuf = null;
+T.Music.ctx = null; T.Music.master = null; T.Music.timer = null; T.Music.started = false;
+AMB.ctx = null; AMB.bed = null; AMB._noiseBuf = null;
+
+let graphThrew = null;
+try {
+  ok(MX.ensure() === true, "Mixer.ensure() builds the audio graph against a real context");
+  ok(MX.bus.music && MX.bus.sfx && MX.bus.ambience && MX.master, "the master + three channel buses exist");
+  MX.setVolume("sfx", 0.7, false); MX.toggleMute(); MX.toggleMute();   // exercise _apply paths
+  // Every Sfx cue (old + the new Task-6 ones) fires without throwing now audio is live.
+  ["bolt", "melee", "boss_stomp",
+   "step_grass", "step_stone", "step_sand", "step_snow", "gather", "mine",
+   "quest_accept", "quest_turnin", "ui_click", "portal", "lowhp", "undefined_cue"]
+    .forEach((n) => T.Sfx.play(n));
+  T.Music.start(); T.Music.toggle(); T.Music.toggle();
+  // Build + crossfade an ambience bed through every zone, then stop — no clicks/throws.
+  AMB.start("meadow");
+  for (const z of T.ZONES) AMB.crossfadeTo(z.id);
+  AMB.stop();
+} catch (e) { graphThrew = e && e.message; }
+ok(!graphThrew, "Sfx / Music / Ambience build + run on a live context without throwing" + (graphThrew ? " — " + graphThrew : ""));
+const fxBed = (AMB.start("caverns"), AMB.bed);
+ok(fxBed && fxBed.gain && Array.isArray(fxBed.sources) && Array.isArray(fxBed.oscs),
+   "an ambience bed wires a fade gain + continuous layer nodes");
+// Wiring: travelling crossfades the live bed to the new zone's recipe.
+AMB.crossfadeTo("shore");
+ok(AMB.bed && AMB.bed.zoneId === "shore", "crossfadeTo() swaps the live bed to the destination zone");
+AMB.stop();
+// Wiring: a moving player emits a per-surface footstep cue in stride cadence.
+const played = []; const realPlay = T.Sfx.play.bind(T.Sfx);
+T.Sfx.play = (n) => { played.push(n); realPlay(n); };
+T.Footsteps._idx = 0;
+T.Footsteps.update({ state: "walk", walkPhase: 0.1 }, T.ZONE_BY_ID.peaks);        // plants foot 0
+T.Footsteps.update({ state: "walk", walkPhase: Math.PI + 0.1 }, T.ZONE_BY_ID.peaks); // next half-cycle → step
+ok(played.indexOf("step_snow") >= 0, "a walking player emits a stride-cadenced per-surface footstep (snow on the peaks)");
+played.length = 0;
+T.Footsteps.update({ state: "idle", walkPhase: Math.PI + 0.1 }, T.ZONE_BY_ID.peaks);
+ok(played.length === 0, "an idle player emits no footsteps");
+T.Sfx.play = realPlay;
+
+// Tear the stub back down so nothing leaks into a (hypothetical) later suite.
+delete window.AudioContext;
+MX.ctx = null; MX.master = null; MX.bus = { music: null, sfx: null, ambience: null };
+T.Sfx.ctx = null; T.Music.ctx = null; AMB.ctx = null; AMB.bed = null;
+MX.vol = savedVol; MX.muted = savedMuted; MX._loaded = false;
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED ✅" : failures + " CHECK(S) FAILED ❌"}`);
 process.exit(failures === 0 ? 0 : 1);
