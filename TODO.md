@@ -50,13 +50,21 @@ The repo-wide **Golden Rules** live in [`CLAUDE.md`](./CLAUDE.md) (auto-loaded b
 Claude Code) so they apply to every run from a single source of truth. **Read
 `CLAUDE.md` before starting any task.**
 
-In short: Babylon.js only (no rewrite, no build step, static on GitHub Pages);
-works on desktop + mobile without freezing; the headless tests
-(`node test/harness.js`) must stay green and **feature-detect** all browser-only
-APIs; additive single-file style; determinism + save/load round-trip;
-procedural-first perf/asset budget with disposal on zone teardown; bump `?v=`
-cache-busters; one task per run; i18n-aware; ask before large/irreversible
-ambiguity.
+In short: Babylon.js only (no rewrite; the **published** site stays static on
+GitHub Pages); works on desktop + mobile without freezing; the test suite
+(today `node test/harness.js`; the npm/Vitest/Playwright pipeline once Task 9
+lands) must stay green and **feature-detect** all browser-only APIs;
+additive style; determinism + save/load round-trip; procedural-first
+perf/asset budget with disposal on zone teardown; bump the cache-buster while it
+exists; one task per run; i18n-aware; ask before large/irreversible ambiguity.
+
+> **Task-level overrides.** A few backlog tasks deliberately **revise** specific
+> Golden Rules — e.g. **Task 9** replaces the single-file / no-build-step rules
+> with a module tree + a build step (whose output is still static on Pages), and
+> **Task 15** adds an opt-in external (Google Drive) dependency. Each such task
+> carries a **"Note on Golden Rules"**; for that task, its note **wins**, and
+> updating `CLAUDE.md` + this file to the new rule is part of the task. Until a
+> rule is revised, it holds as written.
 
 ---
 
@@ -66,23 +74,30 @@ A task is **done** only when **all** of these are true:
 
 - [ ] Feature fully implemented per the task's **Acceptance criteria** — no
       stubs, placeholders, dead code, or `TODO`s left behind.
-- [ ] `node -c js/game.js` is clean and `node test/harness.js` is **all green**.
-- [ ] **New automated tests** added to `test/harness.js` covering the feature's
-      logic (and any new save/load fields), plus a short note in the README
-      "Tests" blurb if a new suite was added.
+- [ ] The repo's **current verification pipeline is all green** — today
+      `node -c js/game.js` + `node test/harness.js`; once a build / lint /
+      typecheck / Vitest / Playwright pipeline lands (Task 9), every stage CI runs
+      must pass.
+- [ ] **New automated tests** added to the repo's test suite (`test/harness.js`
+      today; the Vitest + functional/E2E suites once Task 9 migrates them)
+      covering the feature's logic (and any new save/load fields), plus a short
+      note in the README "Tests" blurb if a new suite was added.
 - [ ] **No regressions** to existing systems: combat, gear/economy, quests,
       crafting, zones/travel, day‑night/weather, pause, and **save/load**.
 - [ ] Browser‑only APIs are **feature‑detected**; the headless harness still runs.
-- [ ] New persistent state is serialized/restored and round‑trips in a test.
-- [ ] `index.html` / `css/style.css` updated as needed and **`?v=` bumped**.
+- [ ] New persistent state is serialized/restored and round‑trips in a test
+      (bump `SAVE_VERSION` on a schema change; older saves still load).
+- [ ] `index.html` / `css/style.css` updated as needed and the **cache‑buster
+      bumped** (`?v=` while it exists; content hashing once a build replaces it).
 - [ ] `README.md` updated (relevant section + roadmap checkbox).
-- [ ] The **CI `Tests` run is green** (`.github/workflows/ci.yml` runs
-      `node -c` + the harness on every push/PR — never merge red).
+- [ ] The **CI run is green** (`.github/workflows/ci.yml` runs the verification
+      pipeline on every push/PR — never merge red).
 - [ ] Work committed in logical chunks; branch merged to `master`
       (fast‑forward) and pushed; the **GitHub Pages deploy run for your commit
       finished with `conclusion: success`** (check it; fix any errors).
 - [ ] This file updated: tick the task's checkbox, add the date and a one‑line
-      note; commit + push that too.
+      note, and add the release entry to the changelog (TODO.md §7, or
+      `CHANGELOG.md` once Task 8 moves it there); commit + push that too.
 - [ ] A short final report: what shipped, test results, deploy status, follow‑ups.
 
 > **Release‑ready means:** a player can load the Pages URL on desktop **and**
@@ -97,17 +112,21 @@ A task is **done** only when **all** of these are true:
 1. Read this file. Pick the task (the run prompt names it, or take the first
    `[ ]` task in [§ Recommended order](#5-recommended-order)).
 2. Briefly plan; skim the relevant systems in `js/game.js`.
-3. Implement on the dev branch **`claude/lucid-mayer-wtmqgq`** (create it if it
+3. Implement on the dev branch **named in the run instructions** (create it if it
    doesn't exist). Commit in logical chunks; end commit messages with the
    `Co-Authored-By` / `Claude-Session` trailers used in this repo's history.
-4. Verify continuously: `node -c js/game.js`, `node test/harness.js`, and a
-   feature‑specific smoke check (e.g. a tiny throwaway Node script that boots the
-   game with the harness stubs and exercises the new code path).
-5. Update `index.html`/`css` (+ `?v=`) and `README.md`.
-6. Merge to `master` (fast‑forward) and push with retry/backoff. Confirm the
-   `deploy-pages.yml` run for your commit is `success` via the GitHub Actions
-   API/tools; fix any failure.
-7. Tick the checkbox here, commit, push, and report.
+4. Verify continuously with the repo's **current** verification pipeline — run
+   whatever exists now (today: `node -c js/game.js` + `node test/harness.js`; once
+   a task adds npm scripts / a build / Vitest / Playwright, run those too, matching
+   CI) — plus a feature‑specific smoke check that exercises the new code path.
+5. Update `index.html`/`css` and `README.md` as needed; bump the `?v=`
+   cache‑buster while it exists (a content‑hashed build, once added, replaces it).
+6. Merge to `master` (fast‑forward) and push with retry/backoff. Confirm the CI
+   run **and** the `deploy-pages.yml` run for your commit are `success` via the
+   GitHub tools; fix any failure.
+7. Tick the task's checkbox here and add a release entry to the changelog
+   (TODO.md §7 today; `CHANGELOG.md` once Task 8 moves it there). Commit, push,
+   and report.
 
 ---
 
@@ -882,45 +901,59 @@ Paste this to start a run. Replace `<N>` with the task number, or write `next`.
 
 ```text
 Act as a senior gameplay engineer on "Good Game 3D" — a Babylon.js browser
-action-RPG in this repo, shipped as static files to GitHub Pages.
+action-RPG in this repo, shipped to GitHub Pages.
 
-FIRST, read CLAUDE.md and TODO.md in full.
+FIRST, read CLAUDE.md and TODO.md in full — including the task you're about to do
+AND its "Depends on" and any "Note on Golden Rules". Some tasks (e.g. Task 9's
+modularization/build step and Task 15's external Drive dependency) deliberately
+REVISE the default rules; when a task has a "Note on Golden Rules", that note WINS
+for that task, and part of the task is updating CLAUDE.md / TODO.md §1 to match.
 
 DO EXACTLY ONE TASK: Task <N>. (If I wrote "next", take the first task whose
 status is [ ] in TODO.md's "Recommended order".) Don't touch any other task or
-scope-creep.
+scope-creep. If the task has an unmet "Depends on", stop and tell me.
 
 Ship it RELEASE-READY and fully functional: a player can use it on desktop AND
 mobile with no errors, no console exceptions, no freezes, and saved progress
 survives reload. No stubs, placeholders, dead code, or leftover TODOs.
 
 Non-negotiables (full list in CLAUDE.md → Golden Rules; satisfy TODO.md §2
-Definition of Done):
-- Engine stays Babylon.js — no framework rewrite, no build step/bundler; stays a
-  static GitHub-Pages site.
+Definition of Done) — apply them all EXCEPT where this task's "Note on Golden
+Rules" overrides a specific one:
+- Engine stays Babylon.js; the PUBLISHED site stays static on GitHub Pages. A
+  build step / bundler is allowed only if a task introduces one — then deploy its
+  built output and keep Pages serving static files.
 - Works on desktop + mobile; never freeze the main thread (chunk heavy work; hide
   unavoidable hitches behind the existing zone-transition fade veil).
-- Keep the headless tests green AND add new tests for what you build:
-  `node -c js/game.js` and `node test/harness.js` must pass. Feature-detect every
-  browser-only API (Babylon / DOM / Web Audio / localStorage / PBR / particles)
-  so the Node harness still runs.
+- Keep ALL existing tests green AND add new tests for what you build. Run the
+  repo's CURRENT verification pipeline — whatever exists NOW: today that's
+  `node -c js/game.js` + `node test/harness.js`; once a task has added npm scripts
+  / a build / Vitest / Playwright (Task 9), run those too and match exactly what
+  CI runs. Feature-detect every browser-only API (Babylon / DOM / Web Audio /
+  localStorage / PBR / particles / external SDKs) so the headless tests still run.
 - All randomness via the seeded rng(); any new persistent state must serialize +
-  restore in serializeGame/applySave and round-trip in a test.
+  restore in serializeGame/applySave (bump SAVE_VERSION on a schema change and
+  keep older saves loading) and round-trip in a test.
 - No regressions to combat, gear, quests, zones/travel, day-night/weather, pause,
   or save/load.
 
 Workflow:
-1. Plan briefly, then implement on branch `claude/lucid-mayer-wtmqgq` (create if
-   missing); commit in logical chunks using this repo's commit-trailer convention.
-2. Verify locally: `node -c js/game.js`, `node test/harness.js` (all green), plus
-   a tiny feature-specific headless smoke check.
-3. Update index.html/css (bump the `?v=` cache-busters) and README.md as needed.
-4. Merge to `master` (fast-forward) and push. Then confirm BOTH the CI "Tests"
-   run AND the Pages deploy run for your commit finished conclusion=success — fix
-   anything until both are green. Do not open a pull request.
+1. Plan briefly, then implement on the branch NAMED IN MY RUN INSTRUCTIONS (create
+   it if missing); commit in logical chunks using this repo's commit-trailer
+   convention (Co-Authored-By + Claude-Session).
+2. Verify locally with the repo's current verify commands (see CLAUDE.md "Verify"
+   / package.json scripts / the CI workflow) until all green, plus a tiny
+   feature-specific smoke check that exercises the new code path.
+3. Update index.html/css and README.md as needed; bump the `?v=` cache-busters
+   while they still exist (a content-hashed build, once added, replaces them).
+4. Merge to `master` (fast-forward) and push with retry/backoff. Then confirm BOTH
+   the CI run AND the Pages deploy run for your commit finished
+   conclusion=success — fix anything until both are green. Do not open a pull
+   request unless I ask.
 5. Tick the task's checkbox in TODO.md (add the date + a one-line note) and add a
-   Changelog entry; commit + push.
-6. Report: what shipped, the test results, and the CI + deploy status.
+   release entry to the changelog — TODO.md §7 today, or CHANGELOG.md once Task 8
+   has moved it there; commit + push.
+6. Report: what shipped, the test/build results, and the CI + deploy status.
 
 If a decision is genuinely mine and cheap to confirm, pick the sensible default
 and note it; if it's expensive or irreversible, ask me first.
