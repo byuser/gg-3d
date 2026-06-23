@@ -24,6 +24,59 @@ delta it shipped with, since later tasks reference those.
 
 _Nothing pending._
 
+## [2026-06-23] — Task 12 — Deep item & equipment system with visible worn gear + a real inventory
+
+Took the gear layer from a flat 8-slot catalogue to a Skyrim-flavoured analog: a **12-slot**
+loadout, **enchantments**, **equipment sets**, **gear you can see on the character**, and a real
+**tabbed inventory** — all data-driven and pure-function-tested. **`SAVE_VERSION` → 7** (per-instance
+affix ids + four new slots); older saves load untouched (no affixes, new slots default empty).
+
+- **Widened loadout (8 → 12 slots).** Added **pauldrons · gloves · belt · cloak** alongside the
+  existing helmet/breastplate/boots/necklace/2 rings/2 hands. Each new armour `type` equals its
+  slot name, so `equipItem` routes by type with no special-casing; the paper-doll, anvil, save
+  schema and worn-gear all iterate `EQUIP_SLOTS`, so the widening flowed through one list.
+- **Enchantments (affixes).** A new `AFFIXES` table of prefix/suffix modifiers. Found + crafted
+  gear rolls `rollAffixes(def, rng)` — a **deterministic, seeded** draw from the affixes valid for
+  the item's category (weapon / armour / jewelry), **count by rarity** (normal 0 · rare 1 · epic 2 ·
+  legendary 3). The rolled ids ride on the instance (`inst.affixes`) and **serialize**, so a reload
+  reproduces them exactly (no re-roll). `effectiveStats` folds them in — additive stats **scale with
+  rarity**, `haste` compounds toward zero — and they surface as localized **chips** on every card,
+  slot and tooltip (a deliberate i18n-safe choice over splicing names, which can't agree in Russian).
+  Shop gear stays **clean** (no rng disturbance from browsing/buying); boss drops + crafts are
+  enchanted.
+- **Equipment sets.** `SETS` (**Ironguard** early/buyable, **Dragonscale** from boss loot) grant
+  cumulative stat bonuses at piece-count thresholds; `setBonusStats(equipment)` is pure and feeds the
+  live recompute, and an **active-set panel** in the inventory shows progress (e.g. *Dragonscale 4/6*)
+  with met/unmet bonus chips.
+- **One pure stat pipeline.** Refactored the recompute into a pure `deriveStats(base, equipment,
+  buffs)` (gear incl. enchant levels + affixes → set bonuses → buffs → weapon profile) shared by the
+  live `recomputeStats` **and** the inventory's **compare-vs-equipped** deltas (`equipDelta`, via
+  `equippedAfter` — a pure simulate of the equip rules: 2-handed fills both hands, dual-wield, ring
+  round-robin). So "what changes if I equip this?" is always exact, sets and all.
+- **Visible, animated worn gear.** Helmet, pauldrons, breastplate, gloves, belt, boots and a
+  billowing **cloak** are built **once** on Lily's procedural body and **toggled + recoloured by
+  rarity** on equip (`refreshWornGear`) — never reallocated, so equip/unequip **can't leak** —
+  parented to the body parts so they stride/swing for free, with the cloak getting a frame-rate-
+  smoothed billow that **freezes with the pause menu**. Tier-gated via `wornDetailFor(tier)` (the low
+  tier drops the lightest pieces + the per-frame sway). Fully feature-detected / headless-safe.
+- **Real tabbed inventory.** The bag became **Gear / Materials / Potions** tabs: gear with
+  **filter** (All / Weapons / Armour / Jewelry) + **sort** (Rarity / Type / Name), enchant chips and
+  the compare deltas; **materials** surfaced as stacks; **potions** quaffable straight from the bag.
+  The 12-slot paper-doll shows rarity colour + level + enchant chips and the live stat block + set
+  bonuses. (Materials/potions keep their canonical stores — crafting/quests/belt depend on them — and
+  are surfaced through the one inventory, so there's zero regression risk.)
+- **More gear.** New armour for the new slots across every rarity (Ironguard + Dragonscale set
+  pieces, Wings of Dawn, Stormforged/Titan pieces, Quickhand/Shadow gear, …), all localized EN/RU.
+
+Determinism + persistence hold: every roll goes through the seeded `rng()`, affixes + the full
+12-slot loadout **round-trip through save/load**, and a v6 file still loads. Pipeline green across
+**lint · typecheck · test · build · Playwright E2E**; a real-browser screenshot pass confirmed the
+gear renders + layers on the hero and the inventory reads correctly. Vitest: **32 → 53 test cases
+across 6 files** (new `test/items.test.js`, 21 cases: affix roll count/pool/determinism, the
+affix/rarity stat math + haste compounding, set thresholds + live folding, the widened slot rules +
+`equippedAfter` parity, compare deltas, worn-gear build/tier-gating/no-leak, the tabbed inventory
+filter/sort/consume, and the v7 round-trip + v6 migration). Content-hashed build — no `?v=` to bump.
+
 ## [2026-06-22] — Task 11 — Brighter, more cheerful art direction + a larger visible play area
 
 Re-graded the world out of its washed-out, faint look and **opened the view up**,

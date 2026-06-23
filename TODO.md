@@ -690,7 +690,16 @@ A task is **done** only when **all** of these are true:
   grade and view distance**, not modeling.
 
 ### Task 12 — Deep item & equipment system (Skyrim‑grade) with visible worn gear + a real inventory
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-23 · Widened the loadout to **12 slots** (added pauldrons/gloves/belt/cloak),
+  added **enchantments** (`AFFIXES` prefix/suffix rolled deterministically on found/crafted gear, rarity‑scaled,
+  serialized + shown as i18n chips) and **equipment sets** (`SETS` Ironguard + Dragonscale with cumulative
+  threshold bonuses). Refactored the recompute into a pure `deriveStats` shared by the live stats **and** the
+  inventory's **compare‑vs‑equipped** deltas (`equipDelta`/`equippedAfter`). **Visible worn gear** — helmet,
+  pauldrons, chest, gloves, belt, boots + a billowing cloak — built once on Lily and toggled/recoloured by
+  rarity on equip (no leak), tier‑gated (`wornDetailFor`). Rebuilt the bag into a **tabbed inventory**
+  (Gear/Materials/Potions) with filter+sort, set‑bonus panel and drink‑from‑bag potions. `SAVE_VERSION` → 7
+  (per‑instance affixes + new slots; v6 saves still load). New `test/items.test.js` (21 cases; Vitest 32 → 53).
+  Full pipeline green; real‑browser screenshot pass confirmed the gear + inventory.
 - **Depends on:** none; pairs naturally with **Task 14** (skills/levels share the
   stat‑recompute pipeline) — keep the data layer compatible.
 - **Goal.** Research how large RPGs (Skyrim/The Elder Scrolls, Diablo‑likes)

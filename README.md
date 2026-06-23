@@ -339,7 +339,17 @@ thins it, low keeps it tight) while indoor lairs stay moodier, the **draw distan
 (`maxZ`) is **tier-ordered**, per-zone **exposure/contrast** stay in a readable ACES
 range, gameplay-critical **markers/enemies remain perceptually distinct** from each
 brightened ground, and **`buildWorld` applies the graded fog** on every tier without
-throwing. On top of that, a
+throwing, and the **item & equipment** suite (`test/items.test.js`) that locks in
+Task 12: the **affix roll** (right count per rarity, drawn only from the item's
+category pool, **deterministic** under a seed), the **affix/rarity stat math**
+(rarity-scaled, flat over enhancement; **haste compounds**), the **equipment sets**
+(cumulative threshold bonuses, folded into the live recompute), the widened **12-slot**
+loadout + **equip rules** (`equippedAfter` mirrors `equipItem` for 2-handed / dual-wield /
+rings), the **compare-vs-equipped deltas**, the **visible worn gear** (core silhouette +
+high-tier extras, **tier-gated**, toggled with **no mesh reallocation** across
+equip/unequip), the **tabbed inventory** (filter / sort / potion consume), and the **v7
+save round-trip** of affixes + the new slots **plus migration** from an older (v6) file.
+On top of that, a
 **functional** suite (`test/functional.test.js`) boots the assembled game in
 isolation and drives whole flows (start → zone travel → save/reload round-trip),
 and a **Playwright** suite (`test/e2e/boot.spec.js`) loads the built bundle in
@@ -365,11 +375,44 @@ additive, not a rewrite (pure content tables live in `src/data/`, foundations in
 - **`Player`** — Lily, built from primitives with a procedural walk cycle, a swappable
   held weapon (wand / bow / blade), melee + ranged attacks, health, and a derived stat
   block computed from her gear.
-- **`ITEM_DB` / equipment / `recomputeStats`** — the item catalogue (weapons, armour,
-  accessories; normal + rare), the slot model (helmet/breastplate/boots/necklace/2 rings/
-  2 hands), and the function that recomputes the player's stats from what's equipped.
-- **`Inventory` / `Shop`** — the bag-and-paper-doll inventory UI (equip/unequip, live
-  stats) and the merchant's **Buy/Sell** shop (normal stock only; rare gear is boss-only).
+- **`ITEM_DB` / `AFFIXES` / `SETS` / equipment / `deriveStats`** — the item catalogue
+  (weapons, armour, accessories; **rarity tiers** common → rare → epic → legendary), the
+  **12-slot** model (helmet/pauldrons/breastplate/gloves/belt/boots/cloak/necklace/2 rings/
+  2 hands), the enchantment + set tables, and the **pure** stat pipeline that recomputes the
+  player from what's equipped. See the **item & equipment model** below.
+- **`Inventory` / `Shop`** — the **tabbed** bag-and-paper-doll inventory UI (Gear / Materials /
+  Potions; equip/unequip, filter/sort, **compare-vs-equipped** deltas, drink potions, live
+  stats + set bonuses) and the merchant's **Buy/Sell** shop (normal stock only; rare gear is boss-only).
+
+#### Item & equipment model (Task 12)
+
+A small, declarative, **data-driven** model in `src/data/items.js`, with pure helpers so the
+whole thing is unit-testable without a GPU:
+
+- **Categories & slots.** Each item is a _weapon_, _armour_ or _jewelry_ (`itemCategory`). The
+  loadout is **12 slots** — every armour `type` equals its slot name, so `equipItem` routes by
+  type; a 2-handed weapon fills both hands (`TWO_HANDED` sentinel); rings round-robin.
+- **Rarity tiers.** `RARITY` common → rare → epic → legendary scales base stats, affix count and
+  affix magnitude, and how far the blacksmith can `enhance` an item.
+- **Enchantments (affixes).** `AFFIXES` are prefix/suffix modifiers. Found/crafted gear rolls
+  `rollAffixes(def, rng)` — a deterministic, seeded draw from the affixes valid for the item's
+  category, **count by rarity** (rare 1 · epic 2 · legendary 3). The rolled ids live on the
+  instance (`inst.affixes`) and **serialize**, so a reload never re-rolls. `effectiveStats` folds
+  them in (rarity-scaled additive stats; haste compounds). Shop gear stays clean.
+- **Set bonuses.** `SETS` (Ironguard, Dragonscale) grant cumulative stat bonuses at piece-count
+  thresholds; `setBonusStats(equipment)` is pure and feeds the live recompute.
+- **Derived stats.** `deriveStats(base, equipment, buffs)` is the one pure function the live
+  `recomputeStats` _and_ the inventory's `equipDelta` compare tooltips share (the latter via
+  `equippedAfter`, a pure simulate of the equip rules) — so "what changes if I equip this?" is
+  always exact.
+- **Worn gear.** Procedural meshes are built **once** on Lily and toggled/recoloured by rarity on
+  equip (`refreshWornGear`) — never reallocated, so it can't leak — parented to the body so it
+  animates for free, with a tier-gated billowing cloak. `wornDetailFor(tier)` drops the lightest
+  pieces + the per-frame sway on low-end devices.
+- **Persistence.** `SAVE_VERSION` 7 stores `{ id, lvl, aff }` per instance across the bag + all 12
+  slots; older saves (no affixes / no new slots) load with clean defaults.
+- **Value / weight.** Items carry a coin **value** (resale, scaled by enhancement); **weight /
+  encumbrance** was considered and deferred (noted as a follow-up — no durability/repair economy).
 - **`Projectile` / `Hazard`** — gravity-bound, life-capped ballistic projectiles. The
   player's bolts/arrows (`Projectile`) and the bosses' hostile candy bolts (`Hazard`)
   both arc under gravity and die on ground/timeout, so nothing flies forever.
@@ -501,8 +544,8 @@ Source: GitHub Actions**.
 - [x] Collect artifacts for score
 - [x] Weapons (wand / bow / staff / sword / axe / dagger) with ranged + melee combat
 - [x] Gravity-bound projectiles (arcing arrows/bolts) that never fly forever
-- [x] Gear system: armour (helmet/breastplate/boots), accessories (2 rings + necklace)
-- [x] Inventory + equipment (two hands; dual-wield or a two-handed weapon) with live stats
+- [x] Gear system: a **12-slot** loadout — armour (helmet/pauldrons/breastplate/gloves/belt/boots/cloak), accessories (2 rings + necklace), 2 hands — with **affixes** + **set bonuses**
+- [x] Inventory + equipment (two hands; dual-wield or a two-handed weapon) with live stats, a **tabbed** bag (Gear/Materials/Potions), filter/sort, compare deltas & **visible worn gear**
 - [x] Normal gear bought from the merchant; rare gear dropped by bosses; sell anything back
 - [x] 12 "living sweet" enemy types (now per-land roaming residents — _superseded the timed waves_)
 - [x] Live monster counter (now "monsters roaming this land")
@@ -574,4 +617,13 @@ Source: GitHub Actions**.
       and the camera **draw distance** (`maxZ`) widens to match — **tier-gated** so
       phones keep a tight, atmospheric radius while desktops open right up — with
       per-zone moods + marker readability preserved and a new `test/artdirection.test.js` suite
+- [x] **Deep item & equipment system** — a **12-slot** loadout (helmet · pauldrons ·
+      breastplate · gloves · belt · boots · cloak · necklace · 2 rings · 2 hands), **enchantments**
+      (prefix/suffix **affixes** rolled deterministically on found/crafted gear, rarity-scaled,
+      shown as chips), **equipment sets** (Ironguard, Dragonscale) with cumulative threshold
+      **set bonuses**, **visible worn gear** rendered on Lily — recoloured by rarity, animated with
+      the body + a billowing **cloak**, tier-gated, swapped on equip with **no leaks** — and a real
+      **tabbed inventory** (Gear / Materials / Potions) with **filter + sort**, **compare-vs-equipped**
+      deltas and drink-from-bag potions; the full loadout (affixes + new slots) **round-trips through
+      save/load** (v7, older saves still load) — `test/items.test.js`
 - [ ] Puzzles (levers, plates, gated doors)

@@ -25,8 +25,9 @@ src/
 │                      runtime, so the layer stays acyclic.
 │
 ├── data/              Pure, self-contained data tables (no runtime/DOM refs):
-│   ├── items.js       RARITY/ENHANCE, ITEM_DB, equip slots + pure stat helpers
-│   │                  (effectiveStats, enhance*), derived shop/drop pools.
+│   ├── items.js       RARITY/ENHANCE, ITEM_DB, the 12 equip slots, AFFIXES + SETS,
+│   │                  and pure stat helpers (effectiveStats, rollAffixes,
+│   │                  setBonusStats, activeSets, enhance*) + derived shop/drop pools.
 │   ├── content.js     Crafting materials, resource kinds, relics, castle parts,
 │   │                  recipes, monster abilities, world locations + story NPCs.
 │   ├── story.js       The declarative campaign: STORY chapters, ordered MISSIONS,
