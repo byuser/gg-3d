@@ -245,6 +245,39 @@ runs in English without a browser.
   tallies), the **castle build state**, cleared **lair bosses**, and the **time/weather**. Back on
   the **start screen**, **Load Progress** reads a save file from your device and drops you right
   back where you left off — even on a different device or browser.
+- **Cloud saves (optional):** if the game has been configured with a Google OAuth client id (see
+  [Cloud saves](#cloud-saves-optional-google-drive) below), you can **Sign in with Google** from the
+  start screen or pause settings and back your progress up to your **own private Google Drive** — a
+  manual **Save to Drive**, an **autosave every 5 minutes** that keeps a **rolling one-hour history**,
+  and a **browse-and-restore** list. It's fully opt-in: signed out (or if it isn't configured) the
+  local `.json` save above is all you need, and nothing changes.
+
+## Cloud saves (optional, Google Drive)
+
+Cloud saves are an **opt-in** extra that lets a player back their progress up to **their own**
+Google Drive — never a server we run. Saves are written to Drive's private **`appDataFolder`** (the
+`drive.appdata` scope only), a hidden per-app folder that's invisible to other apps and adds no Drive
+clutter. The game stores one **manual** slot plus an **autosave every 5 minutes**, keeping a rolling
+**one-hour history** (up to ~12 timestamped autosaves, oldest pruned automatically, the newest always
+kept). Cloud saves use the **exact same JSON** as the local file save, so versioning and migration
+behave identically.
+
+The feature ships **disabled** and only turns on when you supply a Google OAuth **client id**:
+
+1. In the [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the
+   **Google Drive API**.
+2. Configure the **OAuth consent screen** and add the **`.../auth/drive.appdata`** scope.
+3. Create an **OAuth 2.0 Client ID** of type **Web application**, and add your site's origin (e.g.
+   `https://<user>.github.io`) to the **Authorized JavaScript origins**.
+4. Put the client id into `index.html`'s `<meta name="gg-google-client-id" content="…">` tag (or set
+   `window.GG_GOOGLE_CLIENT_ID` before the game loads). **Never commit a client *secret*** — only the
+   public client id is needed for this browser-only OAuth flow.
+
+With no client id configured, the **Cloud Saves** panel shows a short "needs a client id" note and the
+controls stay disabled — the game is otherwise unchanged, and the local save keeps working. Signed out,
+offline, or in the headless test harness, the feature is cleanly disabled and **never throws or blocks**.
+The Google Identity Services script is loaded **on demand** only after you choose to sign in, so the
+published site stays 100% static files.
 
 ## Why Babylon.js?
 
@@ -372,7 +405,16 @@ runtime **waypoint resolution** (same-zone bearing vs cross-zone next-portal),
 **set / clear / arrival** auto-clearing, **fog-of-war** discovery on travel, the
 headless-safe **overlay + minimap** (open / search / select / guide / close), and
 the **v9 save round-trip** of discovered lands + the active waypoint **plus
-migration** from an older (v8) file.
+migration** from an older (v8) file,
+and the **cloud-saves** suite (`test/cloudsave.test.js`) that locks in Task 15:
+the pure **autosave scheduler** (5-min cadence, pause-when-hidden, debounce), the
+**rolling one-hour retention/pruning** (age + slot cap + keep-newest), the
+**newer-of reconcile**, the sortable autosave **file naming**, the **injectable**
+Drive client driving the **manual save / autosave / prune / browse / restore**
+flows against an in-memory stub, **local↔cloud payload parity** (byte-identical to
+a local serialize, round-trips through `applySave`), and the **unconfigured /
+headless** path staying cleanly disabled (no throws). It needs **no save-schema
+change** (`SAVE_VERSION` stays 9).
 On top of that, a
 **functional** suite (`test/functional.test.js`) boots the assembled game in
 isolation and drives whole flows (start → zone travel → save/reload round-trip),
@@ -539,6 +581,14 @@ is fully testable headless:
   re-seed, restore the player (pose + **inventory & equipment**, materials, relics), score,
   money, quests, castle, cleared lairs and time/weather, then **stream to the saved zone**
   (its monsters regenerate from the spawn table). Stats are recomputed from the restored gear.
+- **`CloudSave` / `CloudUI`** — **opt-in** Google Drive cloud saves (Task 15) wrapping the same
+  `serializeGame` / `applySave` JSON: a manual **Save to Drive** slot, a 5-minute **autosave** with a
+  rolling one-hour history, and a browse-and-restore overlay, all written to the player's private Drive
+  **`appDataFolder`**. Pure policy (`cloudAutosaveDue` / `cloudPrune` / `cloudNewer`) plus an
+  **injectable** Drive client (`makeGoogleDriveClient`, loading Google Identity Services on demand);
+  every browser API is feature-detected so signed-out / offline / unconfigured / headless is cleanly
+  disabled and never throws. The autosave-on preference persists in `localStorage`; no save-schema
+  change. See [Cloud saves](#cloud-saves-optional-google-drive).
 - **`Pause`** — the in-game pause menu (Resume / Save / Restart / Exit) that freezes the
   simulation, with a confirmation guard on the destructive actions.
 - **`STORY` / `MISSIONS` / `SIDE_QUESTS` / `Story`** — the **structured main campaign**: a
@@ -729,4 +779,12 @@ Source: GitHub Actions**.
       **clears on arrival**; discovered lands + the active waypoint **round-trip through save/load**
       (v9, older saves still load) — pure helpers in `src/data/worldmap.js`, covered by
       `test/worldmap.test.js`
+- [x] **Cloud saves to Google Drive (opt-in)** — sign in with Google to back progress up to your own
+      private Drive **`appDataFolder`**: a **manual** "Save to Drive", an **autosave every 5 minutes**
+      that keeps a **rolling one-hour history** (≤ 12 timestamped slots, oldest pruned, newest always
+      kept), and a **browse-and-restore** list — all reusing the **same JSON** as the local save (no
+      schema change). Fully opt-in and graceful: signed out / offline / unconfigured / headless it's
+      cleanly disabled and the local save still works. Pure policy + an **injectable** Drive client in
+      `src/game.js` (`CloudSave`), covered by `test/cloudsave.test.js`. See
+      [Cloud saves](#cloud-saves-optional-google-drive) for setup.
 - [ ] Puzzles (levers, plates, gated doors)

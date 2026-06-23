@@ -32,8 +32,10 @@ Architecture quick-map (which module to grep): `CONFIG`/`rng`/`setSeed`
 runtime — `Player`, `Monster`, `Boss`, `Dragon`, `buildWorld`, `SpawnDirector`,
 `ZoneManager`, `teardownZone`, `DayNight`, `Weather`, `Skills`/`SkillsUI`,
 `WorldMap`/`WorldMapUI` (minimap, world map + guided waypoint),
-`Sfx`/`Music`, `QUEST_BY_ID`, the `dom` map, `serializeGame`/`applySave`, and the
-test seam `window.__GG_TEST__` — in `src/game.js`.
+`Sfx`/`Music`, `QUEST_BY_ID`, the `dom` map, `serializeGame`/`applySave`, the
+opt-in Google Drive cloud saves `CloudSave`/`CloudUI` (`makeGoogleDriveClient` +
+the pure `cloudAutosaveDue`/`cloudPrune`/`cloudNewer` policy), and the test seam
+`window.__GG_TEST__` — in `src/game.js`.
 
 ## Golden rules (apply to EVERY change)
 
@@ -43,7 +45,13 @@ test seam `window.__GG_TEST__` — in `src/game.js`.
    the **published** site is the built, content-hashed **static** bundle in
    `dist/` — GitHub Pages still serves only static files. `npm` deps are
    **dev-only** (build/test/lint); nothing is shipped to the player but the
-   bundle + the CDN Babylon.
+   bundle + the CDN Babylon. **Opt-in external services are allowed** when they
+   stay opt-in, **degrade gracefully** (offline / signed-out / headless never
+   throws or blocks), load any client SDK from the provider's CDN (so the site
+   stays static), and read credentials from config (never commit secrets). Task
+   15 added exactly one: **Google Drive cloud saves** (the GIS script loads on
+   demand only after the player opts in; with no OAuth client id configured the
+   feature is cleanly disabled and the local file save still works).
 2. **Runs everywhere.** Must work on **desktop and mobile browsers**. Prefer
    **WebGL** with graceful fallbacks (if you use WebGPU, keep an automatic WebGL
    fallback). Never **freeze** the main thread — chunk heavy work and hide

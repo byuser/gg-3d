@@ -65,11 +65,15 @@ task per run; i18n-aware; ask before large/irreversible ambiguity.
 > Golden Rules. **Task 9 has landed** and already replaced the single-file /
 > no-build-step rules (Golden Rules 1 & 4) with the module tree + Vite build
 > above (output still static on Pages) and the layered Vitest/Playwright pipeline
-> (Rule 3); `CLAUDE.md` + this file are updated to match. **Task 15** still adds
-> an opt-in external (Google Drive) dependency. Each such task carries a **"Note
-> on Golden Rules"**; for that task, its note **wins**, and updating `CLAUDE.md` +
-> this file to the new rule is part of the task. Until a rule is revised, it
-> holds as written.
+> (Rule 3); `CLAUDE.md` + this file are updated to match. **Task 15 has landed**
+> and added one **opt-in external (Google Drive) dependency**: cloud saves that
+> stay opt-in and **degrade gracefully** (offline / signed-out / headless never
+> throws or blocks), load the Google Identity Services SDK from Google's CDN on
+> demand, and read the OAuth client id from config — so the published site stays
+> 100% static. Golden Rule 1 in `CLAUDE.md` is updated to allow such opt-in
+> services. Each such task carries a **"Note on Golden Rules"**; for that task,
+> its note **wins**, and updating `CLAUDE.md` + this file to the new rule is part
+> of the task. Until a rule is revised, it holds as written.
 
 ---
 
@@ -876,7 +880,20 @@ A task is **done** only when **all** of these are true:
   Rule 9); make fusion a pure function of input attributes so it's fully testable.
 
 ### Task 15 — Cloud saves to Google Drive (manual + 5‑min autosave via `appDataFolder`, rolling 1‑hour history)
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-23 · Shipped opt‑in **Google Drive cloud saves** that reuse the exact
+  `serializeGame()`/`applySave()` JSON (no schema change): GIS OAuth (drive.appdata scope, SDK loaded
+  on demand) behind a sign‑in toggle on the start screen + pause settings, a **"Save to Drive"** manual
+  slot, an **autosave every 5 min** (render‑loop tick, wall‑clock gated, paused while the tab is hidden,
+  debounced, never blocks the thread) keeping a **rolling 1‑hour history** (≤ 12 timestamped slots,
+  newest always kept), and a browse‑and‑**restore** overlay that reloads through the same boot path as
+  the local file load (reconciling so a cloud save never silently clobbers newer in‑progress work). The
+  Drive client is **injectable** (`CloudSave._setClient`) and every browser API is feature‑detected, so
+  with no OAuth client id, no `fetch`, offline, or headless the feature is cleanly disabled and the local
+  save still works — nothing throws. Pure policy (`cloudAutosaveDue`/`cloudPrune`/`cloudNewer`/auto‑name)
+  + the injected‑client flows + local↔cloud payload parity are covered by a new `test/cloudsave.test.js`
+  (25 cases; Vitest 100 → 125) plus an E2E panel smoke. The autosave‑on preference persists to
+  `localStorage` (like locale/graphics/audio); `SAVE_VERSION` untouched at 9. Golden Rule 1 (CLAUDE.md +
+  §1) updated to allow such opt‑in external services.
 - **Depends on:** the existing `serializeGame`/`applySave` + `SAVE_VERSION`; do it
   **after** any task that changes the save schema (so the cloud format is stable).
 - **Note on Golden Rules:** this adds an **external network dependency** and OAuth.

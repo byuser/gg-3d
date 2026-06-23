@@ -24,6 +24,43 @@ delta it shipped with, since later tasks reference those.
 
 _Nothing pending._
 
+## [2026-06-23] — Task 15 — Cloud saves to Google Drive (manual + 5-min autosave, rolling 1-hour history)
+
+Added an **opt-in** way to back progress up to the player's own Google Drive, reusing the **exact**
+`serializeGame()`/`applySave()` JSON the local file save uses — so save **versioning and migration just
+work** and there is **no schema change** (`SAVE_VERSION` stays **9**). Everything degrades gracefully:
+signed-out, offline, with no OAuth client id configured, or headless, the feature is cleanly disabled
+and the local save still works — nothing throws and nothing blocks the main thread. Vitest **100 → 125**
+(new `test/cloudsave.test.js`, 25 cases); the Playwright smoke asserts the cloud panel is present and
+cleanly disabled by default.
+
+- **Private `appDataFolder` storage.** Saves live in the player's hidden Drive **app-data folder**
+  (the `drive.appdata` OAuth scope only — invisible to other apps, no Drive clutter). A single
+  **manual** slot (`gg3d-save.json`, overwritten by "Save to Drive") plus timestamped **autosave**
+  files (`gg3d-auto-<epochMs>.json`).
+- **Autosave every 5 minutes.** A cheap, **wall-clock-gated** render-loop tick (`CloudSave.tick`) fires
+  an autosave when due — **paused while the tab is hidden/idle**, **debounced** against an in-flight
+  write, and **never blocking** (the upload is async; the serialize is trivial). Keeps a **rolling
+  one-hour history** (≤ **12** timestamped slots, pruned after each write; the **single newest is always
+  kept** so a long break never loses the last checkpoint).
+- **Browse & restore.** A cloud-saves overlay lists the manual slot + the retained autosaves
+  (newest-first) and restores any of them through the **same boot path** the local file load uses
+  (stash → reload → re-seed → `applySave`). Loading **reconciles** so a cloud save never silently
+  clobbers newer in-progress work.
+- **Pure, tested policy.** `cloudAutosaveDue` (cadence / hidden / debounce), `cloudPrune` (age + slot
+  cap + keep-newest retention), `cloudNewer` (reconcile by `savedAt`), and the autosave file
+  naming/parsing are all **pure functions** with direct unit tests.
+- **Injectable, feature-detected I/O.** The production client (`makeGoogleDriveClient`) loads the tiny
+  **Google Identity Services** script on demand at first sign-in and talks to the **Drive REST API** via
+  plain `fetch` (no heavy gapi client — the site stays static). The client is **injectable**
+  (`CloudSave._setClient`) so the whole flow is exercised against an in-memory stub with no network.
+- **Config & privacy.** The OAuth **client id** is read from a `<meta name="gg-google-client-id">` tag
+  (or `window.GG_GOOGLE_CLIENT_ID`) — **never a committed secret**; empty by default ⇒ cloud saves
+  ship disabled. The autosave-on preference persists to `localStorage` (like locale / graphics / audio),
+  not into the save file. New **EN + RU** strings for the whole panel. Golden Rule 1 (CLAUDE.md + TODO
+  §1) updated to allow such opt-in external services. README gained a **Cloud saves** setup + privacy
+  section.
+
 ## [2026-06-23] — Task 13 — Minimap + full world map with locations, NPCs, search & a guided waypoint
 
 Added the navigation layer large open-world RPGs lean on: a live **corner minimap**, a
