@@ -4,6 +4,7 @@
 // systems (tWeatherLabel -> Weather, bossDisplayName -> boss archetypes) live
 // in the runtime module instead, to keep this layer dependency-acyclic.
 import { RARITY, SLOT_META, getDef, AFFIXES, SETS } from "../data/items.js";
+import { ELEMENTS, EFFECTS } from "../data/skills.js";
 import {
   MATERIALS, RESOURCE_KINDS, RELICS, CASTLE_PART_BY_ID, LOCATION_BY_ID, NPC_BY_ID,
 } from "../data/content.js";
@@ -321,6 +322,53 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "log.sideFrom": "from {icon} {name}{ret} · reward {reward}",
       "log.sideReturn": " · return to turn in",
       "log.sideCompleted": "Completed side quests",
+      // ---- skills, leveling & fusion (Task 14) ----
+      "ctrl.skills": "Skills", "ctrl.skillsKeys": "1 / 2 / 3 · or tap a quick-bar slot",
+      "btnTitle.skills": "Skills (K)", "btnAria.skills": "Open skills",
+      "hud.levelBadge": "Lv {level}",
+      "hud.focusLabel": "Focus",
+      "skills.title": "✨ Skills &amp; Fusion",
+      "skills.tagline": "Learn skills as you level, <b>fuse up to three</b> into a new one, and slot three on your quick bar.",
+      "skills.done": "Done",
+      "skills.level": "Level {level}",
+      "skills.xp": "{xp} / {next} XP",
+      "skills.focus": "Focus {focus} / {max}",
+      "skills.owned": "Your Skills",
+      "skills.none": "No skills yet — defeat foes and level up to learn your first.",
+      "skills.toolbar": "Quick Bar (1 · 2 · 3)",
+      "skills.slotEmpty": "Empty",
+      "skills.fusion": "Skill Fusion",
+      "skills.fuseHint": "Select 2–3 skills to forge a new fused skill.",
+      "skills.fuseBtn": "🌀 Fuse",
+      "skills.fuseCost": "Cost: 🪙 {coins} · 🔮 {crystal}",
+      "skills.fuseResult": "Result: <b>{name}</b>",
+      "skills.fuseNeedMore": "Select {n} more…",
+      "skills.assignTitle": "Assign to a quick-bar slot",
+      "skills.assignSlot": "→ {n}",
+      "skills.clear": "Clear",
+      "skills.fuseTag": "fuse",
+      "skills.srcBase": "Leveled",
+      "skills.srcBoss": "Boss loot",
+      "skills.srcFused": "Fused",
+      "skills.lockHint": "🔒 Reach level {level}",
+      "skills.statPower": "⚔ {power}",
+      "skills.statCost": "🔵 {cost}",
+      "skills.statCooldown": "⏱ {s}s",
+      "skills.statAoe": "◎ {radius}",
+      "skills.statHeal": "💚 {power}",
+      "skills.statBuff": "⏳ {s}s",
+      "skills.fusedName": "{effect} · {element}",
+      "skills.fusedDesc": "A fused {element} skill, blended from {n} skills.",
+      "toast.levelUp": "⭐ Level {level}! +{hp} max health, +{focus} focus.",
+      "toast.skillLearned": "✨ Learned {name}!",
+      "toast.bossSkill": "📖 A rare skill drops: {name}!",
+      "toast.skillFused": "🌀 Fused a new skill: {name}!",
+      "toast.fuseNeed": "Need 🪙 {coins} and 🔮 {crystal} to fuse.",
+      "toast.fuseSelect": "Select 2–3 skills to fuse.",
+      "toast.noFocus": "Not enough focus.",
+      "toast.skillCooling": "Recharging…",
+      "toast.skillEmpty": "No skill slotted there.",
+      "toast.slotAssigned": "Slotted {name}.",
     },
     ru: {
       // ---- boot / start screen ----
@@ -603,6 +651,53 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "log.sideFrom": "от {icon} {name}{ret} · награда {reward}",
       "log.sideReturn": " · вернитесь, чтобы сдать",
       "log.sideCompleted": "Выполненные побочные задания",
+      // ---- skills, leveling & fusion (Task 14) ----
+      "ctrl.skills": "Навыки", "ctrl.skillsKeys": "1 / 2 / 3 · или коснитесь ячейки панели",
+      "btnTitle.skills": "Навыки (K)", "btnAria.skills": "Открыть навыки",
+      "hud.levelBadge": "Ур. {level}",
+      "hud.focusLabel": "Фокус",
+      "skills.title": "✨ Навыки и слияние",
+      "skills.tagline": "Изучайте навыки с ростом уровня, <b>сливайте до трёх</b> в новый и ставьте три на панель быстрого доступа.",
+      "skills.done": "Готово",
+      "skills.level": "Уровень {level}",
+      "skills.xp": "{xp} / {next} опыта",
+      "skills.focus": "Фокус {focus} / {max}",
+      "skills.owned": "Ваши навыки",
+      "skills.none": "Навыков пока нет — побеждайте врагов и повышайте уровень, чтобы изучить первый.",
+      "skills.toolbar": "Панель (1 · 2 · 3)",
+      "skills.slotEmpty": "Пусто",
+      "skills.fusion": "Слияние навыков",
+      "skills.fuseHint": "Выберите 2–3 навыка, чтобы создать новый слитый навык.",
+      "skills.fuseBtn": "🌀 Слить",
+      "skills.fuseCost": "Цена: 🪙 {coins} · 🔮 {crystal}",
+      "skills.fuseResult": "Итог: <b>{name}</b>",
+      "skills.fuseNeedMore": "Выберите ещё {n}…",
+      "skills.assignTitle": "Назначить в ячейку панели",
+      "skills.assignSlot": "→ {n}",
+      "skills.clear": "Очистить",
+      "skills.fuseTag": "слить",
+      "skills.srcBase": "За уровень",
+      "skills.srcBoss": "С босса",
+      "skills.srcFused": "Слитый",
+      "skills.lockHint": "🔒 Нужен уровень {level}",
+      "skills.statPower": "⚔ {power}",
+      "skills.statCost": "🔵 {cost}",
+      "skills.statCooldown": "⏱ {s}с",
+      "skills.statAoe": "◎ {radius}",
+      "skills.statHeal": "💚 {power}",
+      "skills.statBuff": "⏳ {s}с",
+      "skills.fusedName": "{effect} · {element}",
+      "skills.fusedDesc": "Слитый навык школы «{element}», созданный из {n} навыков.",
+      "toast.levelUp": "⭐ Уровень {level}! +{hp} к макс. здоровью, +{focus} фокуса.",
+      "toast.skillLearned": "✨ Изучен навык: {name}!",
+      "toast.bossSkill": "📖 Выпал редкий навык: {name}!",
+      "toast.skillFused": "🌀 Создан новый навык: {name}!",
+      "toast.fuseNeed": "Для слияния нужно 🪙 {coins} и 🔮 {crystal}.",
+      "toast.fuseSelect": "Выберите 2–3 навыка для слияния.",
+      "toast.noFocus": "Недостаточно фокуса.",
+      "toast.skillCooling": "Перезарядка…",
+      "toast.skillEmpty": "В ячейке нет навыка.",
+      "toast.slotAssigned": "Навык в ячейке: {name}.",
     },
   };
 
@@ -768,6 +863,22 @@ import { ZONE_BY_ID } from "../data/zones.js";
     },
     weather: { clear: "Ясно", cloudy: "Облачно", fog: "Туман", rain: "Дождь", storm: "Гроза" },
     dragon: { name: "Древний Дракон" },
+    // Skills, their schools (elements) and effect families (Task 14).
+    skill: {
+      firebolt: { name: "Веер огнезарядов", desc: "Метните веер из трёх огненных зарядов." },
+      frost_nova: { name: "Морозная вспышка", desc: "Взрыв мороза, что бьёт и замедляет врагов рядом." },
+      mend: { name: "Исцеление", desc: "Затяните раны, мгновенно восстановив здоровье." },
+      war_focus: { name: "Боевой настрой", desc: "Соберитесь: больше силы и быстрее удары на время." },
+      chain_spark: { name: "Цепная искра", desc: "Выпустите пробивающую бурю из пяти искр." },
+      quake: { name: "Землетрясение", desc: "Ударьте оземь, сокрушая всё вокруг себя." },
+      meteor: { name: "Метеор", desc: "Призовите метеор губительного огня." },
+      soul_harvest: { name: "Жатва душ", desc: "Пожните врагов рядом, выпивая их суть ради исцеления." },
+      tempest: { name: "Буря", desc: "Обрушьте бурю из семи пробивающих зарядов." },
+      time_warp: { name: "Искажение времени", desc: "Согните время — бейте и двигайтесь куда быстрее." },
+    },
+    element: { arcane: "Чары", fire: "Огонь", frost: "Мороз", storm: "Гроза",
+               nature: "Природа", shadow: "Тень", mixed: "Призма" },
+    effect: { nova: "Вспышка", volley: "Залп", buff: "Аура", heal: "Исцеление" },
   };
 
   // {placeholder} interpolation; missing params are left intact so a bad key is
@@ -814,6 +925,21 @@ import { ZONE_BY_ID } from "../data/zones.js";
   const tSlotLabel = (slot) => tFlat("slot", (slot === "ring1" || slot === "ring2") ? "ring" : slot, (SLOT_META[slot] || {}).label || slot);
   const tAffixLabel = (id) => tFlat("affix", id, (AFFIXES[id] || {}).label || id);
   const tSetName = (id) => tFlat("set", id, (SETS[id] || {}).name || id);
+  // Skills (Task 14): leveled/boss skills resolve through the `skill` group; a
+  // FUSED skill's name/desc is composed from i18n element + effect labels (it
+  // has no static dictionary entry, since it's generated at runtime).
+  const tElementLabel = (id) => tFlat("element", id, (ELEMENTS[id] || ELEMENTS.arcane).label);
+  const tEffectLabel = (id) => tFlat("effect", id, (EFFECTS[id] || {}).label || id);
+  const tSkillName = (def) => {
+    if (!def) return "";
+    if (def.generated) return t("skills.fusedName", { effect: tEffectLabel(def.effect), element: tElementLabel(def.element) });
+    return tField("skill", def.id, "name", def.name || def.id);
+  };
+  const tSkillDesc = (def) => {
+    if (!def) return "";
+    if (def.generated) return t("skills.fusedDesc", { element: tElementLabel(def.element), n: (def.parts || []).length });
+    return tField("skill", def.id, "desc", def.desc || "");
+  };
   const tMaterialLabel = (id) => tFlat("material", id, (MATERIALS[id] || {}).label || id);
   const tResourceLabel = (k) => tFlat("resource", k, (RESOURCE_KINDS[k] || {}).label || k);
   const tRelicName = (id) => tField("relic", id, "name", (RELICS[id] || {}).name || id);
@@ -852,4 +978,5 @@ export {
   tNpcIntro, tNpcName, tPotionLabel, tQuestStory, tQuestTitle, tQuestWhere, tRarityLabel,
   tRelicName, tResourceLabel, tSlotLabel, tAffixLabel, tSetName, tStoryEndingText, tStoryEndingTitle,
   tStoryIntroText, tStoryIntroTitle, tStoryTitle, tZoneName,
+  tElementLabel, tEffectLabel, tSkillName, tSkillDesc,
 };
