@@ -6,10 +6,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="description" content="Good Game 3D — a third-person browser action-RPG adventure. Take quests, gather and craft, fight living sweets and bosses, raise a castle from five relics, and slay the dragon to win. Playable in English and Russian." />
   <meta name="theme-color" content="#0b0f1a" />
-  <!-- Optional: your Google OAuth client id enables opt-in cloud saves to the
-       player's private Drive appDataFolder (Task 15). Leave empty to ship with
+  <!-- Optional: Google OAuth 2.0 client id for opt-in cloud saves to the player's
+       private Drive appDataFolder (Task 15). The RECOMMENDED way to set this for a
+       GitHub Pages deploy is a GitHub Actions variable named GOOGLE_CLIENT_ID in
+       the `github-pages` environment — the deploy workflow injects it at build
+       time (VITE_GOOGLE_CLIENT_ID), so nothing is hardcoded here. This meta tag is
+       only a manual fallback for local/static hosting; leave it empty to ship with
        cloud saves disabled (the local file save always works). See the README
-       "Cloud saves" section for setup. Never commit a client *secret* here. -->
+       "Cloud saves" section for full setup. Never commit a client *secret*. -->
   <meta name="gg-google-client-id" content="" />
   <link rel="stylesheet" href="/css/style.css" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->

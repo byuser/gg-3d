@@ -7804,10 +7804,22 @@ import {
     sched: { lastAt: 0, inFlight: false },
     _loaded: false,
 
-    // Read the OAuth client id from config (a global injected by an optional,
-    // git-ignored config file, or a <meta> tag). Empty ⇒ "not configured".
+    // Read the OAuth client id from config, in priority order:
+    //   1. `window.GG_GOOGLE_CLIENT_ID` — a runtime override (e.g. an optional,
+    //      git-ignored config script for local dev).
+    //   2. `import.meta.env.VITE_GOOGLE_CLIENT_ID` — baked in at *build time* by
+    //      Vite from the `VITE_GOOGLE_CLIENT_ID` env var. The deploy workflow
+    //      feeds this from a GitHub Actions variable/secret in the `github-pages`
+    //      environment, so the published bundle gets the id without it ever being
+    //      hardcoded in the repo (see README → Cloud saves).
+    //   3. `<meta name="gg-google-client-id">` — a manual fallback in index.html.
+    // Empty ⇒ "not configured" (cloud saves stay cleanly disabled).
     readClientId() {
       try { if (typeof window !== "undefined" && window.GG_GOOGLE_CLIENT_ID) return String(window.GG_GOOGLE_CLIENT_ID).trim(); } catch (e) {}
+      try {
+        const env = (typeof import.meta !== "undefined" && import.meta && import.meta.env) ? import.meta.env : null;
+        if (env && env.VITE_GOOGLE_CLIENT_ID) return String(env.VITE_GOOGLE_CLIENT_ID).trim();
+      } catch (e) {}
       try {
         if (typeof document !== "undefined" && document.querySelector) {
           const m = document.querySelector('meta[name="gg-google-client-id"]');

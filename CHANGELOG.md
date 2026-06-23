@@ -24,6 +24,19 @@ delta it shipped with, since later tasks reference those.
 
 _Nothing pending._
 
+## [2026-06-23] — Cloud saves: inject the Google OAuth client id at deploy time
+
+Follow-up to Task 15 so the OAuth 2.0 **Web-app client id** no longer has to be hardcoded in
+`index.html`. The **Deploy to GitHub Pages** workflow now reads it from a GitHub Actions
+**variable** (or secret) named `GOOGLE_CLIENT_ID`, scoped to the `github-pages` environment, and
+passes it to the Vite build as `VITE_GOOGLE_CLIENT_ID`; Vite inlines it into the hashed bundle and
+the game reads it at runtime. `CloudSave.readClientId()` now resolves the id in priority order —
+`window.GG_GOOGLE_CLIENT_ID` → `import.meta.env.VITE_GOOGLE_CLIENT_ID` (build-time) → the
+`<meta name="gg-google-client-id">` tag (manual fallback) — and stays cleanly "not configured" when
+all are empty. `.env.local` is now git-ignored for local dev, and the README gained step-by-step
+instructions for creating the Client ID and storing it as a GitHub environment variable. Vitest
+**125 → 126** (a new build-time-env case); no save-schema change.
+
 ## [2026-06-23] — Task 15 — Cloud saves to Google Drive (manual + 5-min autosave, rolling 1-hour history)
 
 Added an **opt-in** way to back progress up to the player's own Google Drive, reusing the **exact**

@@ -168,6 +168,22 @@ describe("Task 15 — unconfigured / headless: cleanly disabled, never throws", 
   });
 });
 
+describe("Task 15 — OAuth client id from build-time env (deploy injection)", () => {
+  it("readClientId() picks up VITE_GOOGLE_CLIENT_ID baked in by Vite/the deploy", () => {
+    const prev = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    try {
+      import.meta.env.VITE_GOOGLE_CLIENT_ID = "  deploy-injected.apps.googleusercontent.com  ";
+      // No window override + the headless doc has no <meta>, so the env wins.
+      expect(CS.readClientId()).toBe("deploy-injected.apps.googleusercontent.com");
+    } finally {
+      if (prev === undefined) delete import.meta.env.VITE_GOOGLE_CLIENT_ID;
+      else import.meta.env.VITE_GOOGLE_CLIENT_ID = prev;
+    }
+    // Unset again ⇒ unconfigured (cloud saves cleanly disabled).
+    expect(CS.readClientId()).toBe("");
+  });
+});
+
 describe("Task 15 — Drive client is injectable (auth + manual save/load)", () => {
   let drive;
   beforeEach(() => { drive = makeFakeDrive(); arm(drive); });

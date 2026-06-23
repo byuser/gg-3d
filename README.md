@@ -262,16 +262,64 @@ clutter. The game stores one **manual** slot plus an **autosave every 5 minutes*
 kept). Cloud saves use the **exact same JSON** as the local file save, so versioning and migration
 behave identically.
 
-The feature ships **disabled** and only turns on when you supply a Google OAuth **client id**:
+The feature ships **disabled** and only turns on when you supply a Google OAuth **client id**.
 
-1. In the [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the
-   **Google Drive API**.
-2. Configure the **OAuth consent screen** and add the **`.../auth/drive.appdata`** scope.
-3. Create an **OAuth 2.0 Client ID** of type **Web application**, and add your site's origin (e.g.
-   `https://<user>.github.io`) to the **Authorized JavaScript origins**.
-4. Put the client id into `index.html`'s `<meta name="gg-google-client-id" content="…">` tag (or set
-   `window.GG_GOOGLE_CLIENT_ID` before the game loads). **Never commit a client *secret*** — only the
-   public client id is needed for this browser-only OAuth flow.
+### 1. Create the Google OAuth 2.0 Client ID
+
+1. Open the [Google Cloud Console](https://console.cloud.google.com/) and create (or pick) a **project**
+   from the project dropdown at the top.
+2. **Enable the Drive API:** go to **APIs & Services → Library**, search for **Google Drive API**, and
+   click **Enable**.
+3. **Configure the OAuth consent screen** (**APIs & Services → OAuth consent screen**):
+   - User type **External** (so any Google account can use it), then **Create**.
+   - Fill in the app name, your support email and developer email.
+   - On **Scopes**, click **Add or remove scopes**, and add **`.../auth/drive.appdata`**
+     (“See, create, and delete its own configuration data in your Google Drive”). Save.
+   - While the app is in **Testing**, only the Google accounts you list under **Test users** can sign in.
+     To let anyone use it, **Publish** the app (for the `drive.appdata` scope this needs no Google review).
+4. **Create the credential** (**APIs & Services → Credentials → Create credentials → OAuth client ID**):
+   - Application type **Web application**.
+   - Under **Authorized JavaScript origins**, add **every origin** the game is served from — no path, no
+     trailing slash. For GitHub Pages that's your site origin, e.g. `https://<user>.github.io`
+     (Pages project sites share the user origin; the subpath is not part of the origin). Add
+     `http://localhost:4173` and `http://localhost:5173` too if you want cloud saves while developing.
+   - You can leave **Authorized redirect URIs** empty — this token flow doesn't use one.
+   - Click **Create** and copy the **Client ID** (it looks like
+     `1234567890-abc123.apps.googleusercontent.com`). This id is **public** (it ships in the browser
+     bundle); there is **no client secret** to keep for this browser-only flow.
+
+### 2. Give the id to the deployed site — via a GitHub environment variable (recommended)
+
+So the id is **never hardcoded in the repo**, the deploy workflow reads it from a GitHub Actions
+**variable** scoped to the Pages environment and bakes it into the build:
+
+1. In your repo on GitHub, go to **Settings → Environments → `github-pages`** (the environment the Pages
+   deploy uses; create it if it isn't there yet).
+2. Under **Environment variables**, click **Add variable**:
+   - **Name:** `GOOGLE_CLIENT_ID`
+   - **Value:** the Client ID you copied above.
+   - Save. *(A client id for a public web app isn't secret, so a **Variable** is the natural fit. If you'd
+     rather use **Environment secrets**, add a secret with the same name — the workflow checks both.)*
+3. **Re-deploy** so the value is picked up: push to `master` (or run the **Deploy to GitHub Pages**
+   workflow from the **Actions** tab). The build step injects it as `VITE_GOOGLE_CLIENT_ID`, Vite inlines
+   it into the hashed bundle, and the game reads it at runtime.
+
+That's it — open the deployed site, go to **Cloud Saves**, and **Sign in with Google**.
+
+> **How it's wired.** `deploy-pages.yml`'s build step sets
+> `VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID || secrets.GOOGLE_CLIENT_ID }}`; the game's
+> `CloudSave.readClientId()` reads, in priority order, `window.GG_GOOGLE_CLIENT_ID` →
+> `import.meta.env.VITE_GOOGLE_CLIENT_ID` (the build-time value) → the `<meta name="gg-google-client-id">`
+> tag. Anything empty just means “not configured”.
+
+### Alternatives (local / other hosts)
+
+- **`<meta>` tag:** put the id directly into `index.html`'s `<meta name="gg-google-client-id" content="…">`
+  for a manual/static deploy. Fine for the public id, but it commits the id to the repo.
+- **Runtime global:** define `window.GG_GOOGLE_CLIENT_ID = "…"` before the bundle loads (e.g. a small,
+  git-ignored script) — handy for local development.
+- **Local dev build:** create a git-ignored `.env.local` with `VITE_GOOGLE_CLIENT_ID=…`; `npm run dev` /
+  `npm run build` will pick it up just like CI does.
 
 With no client id configured, the **Cloud Saves** panel shows a short "needs a client id" note and the
 controls stay disabled — the game is otherwise unchanged, and the local save keeps working. Signed out,

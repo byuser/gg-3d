@@ -46,6 +46,16 @@ jobs:
 
       - name: Build static bundle
         run: npm run build
+        env:
+          # Opt-in Google Drive cloud saves (Task 15). The OAuth 2.0 Web-app
+          # client id is injected here from a GitHub Actions variable (or secret)
+          # named GOOGLE_CLIENT_ID, scoped to this `github-pages` environment, so
+          # it is never hardcoded in the repo. Vite only exposes `VITE_`-prefixed
+          # vars to the bundle, so we map it across. Unset ⇒ empty ⇒ cloud saves
+          # ship cleanly disabled. A client id for a *public* web app is not a
+          # secret (it is visible in the shipped JS), so a Variable is the natural
+          # choice — but a Secret with the same name works too.
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID || secrets.GOOGLE_CLIENT_ID }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

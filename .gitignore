@@ -2,6 +2,10 @@
 node_modules/
 dist/
 
+# local env (e.g. VITE_GOOGLE_CLIENT_ID for opt-in cloud saves — never commit it)
+.env.local
+.env.*.local
+
 # test + tooling artifacts
 playwright-report/
 test-results/
