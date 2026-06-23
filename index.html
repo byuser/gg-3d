@@ -6,6 +6,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="description" content="Good Game 3D — a third-person browser action-RPG adventure. Take quests, gather and craft, fight living sweets and bosses, raise a castle from five relics, and slay the dragon to win. Playable in English and Russian." />
   <meta name="theme-color" content="#0b0f1a" />
+  <!-- Optional: your Google OAuth client id enables opt-in cloud saves to the
+       player's private Drive appDataFolder (Task 15). Leave empty to ship with
+       cloud saves disabled (the local file save always works). See the README
+       "Cloud saves" section for setup. Never commit a client *secret* here. -->
+  <meta name="gg-google-client-id" content="" />
   <link rel="stylesheet" href="/css/style.css" />
   <!-- Babylon.js: a full WebGL game engine that runs as static files — perfect for GitHub Pages. -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
@@ -50,6 +55,15 @@
         <div class="vol-row"><label for="vol_sfx" data-i18n="settings.volSfx">Effects</label><input id="vol_sfx" class="vol-slider" type="range" min="0" max="100" value="85" aria-label="Effects volume" /></div>
         <div class="vol-row"><label for="vol_ambience" data-i18n="settings.volAmbience">Ambience</label><input id="vol_ambience" class="vol-slider" type="range" min="0" max="100" value="75" aria-label="Ambience volume" /></div>
         <button id="muteToggle" class="lang-btn mute-btn" data-i18n="settings.mute">Mute all</button>
+      </div>
+      <!-- Cloud saves (opt-in Google Drive). Degrades cleanly when unconfigured. -->
+      <div class="cloud-settings" role="group" aria-label="Cloud saves">
+        <span class="lang-label" data-i18n="settings.cloud">Cloud Saves</span>
+        <p id="cloudStatus" class="cloud-status" data-i18n="cloud.notConfigured">Cloud saves need a Google client ID — see the README to enable.</p>
+        <div class="cloud-btn-row">
+          <button id="cloudSignBtn" class="lang-btn cloud-btn" data-i18n="cloud.signIn">Sign in with Google</button>
+          <button id="cloudListBtn" class="lang-btn cloud-btn" data-i18n="cloud.list">Cloud saves…</button>
+        </div>
       </div>
     </div>
   </div>
@@ -188,6 +202,21 @@
         <div class="vol-row"><label for="vol_sfxP" data-i18n="settings.volSfx">Effects</label><input id="vol_sfxP" class="vol-slider" type="range" min="0" max="100" value="85" aria-label="Effects volume" /></div>
         <div class="vol-row"><label for="vol_ambienceP" data-i18n="settings.volAmbience">Ambience</label><input id="vol_ambienceP" class="vol-slider" type="range" min="0" max="100" value="75" aria-label="Ambience volume" /></div>
         <button id="muteToggleP" class="lang-btn mute-btn" data-i18n="settings.mute">Mute all</button>
+      </div>
+
+      <!-- Cloud saves (opt-in Google Drive): sign-in, manual save, autosave toggle,
+           and the browse overlay. Disabled cleanly when not configured/ signed in. -->
+      <div class="cloud-settings" role="group" aria-label="Cloud saves">
+        <span class="lang-label" data-i18n="settings.cloud">Cloud Saves</span>
+        <p id="cloudStatusP" class="cloud-status" data-i18n="cloud.notConfigured">Cloud saves need a Google client ID — see the README to enable.</p>
+        <div class="cloud-btn-row">
+          <button id="cloudSignBtnP" class="lang-btn cloud-btn" data-i18n="cloud.signIn">Sign in with Google</button>
+          <button id="cloudAutoBtnP" class="lang-btn cloud-btn" data-i18n="cloud.autosaveOff">Autosave: Off</button>
+        </div>
+        <div class="cloud-btn-row">
+          <button id="cloudSaveBtnP" class="lang-btn cloud-btn" data-i18n="cloud.save">Save to Drive</button>
+          <button id="cloudListBtnP" class="lang-btn cloud-btn" data-i18n="cloud.list">Cloud saves…</button>
+        </div>
       </div>
 
       <!-- Confirmation guard for the destructive Restart / Exit actions. -->
@@ -347,6 +376,20 @@
         <button id="mapGuideBtn" class="start-btn map-guide" data-i18n="map.guide" disabled>Guide me there</button>
         <button id="mapClearBtn" class="start-btn secondary-btn" data-i18n="map.clearGuide" disabled>Clear waypoint</button>
         <button id="mapDone" class="start-btn shop-done" data-i18n="map.done">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cloud-saves browser: lists the manual slot + the rolling hour of autosaves
+       from the player's private Drive appDataFolder, each restorable (Task 15). -->
+  <div id="cloudSaves" class="shop-overlay hidden">
+    <div class="shop-panel cloud-panel">
+      <button id="cloudClose" class="shop-close" data-i18n-title="btn.close" title="Close" aria-label="Close cloud saves">×</button>
+      <h2 data-i18n="cloud.title">Cloud Saves</h2>
+      <p class="cloud-intro" data-i18n="cloud.intro">Saves live in your private Drive app folder — invisible to other apps. Autosave keeps the last hour.</p>
+      <div id="cloudList" class="cloud-list"></div>
+      <div class="map-actions">
+        <button id="cloudDone" class="start-btn shop-done" data-i18n="map.done">Done</button>
       </div>
     </div>
   </div>
