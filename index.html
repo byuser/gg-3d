@@ -29,6 +29,7 @@
         <li><b data-i18n="ctrl.interact">Interact / talk / gather</b><span data-i18n="ctrl.interactKeys">E · or the action button</span></li>
         <li><b data-i18n="ctrl.inventory">Inventory</b><span data-i18n="ctrl.inventoryKeys">I · or the 🎒 button</span></li>
         <li><b data-i18n="ctrl.craft">Craft · Quests</b><span data-i18n="ctrl.craftKeys">C · J · or the 🛠️ 📜 buttons</span></li>
+        <li><b data-i18n="ctrl.map">Map</b><span data-i18n="ctrl.mapKeys">Tab · the 🗺️ button · N toggles the minimap</span></li>
         <li><b data-i18n="ctrl.travel">Travel</b><span data-i18n="ctrl.travelKeys">walk into a path / bridge / cave portal</span></li>
       </ul>
       <button id="startBtn" class="start-btn" data-i18n="start.startBtn">Start Adventure</button>
@@ -89,6 +90,20 @@
     <!-- Zone/location banner: shows the name of the land you've just entered. -->
     <div id="waveBanner" class="wave-banner"></div>
 
+    <!-- Guided-waypoint compass: an arrow + label pointing toward the chosen
+         destination (or the next portal to take when it's in another land). -->
+    <div id="compass" class="compass hidden">
+      <span id="compassArrow" class="compass-arrow">▲</span>
+      <span id="compassLabel" class="compass-label"></span>
+    </div>
+
+    <!-- Corner minimap: the current land, north-up, with the player, portals,
+         NPCs, resources and the active waypoint. Tap it to open the full map. -->
+    <div id="minimap" class="minimap" data-i18n-title="map.openTitle" title="Open map (Tab)">
+      <canvas id="minimapCanvas" class="minimap-canvas" width="150" height="150"></canvas>
+      <span class="minimap-n">N</span>
+    </div>
+
     <!-- Skill quick bar: up to 3 active skills (cast with 1/2/3 or a tap). -->
     <div id="skillBar" class="skill-bar"></div>
 
@@ -103,6 +118,7 @@
     <button id="skillsBtn" class="icon-btn skills-btn" data-i18n-title="btnTitle.skills" data-i18n-aria="btnAria.skills" title="Skills (K)" aria-label="Open skills">✨</button>
     <button id="craftBtn" class="icon-btn craft-btn" data-i18n-title="btnTitle.crafting" data-i18n-aria="btnAria.crafting" title="Crafting (C)" aria-label="Open crafting">🛠️</button>
     <button id="questBtn" class="icon-btn quest-btn" data-i18n-title="btnTitle.questLog" data-i18n-aria="btnAria.questLog" title="Quest log (J)" aria-label="Open quest log">📜</button>
+    <button id="mapBtn" class="icon-btn map-btn" data-i18n-title="btnTitle.map" data-i18n-aria="btnAria.map" title="World map (Tab)" aria-label="Open world map">🗺️</button>
     <button id="musicBtn" class="icon-btn music-btn" data-i18n-title="btnTitle.muteMusic" data-i18n-aria="btnAria.music" title="Mute music (M)" aria-label="Toggle music">🔊</button>
     <div id="toast" class="toast"></div>
   </div>
@@ -301,6 +317,37 @@
       <p class="shop-tagline" data-i18n-html="questlog.tagline">Your <b>main story</b> runs in chapters across the lands — follow the tracker from one ❗ giver to the next. <b>Side quests</b> are optional bounties &amp; errands, listed separately.</p>
       <div id="questLogItems" class="quest-log-items"></div>
       <button id="questLogDone" class="start-btn shop-done" data-i18n="questlog.done">Done</button>
+    </div>
+  </div>
+
+  <!-- World map: opened with 🗺️ / Tab. A detailed current-zone view and a
+       world overview of the portal graph, with name search and a guided
+       waypoint that points the way (and the next portal across lands). -->
+  <div id="worldmap" class="shop-overlay hidden">
+    <div class="shop-panel map-panel">
+      <button id="mapClose" class="shop-close" data-i18n-title="btn.close" title="Close" aria-label="Close map">×</button>
+      <h2 data-i18n="map.title">🗺️ World Map</h2>
+      <div class="map-tabs">
+        <button id="mapTabZone" class="shop-tab active" data-i18n="map.tabZone">This Land</button>
+        <button id="mapTabWorld" class="shop-tab" data-i18n="map.tabWorld">World</button>
+        <span class="map-zoom">
+          <button id="mapZoomOut" class="map-zoom-btn" aria-label="Zoom out">−</button>
+          <button id="mapZoomIn" class="map-zoom-btn" aria-label="Zoom in">+</button>
+        </span>
+      </div>
+      <div class="map-body">
+        <div class="map-canvas-wrap"><canvas id="mapCanvas" class="map-canvas"></canvas></div>
+        <div class="map-side">
+          <input id="mapSearch" class="map-search" type="search" data-i18n-ph="map.searchPlaceholder" placeholder="Search a place or person…" aria-label="Search the map" />
+          <div id="mapResults" class="map-results"></div>
+        </div>
+      </div>
+      <div id="mapSelInfo" class="map-sel-info"></div>
+      <div class="map-actions">
+        <button id="mapGuideBtn" class="start-btn map-guide" data-i18n="map.guide" disabled>Guide me there</button>
+        <button id="mapClearBtn" class="start-btn secondary-btn" data-i18n="map.clearGuide" disabled>Clear waypoint</button>
+        <button id="mapDone" class="start-btn shop-done" data-i18n="map.done">Done</button>
+      </div>
     </div>
   </div>
 

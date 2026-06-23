@@ -42,6 +42,12 @@ import {
 } from "./data/story.js";
 import { ZONES, ZONE_BY_ID, HUB_ZONE } from "./data/zones.js";
 import {
+  ZONE_ADJ, zoneEdges, findRoute, nextZoneStep,
+  bearingRad, dist2D, relativeHeading, compass8,
+  MAP_TARGETS, targetZoneOf, targetPoint, validWaypoint,
+  searchTargets, worldLayout,
+} from "./data/worldmap.js";
+import {
   SKILL_DB, getSkill, ELEMENTS, EFFECTS, BASE_SKILL_IDS, BOSS_SKILL_IDS, STARTER_SKILL_IDS,
   SKILL_SLOTS, MAX_FUSE_INPUTS, FOCUS_REGEN, XP_PER_GATHER, XP_PER_QUEST,
   xpToNext, totalXpToReach, maxFocusForLevel, levelHealthBonus, skillsUnlockedAt,
@@ -88,6 +94,7 @@ import {
       document.querySelectorAll("[data-i18n-html]").forEach((el) => { el.innerHTML = t(el.getAttribute("data-i18n-html")); });
       document.querySelectorAll("[data-i18n-title]").forEach((el) => { el.title = t(el.getAttribute("data-i18n-title")); });
       document.querySelectorAll("[data-i18n-aria]").forEach((el) => { el.setAttribute("aria-label", t(el.getAttribute("data-i18n-aria"))); });
+      document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.setAttribute("placeholder", t(el.getAttribute("data-i18n-ph"))); });
     } catch (e) {}
   }
 
@@ -125,6 +132,8 @@ import {
     if (typeof CastleUI !== "undefined" && CastleUI.open) CastleUI.render();
     if (typeof QuestLog !== "undefined" && QuestLog.open) QuestLog.render();
     if (typeof SkillsUI !== "undefined" && SkillsUI.open) SkillsUI.render();
+    if (typeof WorldMapUI !== "undefined" && WorldMapUI.open) WorldMapUI.render();
+    if (typeof WorldMap !== "undefined" && WorldMap.state) WorldMap.update(0);
     if (typeof Dialogue !== "undefined" && Dialogue.open && Dialogue.npc) Dialogue.render();
     if (typeof Pause !== "undefined" && typeof paused !== "undefined" && paused) Pause.refreshTexts();
     if (typeof Music !== "undefined" && dom.musicBtn) dom.musicBtn.title = t(Music.on ? "btnTitle.muteMusic" : "btnTitle.playMusic");
@@ -617,6 +626,26 @@ import {
     skillsToolbar: document.getElementById("skillsToolbar"),
     skillsFusion: document.getElementById("skillsFusion"),
     skillsList: document.getElementById("skillsList"),
+    // ---- Minimap, compass + full world map (Task 13) ----
+    mapBtn: document.getElementById("mapBtn"),
+    minimap: document.getElementById("minimap"),
+    minimapCanvas: document.getElementById("minimapCanvas"),
+    compass: document.getElementById("compass"),
+    compassArrow: document.getElementById("compassArrow"),
+    compassLabel: document.getElementById("compassLabel"),
+    worldmap: document.getElementById("worldmap"),
+    mapClose: document.getElementById("mapClose"),
+    mapDone: document.getElementById("mapDone"),
+    mapTabZone: document.getElementById("mapTabZone"),
+    mapTabWorld: document.getElementById("mapTabWorld"),
+    mapSearch: document.getElementById("mapSearch"),
+    mapZoomIn: document.getElementById("mapZoomIn"),
+    mapZoomOut: document.getElementById("mapZoomOut"),
+    mapCanvas: document.getElementById("mapCanvas"),
+    mapResults: document.getElementById("mapResults"),
+    mapSelInfo: document.getElementById("mapSelInfo"),
+    mapGuideBtn: document.getElementById("mapGuideBtn"),
+    mapClearBtn: document.getElementById("mapClearBtn"),
   };
 
   const isTouch = window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
@@ -5320,7 +5349,446 @@ import {
     if (except !== Crafting && Crafting.open) Crafting.close();
     if (except !== CastleUI && CastleUI.open) CastleUI.close();
     if (except !== QuestLog && QuestLog.open) QuestLog.close();
+    if (except !== SkillsUI && SkillsUI.open) SkillsUI.close();
+    if (except !== WorldMapUI && WorldMapUI.open) WorldMapUI.close();
   }
+
+  // =========================================================================
+  // WORLD MAP (Task 13) — a live corner MINIMAP, a full-screen MAP overlay
+  // (current-zone detail + a world overview of the portal graph), name SEARCH,
+  // and a guided WAYPOINT (an on-screen compass arrow + a minimap marker that
+  // route the player toward any zone / landmark / NPC, hopping portals across
+  // zones). Every canvas draw is feature-detected (headless-safe); the graph,
+  // route-finding and bearing/compass math come from src/data/worldmap.js.
+  // =========================================================================
+
+  // A 2D context, or null when canvas/getContext is unavailable (headless).
+  function ctx2d(canvas) {
+    if (!canvas || typeof canvas.getContext !== "function") return null;
+    try { return canvas.getContext("2d"); } catch (e) { return null; }
+  }
+  // Darken/brighten a #rrggbb toward a 0..1 multiplier → "rgb(...)".
+  function shadeHex(hex, mul) {
+    try {
+      const c = BABYLON.Color3.FromHexString(hex);
+      const f = (v) => Math.max(0, Math.min(255, Math.round(v * mul * 255)));
+      return `rgb(${f(c.r)},${f(c.g)},${f(c.b)})`;
+    } catch (e) { return "#5fae4f"; }
+  }
+  function mmDot(ctx, x, y, r, fill, stroke) {
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.lineWidth = 1; ctx.strokeStyle = stroke; ctx.stroke(); }
+  }
+  // A bobbing target ring (the waypoint marker).
+  function mmRing(ctx, x, y, r) {
+    ctx.save();
+    ctx.strokeStyle = "#ffd34e"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, 1.5, 0, Math.PI * 2); ctx.fillStyle = "#ffd34e"; ctx.fill();
+    ctx.restore();
+  }
+  function mmPlayer(ctx, x, y, facing) {
+    const fx = Math.sin(facing), fy = Math.cos(facing); // screen dir (y = +Z down)
+    const px = -fy, py = fx;
+    ctx.beginPath();
+    ctx.moveTo(x + fx * 6.5, y + fy * 6.5);
+    ctx.lineTo(x - fx * 3.2 + px * 4, y - fy * 3.2 + py * 4);
+    ctx.lineTo(x - fx * 3.2 - px * 4, y - fy * 3.2 - py * 4);
+    ctx.closePath();
+    ctx.fillStyle = "#ffe27a"; ctx.fill();
+    ctx.lineWidth = 1.2; ctx.strokeStyle = "#3a2a00"; ctx.stroke();
+  }
+  const PORTAL_COL = { path: "#9be36b", bridge: "#6cc6ff", cave: "#c69bff" };
+  const NPC_STATUS_COL = { turnin: "#5be0a0", new: "#ffd34e", active: "#6cc6ff", done: "#9aa0a6" };
+
+  // Resolve a {kind,id} waypoint into live guidance for the current zone:
+  // { inZone, targetZone, point?, portal?, nextZone?, dx, dz, dist, arrived }.
+  function resolveWaypoint(wp, state, player) {
+    if (!validWaypoint(wp) || !state || !player) return null;
+    const cur = state.zoneId;
+    const tz = targetZoneOf(wp.kind, wp.id);
+    if (!tz) return null;
+    const p = player.position;
+    if (cur === tz) {
+      const pt = targetPoint(wp.kind, wp.id);
+      if (!pt) return { inZone: true, targetZone: tz, dist: 0, arrived: true };
+      const dx = pt.x - p.x, dz = pt.z - p.z, dist = Math.hypot(dx, dz);
+      return { inZone: true, targetZone: tz, point: pt, dx, dz, dist, arrived: dist <= CONFIG.questReachRange };
+    }
+    const nextZone = nextZoneStep(cur, tz);
+    const portal = (nextZone && state.world) ? (state.world.portals || []).find((pp) => pp.to === nextZone) : null;
+    if (!portal) return { inZone: false, targetZone: tz, nextZone, dx: 0, dz: 0, dist: 0, arrived: false };
+    const dx = portal.x - p.x, dz = portal.z - p.z;
+    return { inZone: false, targetZone: tz, nextZone, portal, dx, dz, dist: Math.hypot(dx, dz), arrived: false };
+  }
+
+  // Draw the current zone (north-up): fence, resources, monsters, vendors, the
+  // castle, portals, NPCs (status-coloured), the waypoint marker and the player
+  // arrow. `proj(wx,wz)->{x,y}` maps world to canvas; shared by minimap + map.
+  function drawZoneScene(ctx, o) {
+    const { W, H, world, state, player, waypoint, proj, scale, labels } = o;
+    ctx.clearRect(0, 0, W, H);
+    const theme = world.zone.theme || {};
+    ctx.fillStyle = shadeHex(theme.ground || "#5fae4f", 0.35);
+    ctx.fillRect(0, 0, W, H);
+    const c = proj(0, 0), fr = (world.radius || 80) * scale;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(c.x, c.y, fr, 0, Math.PI * 2); ctx.closePath();
+    ctx.clip();
+    ctx.fillStyle = shadeHex(theme.ground || "#5fae4f", 0.62);
+    ctx.beginPath(); ctx.arc(c.x, c.y, fr, 0, Math.PI * 2); ctx.fill();
+    // Roads/landmarks of the hub: dots for the named locations.
+    if (world.zone.home) {
+      for (const l of LOCATIONS) { const s = proj(l.x, l.z); mmDot(ctx, s.x, s.y, labels ? 3 : 2, "rgba(255,240,200,0.5)"); }
+    }
+    // Resource nodes (brighter when ready to harvest).
+    for (const r of state.resources) {
+      const pp = r.root && r.root.position; if (!pp) continue;
+      const s = proj(pp.x, pp.z);
+      mmDot(ctx, s.x, s.y, 2, (r.respawn || 0) <= 0 ? "#7CFC8A" : "rgba(120,160,110,0.6)");
+    }
+    // Monsters.
+    for (const m of state.monsters) {
+      if (!m.alive) continue; const s = proj(m.position.x, m.position.z);
+      mmDot(ctx, s.x, s.y, 2.4, "#ff5c6a");
+    }
+    // Vendors + castle.
+    const glyph = (px, pz, col) => { const s = proj(px, pz); mmDot(ctx, s.x, s.y, labels ? 4 : 3.2, col, "#1a1a1a"); };
+    if (state.merchant && state.merchant.visible) glyph(state.merchant.root.position.x, state.merchant.root.position.z, "#ffcf3a");
+    if (state.blacksmith && state.blacksmith.visible) glyph(state.blacksmith.root.position.x, state.blacksmith.root.position.z, "#ff8a4e");
+    if (state.castle && state.castle.root) glyph(state.castle.root.position.x, state.castle.root.position.z, "#ff9d5c");
+    // Boss / dragon.
+    const liveBoss = state.dragon || state.boss;
+    if (liveBoss && liveBoss.alive && liveBoss.position) glyph(liveBoss.position.x, liveBoss.position.z, "#ff3bd0");
+    // Portals (coloured by kind).
+    for (const portal of world.portals || []) {
+      const s = proj(portal.x, portal.z);
+      ctx.save();
+      ctx.fillStyle = PORTAL_COL[portal.kind] || "#ffd98a";
+      ctx.strokeStyle = "#1a1a1a"; ctx.lineWidth = 1;
+      ctx.fillRect(s.x - 3.5, s.y - 3.5, 7, 7); ctx.strokeRect(s.x - 3.5, s.y - 3.5, 7, 7);
+      ctx.restore();
+      if (labels && ctx.fillText) {
+        ctx.fillStyle = "#fff"; ctx.font = "10px system-ui, sans-serif"; ctx.textAlign = "center";
+        ctx.fillText((portal.icon || "") + " " + tZoneName(ZONE_BY_ID[portal.to]), s.x, s.y - 6);
+      }
+    }
+    // Story NPCs (status-coloured marker).
+    for (const n of state.npcs) {
+      const pp = n.root && n.root.position; if (!pp) continue;
+      const s = proj(pp.x, pp.z);
+      let col = "#ffd34e"; try { col = NPC_STATUS_COL[n.status()] || col; } catch (e) {}
+      mmDot(ctx, s.x, s.y, labels ? 3.4 : 2.6, col, "#1a1a1a");
+    }
+    // Waypoint marker (in-zone point, or the portal to take next).
+    if (waypoint) {
+      const g = resolveWaypoint(waypoint, state, player);
+      if (g && g.point) { const s = proj(g.point.x, g.point.z); mmRing(ctx, s.x, s.y, 6); }
+      else if (g && g.portal) { const s = proj(g.portal.x, g.portal.z); mmRing(ctx, s.x, s.y, 6); }
+    }
+    // The player.
+    const ps = proj(player.position.x, player.position.z);
+    mmPlayer(ctx, ps.x, ps.y, player.facing || 0);
+    ctx.restore();
+    // Fence ring + north pip (outside the clip).
+    ctx.save();
+    ctx.beginPath(); ctx.arc(c.x, c.y, fr, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(255,255,255,0.4)"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore();
+  }
+
+  // Draw the world overview: the zone graph (nodes + portal links), discovered
+  // vs fogged, the current zone and the waypoint target highlighted.
+  function drawWorldScene(ctx, o) {
+    const { W, H, state, waypoint, proj } = o;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#10131f"; ctx.fillRect(0, 0, W, H);
+    const lay = worldLayout();
+    ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.lineWidth = 2;
+    for (const [a, b] of zoneEdges()) {
+      if (!lay[a] || !lay[b]) continue;
+      const pa = proj(lay[a]), pb = proj(lay[b]);
+      ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
+    }
+    for (const z of ZONES) {
+      if (!lay[z.id]) continue;
+      const p = proj(lay[z.id]);
+      const discovered = !!(state.discovered && state.discovered[z.id]);
+      const here = state.zoneId === z.id;
+      mmDot(ctx, p.x, p.y, here ? 13 : 10, discovered ? shadeHex(z.theme.ground, 0.85) : "#2a2f40", here ? "#ffe27a" : "#11131c");
+      if (ctx.fillText) {
+        ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+        ctx.fillStyle = discovered ? "#fff" : "#7a8090";
+        ctx.fillText(discovered ? z.icon : "❓", p.x, p.y + 4);
+        if (discovered) { ctx.fillStyle = "#cdd3e0"; ctx.fillText(tZoneName(z), p.x, p.y + 26); }
+      }
+    }
+    if (waypoint) {
+      const tz = targetZoneOf(waypoint.kind, waypoint.id);
+      if (tz && lay[tz]) { const p = proj(lay[tz]); mmRing(ctx, p.x, p.y, 17); }
+    }
+  }
+
+  // The HUD systems: the corner minimap + the compass arrow + the live waypoint.
+  const WorldMap = {
+    state: null, player: null, camera: null, minimapOn: true, _acc: 0,
+
+    init(state, player, camera) {
+      this.state = state; this.player = player; this.camera = camera;
+      this.minimapOn = true; this._acc = 0;
+      if (dom.minimap && dom.minimap.classList) dom.minimap.classList.toggle("hidden", !this.minimapOn);
+      if (dom.compass && dom.compass.classList) dom.compass.classList.toggle("hidden", !(state && state.waypoint));
+    },
+
+    setWaypoint(kind, id) {
+      if (!this.state || !validWaypoint({ kind, id })) return;
+      this.state.waypoint = { kind, id };
+      Sfx.play("ui_click");
+      toast(t("map.guideSet", { name: WorldMapUI.targetName({ kind, id }) }));
+      this.update(0);
+    },
+    clearWaypoint(silent) {
+      if (!this.state || !this.state.waypoint) return;
+      this.state.waypoint = null;
+      if (!silent) toast(t("map.guideCleared"));
+      if (dom.compass && dom.compass.classList) dom.compass.classList.add("hidden");
+      if (WorldMapUI.open) WorldMapUI.render();
+    },
+    toggleMinimap() {
+      this.minimapOn = !this.minimapOn;
+      if (dom.minimap && dom.minimap.classList) dom.minimap.classList.toggle("hidden", !this.minimapOn);
+      if (this.minimapOn) this.renderMinimap();
+    },
+
+    // Per-frame: arrival check, compass arrow + label, throttled minimap redraw.
+    update(dt) {
+      const state = this.state, player = this.player;
+      if (!state || !player) return;
+      const wp = state.waypoint;
+      if (wp) {
+        const g = resolveWaypoint(wp, state, player);
+        if (!g) this.clearWaypoint(true);
+        else if (g.arrived) { toast(t("map.arrived", { name: WorldMapUI.targetName(wp) })); this.clearWaypoint(true); }
+        else this._compass(g);
+      } else if (dom.compass && dom.compass.classList) {
+        dom.compass.classList.add("hidden");
+      }
+      this._acc += dt;
+      if (dt === 0 || this._acc >= 0.08) { this._acc = 0; this.renderMinimap(); }
+    },
+
+    _compass(g) {
+      if (!dom.compass || !dom.compass.classList) return;
+      dom.compass.classList.remove("hidden");
+      let camYaw = this.player.facing || 0;
+      try {
+        const cam = this.camera;
+        if (cam && typeof cam.getForwardRay === "function") {
+          const d = cam.getForwardRay().direction; camYaw = Math.atan2(d.x, d.z);
+        }
+      } catch (e) {}
+      const ang = relativeHeading(g.dx, g.dz, camYaw);
+      if (dom.compassArrow && dom.compassArrow.style) dom.compassArrow.style.transform = `rotate(${ang}rad)`;
+      if (dom.compassLabel) {
+        const dist = Math.max(0, Math.round(g.dist || 0));
+        dom.compassLabel.innerHTML = g.inZone
+          ? t("map.compassTo", { name: WorldMapUI.targetName(this.state.waypoint), dist })
+          : t("map.compassPortal", {
+              kind: t("portalKind." + ((g.portal && g.portal.kind) || "path")),
+              zone: tZoneName(ZONE_BY_ID[g.nextZone]), dist });
+      }
+    },
+
+    renderMinimap() {
+      if (!this.minimapOn) return;
+      const ctx = ctx2d(dom.minimapCanvas);
+      if (!ctx) return;
+      const state = this.state, player = this.player, world = state && state.world;
+      if (!world) return;
+      const cv = dom.minimapCanvas, W = cv.width || 150, H = cv.height || 150;
+      const base = (Math.min(W, H) * 0.46) / (world.radius || 80);
+      const proj = (wx, wz) => ({ x: W / 2 + wx * base, y: H / 2 + wz * base });
+      drawZoneScene(ctx, { W, H, world, state, player, waypoint: state.waypoint, proj, scale: base, labels: false });
+    },
+  };
+
+  // The full-screen world-map overlay: tabs (current zone / world overview),
+  // pan + zoom, a name search with results, and a "guide me there" waypoint.
+  const WorldMapUI = {
+    open: false, tab: "zone", sel: null, query: "", view: null, _drag: null, _wired: false,
+
+    init() {
+      this._resetView();
+      if (this._wired) return; this._wired = true;
+      const cv = dom.mapCanvas;
+      if (cv && cv.addEventListener) {
+        cv.addEventListener("pointerdown", (e) => {
+          this._drag = { x: e.clientX || 0, y: e.clientY || 0, ox: this.view.ox, oy: this.view.oy };
+          try { cv.setPointerCapture && cv.setPointerCapture(e.pointerId); } catch (err) {}
+        });
+        cv.addEventListener("pointermove", (e) => {
+          if (!this._drag) return;
+          this.view.ox = this._drag.ox + ((e.clientX || 0) - this._drag.x);
+          this.view.oy = this._drag.oy + ((e.clientY || 0) - this._drag.y);
+          this.renderCanvas();
+        });
+        const end = () => { this._drag = null; };
+        cv.addEventListener("pointerup", end);
+        cv.addEventListener("pointercancel", end);
+        cv.addEventListener("pointerleave", end);
+        cv.addEventListener("wheel", (e) => { this.zoom(e.deltaY < 0 ? 1.15 : 1 / 1.15); if (e.preventDefault) e.preventDefault(); });
+      }
+    },
+
+    _resetView() { this.view = { scale: 1, ox: 0, oy: 0 }; this._drag = null; },
+
+    targetName(tg) {
+      if (!tg) return "";
+      if (tg.kind === "zone") return tZoneName(ZONE_BY_ID[tg.id]);
+      if (tg.kind === "location") return tLocationName(tg.id);
+      if (tg.kind === "npc") return tNpcName(tg.id);
+      return "";
+    },
+    targetIcon(tg) {
+      if (!tg) return "📍";
+      if (tg.icon) return tg.icon;
+      if (tg.kind === "zone") return (ZONE_BY_ID[tg.id] || {}).icon || "🗺️";
+      return "📍";
+    },
+
+    toggle() { if (this.open) this.close(); else this.openMap(); },
+    openMap() {
+      if (this.open) return;
+      closeOtherMenus(this);
+      this.open = true; uiPaused = true;
+      this.tab = "zone"; this.query = ""; this.sel = null; this._resetView();
+      if (dom.mapSearch) dom.mapSearch.value = "";
+      if (dom.worldmap && dom.worldmap.classList) dom.worldmap.classList.remove("hidden");
+      this.render();
+    },
+    close() {
+      if (!this.open) return;
+      this.open = false; uiPaused = false;
+      if (dom.worldmap && dom.worldmap.classList) dom.worldmap.classList.add("hidden");
+    },
+
+    setTab(tab) { this.tab = tab; this._resetView(); this.render(); },
+    zoom(f) {
+      this.view.scale = Math.max(0.6, Math.min(4.5, this.view.scale * f));
+      this.renderCanvas();
+    },
+    search(q) { this.query = q || ""; this.renderResults(); },
+    selectTarget(tg) {
+      this.sel = tg;
+      // Jump the right tab so the selection is visible, then frame it.
+      if (tg && tg.kind !== "zone" && this.tab === "world") this.tab = "zone";
+      this.render();
+    },
+    guide() {
+      if (!this.sel) return;
+      WorldMap.setWaypoint(this.sel.kind, this.sel.id);
+      this.render();
+    },
+
+    render() {
+      if (!this.open) return;
+      this._syncTabs();
+      this.renderResults();
+      this.renderInfo();
+      this.renderCanvas();
+    },
+    _syncTabs() {
+      const set = (el, on) => { if (el && el.classList) el.classList.toggle("active", on); };
+      set(dom.mapTabZone, this.tab === "zone");
+      set(dom.mapTabWorld, this.tab === "world");
+    },
+
+    renderResults() {
+      if (!dom.mapResults) return;
+      const order = { zone: 0, location: 1, npc: 2 };
+      const results = searchTargets(this.query, (tg) => this.targetName(tg))
+        .slice()
+        .sort((a, b) => (order[a.kind] - order[b.kind]) || this.targetName(a).localeCompare(this.targetName(b)));
+      dom.mapResults.innerHTML = "";
+      if (!results.length) {
+        const empty = document.createElement("div");
+        empty.className = "map-empty"; empty.textContent = t("map.noResults");
+        dom.mapResults.appendChild(empty); return;
+      }
+      for (const tg of results.slice(0, 60)) {
+        const tz = targetZoneOf(tg.kind, tg.id);
+        const row = document.createElement("button");
+        const selected = this.sel && this.sel.kind === tg.kind && this.sel.id === tg.id;
+        row.className = "map-result" + (selected ? " sel" : "");
+        row.innerHTML =
+          `<span class="mr-icon">${this.targetIcon(tg)}</span>` +
+          `<span class="mr-name">${this.targetName(tg)}</span>` +
+          `<span class="mr-zone">${t("map.kind." + tg.kind)} · ${tZoneName(ZONE_BY_ID[tz])}</span>`;
+        row.addEventListener("click", () => this.selectTarget(tg));
+        dom.mapResults.appendChild(row);
+      }
+    },
+
+    renderInfo() {
+      if (!dom.mapSelInfo) return;
+      const wp = WorldMap.state && WorldMap.state.waypoint;
+      let html = "";
+      if (this.sel) {
+        const tz = targetZoneOf(this.sel.kind, this.sel.id);
+        const cur = WorldMap.state ? WorldMap.state.zoneId : HUB_ZONE;
+        let route;
+        if (tz === cur) route = t("map.routeHere");
+        else {
+          const r = findRoute(cur, tz) || [];
+          route = t("map.routeVia", { path: r.map((id) => tZoneName(ZONE_BY_ID[id])).join(" → ") });
+        }
+        html = `<div class="msi-name">${this.targetIcon(this.sel)} ${this.targetName(this.sel)}</div>` +
+               `<div class="msi-route">${route}</div>`;
+      } else {
+        html = `<div class="msi-hint">${t("map.selectHint")}</div>`;
+      }
+      if (wp) html += `<div class="msi-active">${t("map.activeWaypoint", { name: this.targetName(wp) })}</div>`;
+      dom.mapSelInfo.innerHTML = html;
+      if (dom.mapGuideBtn) dom.mapGuideBtn.disabled = !this.sel;
+      if (dom.mapClearBtn) dom.mapClearBtn.disabled = !wp;
+    },
+
+    renderCanvas() {
+      const ctx = ctx2d(dom.mapCanvas);
+      if (!ctx) return;
+      const cv = dom.mapCanvas;
+      // Match the backing store to the element's box for crisp drawing.
+      try {
+        const rect = cv.getBoundingClientRect ? cv.getBoundingClientRect() : { width: cv.width, height: cv.height };
+        const w = Math.max(2, Math.round(rect.width || cv.width || 320));
+        const h = Math.max(2, Math.round(rect.height || cv.height || 320));
+        if (cv.width !== w) cv.width = w;
+        if (cv.height !== h) cv.height = h;
+      } catch (e) {}
+      const W = cv.width || 320, H = cv.height || 320;
+      const state = WorldMap.state, player = WorldMap.player, world = state && state.world;
+      if (!state) return;
+      if (this.tab === "world") {
+        const base = Math.min(W, H) * 0.4 * this.view.scale;
+        const proj = (pt) => ({ x: W / 2 + pt.x * base + this.view.ox, y: H / 2 + pt.y * base + this.view.oy });
+        drawWorldScene(ctx, { W, H, state, waypoint: state.waypoint, proj });
+        // Highlight a selected zone target.
+        if (this.sel && this.sel.kind === "zone") {
+          const lay = worldLayout(); const p = lay[this.sel.id]; if (p) mmRing(ctx, proj(p).x, proj(p).y, 20);
+        }
+      } else if (world) {
+        const base = (Math.min(W, H) * 0.45) / (world.radius || 80) * this.view.scale;
+        const proj = (wx, wz) => ({ x: W / 2 + wx * base + this.view.ox, y: H / 2 + wz * base + this.view.oy });
+        drawZoneScene(ctx, { W, H, world, state, player, waypoint: state.waypoint, proj, scale: base, labels: true });
+        // Highlight an in-zone selected target.
+        if (this.sel && targetZoneOf(this.sel.kind, this.sel.id) === state.zoneId) {
+          const pt = targetPoint(this.sel.kind, this.sel.id);
+          if (pt) mmRing(ctx, proj(pt.x, pt.z).x, proj(pt.x, pt.z).y, 9);
+        }
+      }
+    },
+  };
 
   // =========================================================================
   // Dialogue — the NPC conversation overlay. Lists every quest this NPC is
@@ -5765,6 +6233,8 @@ import {
       // 3) Build + theme the new world; re-point the systems that hold a world.
       const world = buildWorld(scene, target);
       state.world = world; state.shadow = world.shadow; state.zoneId = toId;
+      if (!state.discovered) state.discovered = {};
+      state.discovered[toId] = true;          // reveal the new zone on the world map
       player.world = world; worldRef = world;
       DayNight.init(world, DayNight.t);   // re-point sky/sun/hemi to the new zone
       Weather.world = world;               // keep the rain system; just re-aim it
@@ -5861,6 +6331,8 @@ import {
       score: 0, coins: 0, wave: 0, waveTotal: 0, over: false, won: false,
       zoneId: world.zone.id,        // the currently loaded zone
       bossesCleared: {},            // lair bosses defeated this run, by zone id
+      discovered: { [world.zone.id]: true }, // zones the player has visited (map fog-of-war)
+      waypoint: null,               // the active guided target ({ kind, id }) or null
       castleBuilt: [],              // castle parts raised (survives zone reloads)
       artifacts: [], monsters: [], bolts: [], coinsList: [],
       enemyBolts: [],   // hostile boss projectiles (Hazard)
@@ -5893,6 +6365,7 @@ import {
     Crafting.init(state, player);
     CastleUI.init(state, player);
     SkillsUI.init(state, player);
+    WorldMap.init(state, player, camera);
     updatePotionBar(player);
     updateMaterialsHud(player);
     updateRelicHud(player);
@@ -6002,6 +6475,9 @@ import {
 
       interaction.update(player.position);
       if (Input.consumeInteract() && !player.busy) interaction.trigger();
+
+      // Minimap + compass + guided-waypoint arrival (throttled, headless-safe).
+      WorldMap.update(dt);
 
       cosmetics(state, dt);
     });
@@ -6868,7 +7344,7 @@ import {
   // monsters, the boss, artifacts and dropped coins, plus the wave clock) is
   // serialized explicitly so the run resumes exactly where it left off.
   // =========================================================================
-  const SAVE_VERSION = 8;
+  const SAVE_VERSION = 9;
   const PENDING_LOAD_KEY = "gg3d_pending_load"; // sessionStorage hand-off across reload
   const AUTOSTART_KEY = "gg3d_autostart";       // restart -> skip the start screen
 
@@ -6900,6 +7376,10 @@ import {
       // the zone's spawn table on load (and respawn during play anyway).
       zone: state.zoneId,
       bossesCleared: Object.assign({}, state.bossesCleared),
+      // World-map state (v9): zones discovered (fog-of-war) + the active guided
+      // waypoint ({ kind, id }) so the player's chosen destination survives reload.
+      discovered: Object.keys(state.discovered || {}),
+      waypoint: state.waypoint || null,
       score: state.score,
       money: state.coins,
       player: {
@@ -6998,6 +7478,12 @@ import {
     state.bossesCleared = Object.assign({}, d.bossesCleared || {});
     state.castleBuilt = (d.castle || []).slice();
 
+    // World-map state (v9; legacy saves default to "only the saved zone known",
+    // no waypoint). The saved/target zone is always marked discovered below.
+    state.discovered = {};
+    for (const id of (Array.isArray(d.discovered) ? d.discovered : [])) if (ZONE_BY_ID[id]) state.discovered[id] = true;
+    state.waypoint = validWaypoint(d.waypoint) ? { kind: d.waypoint.kind, id: d.waypoint.id } : null;
+
     // Player gear (zone-independent). Rebuild the bag + equipped slots from item
     // ids, then recompute the whole derived stat block.
     const ps = d.player;
@@ -7049,6 +7535,7 @@ import {
     // Stream to the saved zone. If we're already there (the hub on boot), just
     // restore the castle build + re-wake the dragon if it was complete.
     const targetZone = (d.zone && ZONE_BY_ID[d.zone]) ? d.zone : HUB_ZONE;
+    state.discovered[targetZone] = true;   // you're always standing in a known zone
     if (state.zoneId !== targetZone && zoneManager) {
       zoneManager._swap(state.zoneId, targetZone, ZONE_BY_ID[targetZone]);
     } else if (state.castle) {
@@ -7070,6 +7557,8 @@ import {
     updateCoins(state);
     updateLocationHud(ZONE_BY_ID[state.zoneId]);
     updateMonsterCounter(state);
+    WorldMap.update(0);                 // redraw the minimap + restored compass
+    if (WorldMapUI.open) WorldMapUI.render();
   }
 
   // Serialize the current run and hand the player a .json download.
@@ -7938,6 +8427,21 @@ import {
       if (dom.skillsBtn) dom.skillsBtn.addEventListener("click", () => { Sfx.play("ui_click"); SkillsUI.toggle(); });
       if (dom.skillsClose) dom.skillsClose.addEventListener("click", () => SkillsUI.close());
       if (dom.skillsDone) dom.skillsDone.addEventListener("click", () => SkillsUI.close());
+
+      // World-map overlay (🗺️ / Tab): tabs, search, zoom, guide + the minimap.
+      WorldMapUI.init();
+      if (dom.mapBtn) dom.mapBtn.addEventListener("click", () => { Sfx.play("ui_click"); WorldMapUI.toggle(); });
+      if (dom.minimap) dom.minimap.addEventListener("click", () => { Sfx.play("ui_click"); WorldMapUI.openMap(); });
+      if (dom.mapClose) dom.mapClose.addEventListener("click", () => WorldMapUI.close());
+      if (dom.mapDone) dom.mapDone.addEventListener("click", () => WorldMapUI.close());
+      if (dom.mapTabZone) dom.mapTabZone.addEventListener("click", () => { Sfx.play("ui_click"); WorldMapUI.setTab("zone"); });
+      if (dom.mapTabWorld) dom.mapTabWorld.addEventListener("click", () => { Sfx.play("ui_click"); WorldMapUI.setTab("world"); });
+      if (dom.mapSearch) dom.mapSearch.addEventListener("input", (e) => WorldMapUI.search(e.target ? e.target.value : ""));
+      if (dom.mapZoomIn) dom.mapZoomIn.addEventListener("click", () => WorldMapUI.zoom(1.25));
+      if (dom.mapZoomOut) dom.mapZoomOut.addEventListener("click", () => WorldMapUI.zoom(1 / 1.25));
+      if (dom.mapGuideBtn) dom.mapGuideBtn.addEventListener("click", () => WorldMapUI.guide());
+      if (dom.mapClearBtn) dom.mapClearBtn.addEventListener("click", () => { WorldMap.clearWaypoint(false); WorldMapUI.render(); });
+
       if (dom.winReplayBtn) dom.winReplayBtn.addEventListener("click", () => window.location.reload());
 
       // Music toggle (🔊 / 🔇).
@@ -7976,26 +8480,35 @@ import {
           e.preventDefault(); return;
         }
         // Inventory hotkey (only once playing, and not while another menu is up).
-        if ((e.code === "KeyI" || e.code === "KeyB") && gameStarted && !paused && !Shop.open && !Anvil.open && !Dialogue.open && !Crafting.open && !CastleUI.open && !SkillsUI.open) {
+        // While typing in the map search, let keys flow to the input (only Esc /
+        // the map toggle are still honoured below).
+        const typingInSearch = WorldMapUI.open && e.target === dom.mapSearch;
+        if ((e.code === "KeyI" || e.code === "KeyB") && gameStarted && !paused && !Shop.open && !Anvil.open && !Dialogue.open && !Crafting.open && !CastleUI.open && !SkillsUI.open && !WorldMapUI.open) {
           Inventory.toggle(); e.preventDefault(); return;
         }
         // Skills & fusion (K) hotkey.
-        if (e.code === "KeyK" && gameStarted && !paused && !Shop.open && !Anvil.open && !Inventory.open && !Dialogue.open && !Crafting.open && !CastleUI.open) {
+        if (e.code === "KeyK" && gameStarted && !paused && !Shop.open && !Anvil.open && !Inventory.open && !Dialogue.open && !Crafting.open && !CastleUI.open && !WorldMapUI.open) {
           SkillsUI.toggle(); e.preventDefault(); return;
         }
         // Crafting bench (C) and quest log (J) hotkeys.
-        if (e.code === "KeyC" && gameStarted && !paused && !Shop.open && !Anvil.open && !Inventory.open && !Dialogue.open && !CastleUI.open && !SkillsUI.open) {
+        if (e.code === "KeyC" && gameStarted && !paused && !Shop.open && !Anvil.open && !Inventory.open && !Dialogue.open && !CastleUI.open && !SkillsUI.open && !WorldMapUI.open) {
           Crafting.toggle(); e.preventDefault(); return;
         }
-        if ((e.code === "KeyJ" || e.code === "KeyL") && gameStarted && !paused && !Shop.open && !Anvil.open && !Inventory.open && !Dialogue.open && !Crafting.open && !SkillsUI.open) {
+        if ((e.code === "KeyJ" || e.code === "KeyL") && gameStarted && !paused && !Shop.open && !Anvil.open && !Inventory.open && !Dialogue.open && !Crafting.open && !SkillsUI.open && !WorldMapUI.open) {
           QuestLog.toggle(); e.preventDefault(); return;
         }
-        if (e.code === "KeyM") { Music.toggle(); return; }
+        // World map (Tab / 🗺️) and minimap toggle (N).
+        if (e.code === "Tab" && gameStarted && !paused && !Shop.open && !Anvil.open && !Inventory.open && !Dialogue.open && !Crafting.open && !CastleUI.open && !SkillsUI.open) {
+          WorldMapUI.toggle(); e.preventDefault(); return;
+        }
+        if (e.code === "KeyN" && gameStarted && !paused && !typingInSearch) { WorldMap.toggleMinimap(); e.preventDefault(); return; }
+        if (e.code === "KeyM" && !typingInSearch) { Music.toggle(); return; }
         if (e.code !== "Escape") return;
         if (Shop.open) { Shop.closeShop(); return; }
         if (Anvil.open) { Anvil.close(); return; }
         if (Inventory.open) { Inventory.close(); return; }
         if (SkillsUI.open) { SkillsUI.close(); return; }
+        if (WorldMapUI.open) { WorldMapUI.close(); return; }
         if (Dialogue.open) { Dialogue.close(); return; }
         if (Crafting.open) { Crafting.close(); return; }
         if (CastleUI.open) { CastleUI.close(); return; }
@@ -8139,6 +8652,11 @@ import {
       // ---- RPG world / zones ----
       ZONES, ZONE_BY_ID, HUB_ZONE, SpawnDirector, ZoneManager, buildWorld,
       setupZoneContent, teardownZone,
+      // ---- Minimap / world map / guided waypoint (Task 13) ----
+      WorldMap, WorldMapUI, resolveWaypoint,
+      ZONE_ADJ, zoneEdges, findRoute, nextZoneStep, bearingRad, dist2D,
+      relativeHeading, compass8, MAP_TARGETS, targetZoneOf, targetPoint,
+      validWaypoint, searchTargets, worldLayout,
       // ---- Animation (Task 5) ----
       Swing, SWING_DUR, ambientSpecFor, buildAmbientFX, AMBIENT_SPECS,
       // ---- Lighting / shadows / quality tier (Task 4) ----

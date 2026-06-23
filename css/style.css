@@ -525,12 +525,13 @@ html, body {
 .icon-btn:hover { background: rgba(11, 15, 26, 0.85); }
 .icon-btn:active { transform: scale(0.92); }
 /* Row, right→left: fullscreen, pause(+52), inventory(+104), skills(+156),
-   craft(+208), quest(+260), music(+312). */
+   craft(+208), quest(+260), map(+312), music(+364). */
 .inv-btn    { right: calc(max(12px, env(safe-area-inset-right)) + 104px); }
 .skills-btn { right: calc(max(12px, env(safe-area-inset-right)) + 156px); }
 .craft-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 208px); }
 .quest-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 260px); }
-.music-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 312px); }
+.map-btn    { right: calc(max(12px, env(safe-area-inset-right)) + 312px); }
+.music-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 364px); }
 /* On phones the row holds seven buttons; shrink + tighten them so the row keeps
    the same footprint it had before the ✨ skills button (no crowding the chips). */
 @media (pointer: coarse) {
@@ -540,7 +541,8 @@ html, body {
   .skills-btn { right: calc(max(12px, env(safe-area-inset-right)) + 132px); }
   .craft-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 176px); }
   .quest-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 220px); }
-  .music-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 264px); }
+  .map-btn    { right: calc(max(12px, env(safe-area-inset-right)) + 264px); }
+  .music-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 308px); }
 }
 
 /* ---------- Shop Buy/Sell tabs ---------- */
@@ -933,4 +935,94 @@ html, body {
 @media (max-width: 560px) {
   .materials-bar { max-width: 52vw; }
   .quest-tracker { max-width: 56vw; }
+}
+
+/* ============================================================================
+   Minimap · compass · world map (Task 13)
+   ============================================================================ */
+/* Corner minimap — top-right, under the icon-button row. North-up, tappable. */
+.minimap {
+  position: absolute; top: max(64px, calc(env(safe-area-inset-top) + 56px));
+  right: max(12px, env(safe-area-inset-right));
+  width: 150px; height: 150px; border-radius: 14px; overflow: hidden;
+  background: rgba(11, 15, 26, 0.55); border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4); pointer-events: auto; cursor: pointer;
+  transition: transform 0.1s ease;
+}
+.minimap:active { transform: scale(0.97); }
+.minimap-canvas { display: block; width: 100%; height: 100%; }
+.minimap-n {
+  position: absolute; top: 4px; left: 50%; transform: translateX(-50%);
+  font-size: 11px; font-weight: 800; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  pointer-events: none;
+}
+
+/* Guided-waypoint compass — a pill just under the minimap. */
+.compass {
+  position: absolute; top: max(222px, calc(env(safe-area-inset-top) + 214px));
+  right: max(12px, env(safe-area-inset-right));
+  display: flex; align-items: center; gap: 8px; max-width: 230px;
+  padding: 6px 12px; border-radius: 999px; pointer-events: none;
+  background: rgba(11, 15, 26, 0.72); border: 1px solid rgba(255, 207, 92, 0.5);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+.compass-arrow {
+  font-size: 18px; color: var(--accent); line-height: 1;
+  display: inline-block; transition: transform 0.12s ease;
+}
+.compass-label { font-size: 12px; font-weight: 700; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* World-map overlay panel. */
+.map-panel { max-width: 720px; width: min(720px, 94vw); }
+.map-tabs { display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+.map-zoom { margin-left: auto; display: inline-flex; gap: 6px; }
+.map-zoom-btn {
+  width: 34px; height: 34px; border-radius: 9px; cursor: pointer; font-size: 20px; line-height: 1;
+  background: rgba(255, 255, 255, 0.08); color: var(--ink); border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.map-zoom-btn:hover { background: rgba(255, 255, 255, 0.16); }
+.map-body { display: flex; gap: 12px; align-items: stretch; }
+.map-canvas-wrap {
+  flex: 1 1 60%; min-width: 0; border-radius: 12px; overflow: hidden;
+  background: #10131f; border: 1px solid rgba(255, 255, 255, 0.14);
+  aspect-ratio: 1 / 1; touch-action: none;
+}
+.map-canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+.map-canvas:active { cursor: grabbing; }
+.map-side { flex: 1 1 40%; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.map-search {
+  width: 100%; padding: 9px 12px; border-radius: 10px; font-size: 14px;
+  background: rgba(11, 15, 26, 0.6); color: var(--ink); border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.map-results {
+  flex: 1 1 auto; overflow-y: auto; max-height: 320px; display: flex; flex-direction: column; gap: 5px;
+}
+.map-result {
+  display: flex; align-items: center; gap: 8px; text-align: left; cursor: pointer; width: 100%;
+  padding: 7px 9px; border-radius: 9px; color: var(--ink);
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.map-result:hover { background: rgba(255, 255, 255, 0.12); }
+.map-result.sel { border-color: var(--accent); background: rgba(255, 207, 92, 0.16); }
+.map-result .mr-icon { font-size: 18px; }
+.map-result .mr-name { font-weight: 700; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-result .mr-zone { font-size: 11px; opacity: 0.7; white-space: nowrap; }
+.map-empty { opacity: 0.6; font-size: 13px; padding: 8px; }
+.map-sel-info { margin: 8px 0 0; min-height: 20px; font-size: 13px; }
+.map-sel-info .msi-name { font-weight: 800; font-size: 15px; }
+.map-sel-info .msi-route { opacity: 0.85; margin-top: 2px; }
+.map-sel-info .msi-active { color: var(--accent); margin-top: 3px; font-weight: 700; }
+.map-sel-info .msi-hint { opacity: 0.7; }
+.map-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.map-actions .start-btn { margin: 0; flex: 1 1 auto; min-width: 130px; }
+.map-guide:disabled { opacity: 0.5; cursor: default; }
+
+@media (pointer: coarse) {
+  .minimap { width: 116px; height: 116px; top: max(58px, calc(env(safe-area-inset-top) + 50px)); }
+  .compass { top: max(182px, calc(env(safe-area-inset-top) + 174px)); max-width: 190px; }
+}
+@media (max-width: 620px) {
+  .map-body { flex-direction: column; }
+  .map-canvas-wrap { flex-basis: auto; }
+  .map-results { max-height: 180px; }
 }
