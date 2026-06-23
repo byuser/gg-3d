@@ -47,35 +47,189 @@
   // Append a "+N" suffix to an enhanced item's name (e.g. "Iron Sword +3").
   const enhanceName = (name, level) => level ? `${name} +${level}` : name;
 
-  // An item's effective stat block once its enhancement level is folded in.
-  // `haste` (a sub-1 cooldown multiplier) improves *toward* zero, so we scale
-  // its distance from 1 instead of the raw value.
-  function effectiveStats(inst) {
-    const def = getDef(inst.id);
-    const base = def.stats || {};
-    const mult = enhanceMult(def, instLevel(inst));
-    if (mult === 1) return base;
+  // ---- Enchantments / affixes (Task 12) ---------------------------------
+  // Found + crafted gear can carry up to a few AFFIXES — prefix/suffix modifiers
+  // that add stats on top of the item's base block. An instance stores only the
+  // affix *ids* (`inst.affixes = ["fierce", "of_vigor"]`); the magnitude is
+  // derived from the item's rarity tier (AFFIX_TIER_MULT), so a roll is tiny to
+  // save and reproduces exactly on load (no re-roll). Each affix declares which
+  // item categories it can land on. `haste` affixes compound multiplicatively
+  // and are NOT rarity-scaled (scaling a sub-1 multiplier toward 0 is nonsense).
+  const AFFIXES = {
+    // prefixes — mostly offensive / utility
+    fierce:   { kind: "prefix", label: "Fierce",   on: ["weapon"],            stats: { damage: 1 } },
+    keen:     { kind: "prefix", label: "Keen",     on: ["weapon"],            stats: { pierce: 1 } },
+    vampiric: { kind: "prefix", label: "Vampiric", on: ["weapon"],            stats: { lifesteal: 1 } },
+    swift:    { kind: "prefix", label: "Swift",    on: ["weapon", "jewelry"], stats: { haste: 0.92 } },
+    sturdy:   { kind: "prefix", label: "Sturdy",   on: ["armor"],             stats: { maxHealth: 10 } },
+    guarded:  { kind: "prefix", label: "Guarded",  on: ["armor", "jewelry"],  stats: { damageReduction: 0.03 } },
+    fleet:    { kind: "prefix", label: "Fleet",    on: ["armor", "jewelry"],  stats: { moveSpeed: 0.4 } },
+    // suffixes — "of X"
+    of_vigor:     { kind: "suffix", label: "of Vigor",     on: ["weapon", "armor", "jewelry"], stats: { maxHealth: 12 } },
+    of_warding:   { kind: "suffix", label: "of Warding",   on: ["armor", "jewelry"],           stats: { damageReduction: 0.03 } },
+    of_power:     { kind: "suffix", label: "of Power",     on: ["weapon", "jewelry"],          stats: { damage: 1 } },
+    of_haste:     { kind: "suffix", label: "of Haste",     on: ["weapon", "jewelry"],          stats: { haste: 0.93 } },
+    of_swiftness: { kind: "suffix", label: "of Swiftness", on: ["armor", "jewelry"],           stats: { moveSpeed: 0.5 } },
+    of_leeching:  { kind: "suffix", label: "of Leeching",  on: ["weapon", "jewelry"],          stats: { lifesteal: 1 } },
+    of_fortune:   { kind: "suffix", label: "of Fortune",   on: ["armor", "jewelry"],           stats: { coinRange: 2 } },
+  };
+  // How many affixes a freshly-generated item of each rarity rolls, and how much
+  // its rarity scales each affix's additive magnitude. Normal gear stays clean.
+  const RARITY_AFFIX_COUNT = { normal: 0, rare: 1, epic: 2, legendary: 3 };
+  const AFFIX_TIER_MULT = [1, 1.4, 1.9, 2.5]; // indexed by RARITY[...].tier
+
+  // An item's affix "category" for pool filtering: weapons, jewelry (ring/necklace)
+  // or armour (everything else worn).
+  function itemCategory(def) {
+    if (!def) return "armor";
+    if (def.type === "weapon") return "weapon";
+    if (def.type === "ring" || def.type === "necklace") return "jewelry";
+    return "armor";
+  }
+  // The affix ids that may roll on a given item def (by category).
+  function affixPoolFor(def) {
+    const cat = itemCategory(def);
+    return Object.keys(AFFIXES).filter((id) => AFFIXES[id].on.includes(cat));
+  }
+  // Deterministically pick this item's affixes from its pool using a 0..1 rng fn.
+  // Pure: same def + same rng sequence ⇒ same affixes. Returns an array of ids.
+  function rollAffixes(def, rngFn) {
+    const n = RARITY_AFFIX_COUNT[def && def.rarity] || 0;
+    if (!n || !isGear(def.id)) return [];
+    const pool = affixPoolFor(def);
+    const out = [];
+    for (let i = 0; i < n && pool.length; i++) {
+      const idx = Math.min(pool.length - 1, Math.floor((rngFn() || 0) * pool.length));
+      out.push(pool.splice(idx, 1)[0]);
+    }
+    return out;
+  }
+  const affixMagMult = (def) => AFFIX_TIER_MULT[(RARITY[def && def.rarity] || RARITY.normal).tier] || 1;
+  // The stat block contributed by an instance's affixes (rarity-scaled additive
+  // stats; haste compounds multiplicatively).
+  function affixStats(inst) {
     const out = {};
-    for (const k in base) {
-      out[k] = k === "haste" ? 1 - (1 - base[k]) * mult : base[k] * mult;
+    const def = getDef(inst && inst.id);
+    const list = (inst && inst.affixes) || [];
+    if (!def || !list.length) return out;
+    const mag = affixMagMult(def);
+    for (const id of list) {
+      const a = AFFIXES[id];
+      if (!a || !a.stats) continue;
+      for (const k in a.stats) {
+        if (k === "haste") out.haste = (out.haste == null ? 1 : out.haste) * a.stats[k];
+        else out[k] = (out[k] || 0) + a.stats[k] * mag;
+      }
     }
     return out;
   }
 
-  // Equipment slots, in display order. A two-handed weapon lives in hand1 with
-  // a TWO_HANDED sentinel parked in hand2 so the off-hand reads as occupied.
-  const EQUIP_SLOTS = ["helmet", "breastplate", "boots", "necklace", "ring1", "ring2", "hand1", "hand2"];
+  // ---- Equipment sets (Task 12) -----------------------------------------
+  // Wearing several pieces of a set grants cumulative bonuses at thresholds. A
+  // gear def opts in via `set: "<id>"`. setBonusStats() is pure over an equipment
+  // map so it can be previewed + unit-tested without a live player.
+  const SETS = {
+    ironguard: {
+      name: "Ironguard",
+      pieces: ["iron_helm", "iron_plate", "iron_greaves", "iron_pauldrons", "iron_gauntlets", "reinforced_belt"],
+      bonuses: { 2: { damageReduction: 0.04 }, 4: { maxHealth: 40, damageReduction: 0.06 } },
+    },
+    dragonscale: {
+      name: "Dragonscale",
+      pieces: ["dragon_helm", "dragonscale_plate", "dragon_pauldrons", "dragon_gauntlets", "dragon_belt", "dragon_cloak"],
+      bonuses: { 2: { maxHealth: 25 }, 4: { damage: 2, damageReduction: 0.06 }, 6: { maxHealth: 50, lifesteal: 3 } },
+    },
+  };
+  // How many distinct equipped pieces of each set are present in an equipment map.
+  function setCounts(equipment) {
+    const counts = {};
+    for (const slot in equipment) {
+      const inst = equipment[slot];
+      if (!inst || inst === TWO_HANDED) continue;
+      const def = getDef(inst.id);
+      if (def && def.set) counts[def.set] = (counts[def.set] || 0) + 1;
+    }
+    return counts;
+  }
+  // The merged stat bonus from every set threshold currently met.
+  function setBonusStats(equipment) {
+    const counts = setCounts(equipment);
+    const out = {};
+    for (const setId in counts) {
+      const set = SETS[setId];
+      if (!set) continue;
+      for (const thr in set.bonuses) {
+        if (counts[setId] >= +thr) {
+          const s = set.bonuses[thr];
+          for (const k in s) out[k] = (out[k] || 0) + s[k];
+        }
+      }
+    }
+    return out;
+  }
+  // A UI-friendly summary of every set with at least one piece equipped:
+  // [{ id, name, count, total, next, bonuses:[{threshold, met, stats}] }].
+  function activeSets(equipment) {
+    const counts = setCounts(equipment);
+    const out = [];
+    for (const setId in counts) {
+      const set = SETS[setId];
+      if (!set) continue;
+      const thresholds = Object.keys(set.bonuses).map(Number).sort((a, b) => a - b);
+      out.push({
+        id: setId, name: set.name, count: counts[setId], total: set.pieces.length,
+        next: thresholds.find((thr) => counts[setId] < thr) || null,
+        bonuses: thresholds.map((thr) => ({ threshold: thr, met: counts[setId] >= thr, stats: set.bonuses[thr] })),
+      });
+    }
+    return out;
+  }
+
+  // An item's effective stat block once its enhancement level + affixes are folded
+  // in. `haste` (a sub-1 cooldown multiplier) improves *toward* zero, so we scale
+  // its distance from 1 instead of the raw value; affix haste then compounds.
+  function effectiveStats(inst) {
+    const def = getDef(inst.id);
+    const base = def.stats || {};
+    const mult = enhanceMult(def, instLevel(inst));
+    const affix = affixStats(inst);
+    const hasAffix = Object.keys(affix).length > 0;
+    if (mult === 1 && !hasAffix) return base;
+    const out = {};
+    for (const k in base) {
+      out[k] = k === "haste" ? 1 - (1 - base[k]) * mult : base[k] * mult;
+    }
+    for (const k in affix) {
+      if (k === "haste") out.haste = (out.haste == null ? 1 : out.haste) * affix.haste;
+      else out[k] = (out[k] || 0) + affix[k];
+    }
+    return out;
+  }
+
+  // Equipment slots, head-to-toe display order. A two-handed weapon lives in hand1
+  // with a TWO_HANDED sentinel parked in hand2 so the off-hand reads as occupied.
+  // Task 12 widened the loadout from 8 to 12 worn slots (pauldrons/gloves/belt/cloak
+  // joined helmet/breastplate/boots/necklace/rings/hands). Each armour `type` equals
+  // its slot name so equipItem() routes by type with no extra mapping.
+  const EQUIP_SLOTS = ["helmet", "pauldrons", "breastplate", "gloves", "belt", "boots",
+                       "cloak", "necklace", "ring1", "ring2", "hand1", "hand2"];
   const TWO_HANDED = "__2H__";
   const SLOT_META = {
     helmet:      { label: "Helmet",      icon: "🪖" },
+    pauldrons:   { label: "Pauldrons",   icon: "🎽" },
     breastplate: { label: "Breastplate", icon: "🦺" },
+    gloves:      { label: "Gloves",      icon: "🧤" },
+    belt:        { label: "Belt",        icon: "🪢" },
     boots:       { label: "Boots",       icon: "🥾" },
+    cloak:       { label: "Cloak",       icon: "🧥" },
     necklace:    { label: "Necklace",    icon: "📿" },
     ring1:       { label: "Ring",        icon: "💍" },
     ring2:       { label: "Ring",        icon: "💍" },
     hand1:       { label: "Main hand",   icon: "🤚" },
     hand2:       { label: "Off hand",    icon: "✋" },
   };
+  // Which equip slots a built worn-gear mesh exists for (the rest read off the body).
+  const WORN_SLOTS = ["helmet", "pauldrons", "breastplate", "gloves", "belt", "boots", "cloak"];
 
   // The fallback "weapon" when the player holds nothing — bare-handed melee.
   const FISTS = {
@@ -128,11 +282,19 @@
 
     // ----- Armour (normal / buyable) -----
     leather_cap:    { name: "Leather Cap",    icon: "🧢", type: "helmet",      rarity: "normal", cost: 14, desc: "+15 max health.", stats: { maxHealth: 15 } },
-    iron_helm:      { name: "Iron Helm",      icon: "⛑️", type: "helmet",      rarity: "normal", cost: 30, desc: "+25 health, +4% resist.", stats: { maxHealth: 25, damageReduction: 0.04 } },
+    iron_helm:      { name: "Iron Helm",      icon: "⛑️", type: "helmet",      rarity: "normal", cost: 30, desc: "+25 health, +4% resist.", stats: { maxHealth: 25, damageReduction: 0.04 }, set: "ironguard" },
     leather_vest:   { name: "Leather Vest",   icon: "🦺", type: "breastplate", rarity: "normal", cost: 20, desc: "+20 health, +4% resist.", stats: { maxHealth: 20, damageReduction: 0.04 } },
-    iron_plate:     { name: "Iron Plate",     icon: "🛡️", type: "breastplate", rarity: "normal", cost: 40, desc: "+35 health, +10% resist.", stats: { maxHealth: 35, damageReduction: 0.1 } },
+    iron_plate:     { name: "Iron Plate",     icon: "🛡️", type: "breastplate", rarity: "normal", cost: 40, desc: "+35 health, +10% resist.", stats: { maxHealth: 35, damageReduction: 0.1 }, set: "ironguard" },
     leather_boots:  { name: "Leather Boots",  icon: "🥾", type: "boots",       rarity: "normal", cost: 16, desc: "+0.8 move speed.", stats: { moveSpeed: 0.8 } },
-    iron_greaves:   { name: "Iron Greaves",   icon: "🦿", type: "boots",       rarity: "normal", cost: 30, desc: "+0.4 speed, +5% resist.", stats: { moveSpeed: 0.4, damageReduction: 0.05 } },
+    iron_greaves:   { name: "Iron Greaves",   icon: "🦿", type: "boots",       rarity: "normal", cost: 30, desc: "+0.4 speed, +5% resist.", stats: { moveSpeed: 0.4, damageReduction: 0.05 }, set: "ironguard" },
+    leather_pauldrons: { name: "Leather Spaulders", icon: "🎽", type: "pauldrons", rarity: "normal", cost: 16, desc: "+12 max health.", stats: { maxHealth: 12 } },
+    iron_pauldrons: { name: "Iron Spaulders", icon: "🎽", type: "pauldrons", rarity: "normal", cost: 32, desc: "+18 health, +5% resist.", stats: { maxHealth: 18, damageReduction: 0.05 }, set: "ironguard" },
+    leather_gloves: { name: "Leather Gloves", icon: "🧤", type: "gloves",     rarity: "normal", cost: 14, desc: "+1 weapon damage.", stats: { damage: 1 } },
+    iron_gauntlets: { name: "Iron Gauntlets", icon: "🧤", type: "gloves",     rarity: "normal", cost: 30, desc: "+12 health, +1 damage.", stats: { maxHealth: 12, damage: 1 }, set: "ironguard" },
+    leather_belt:   { name: "Leather Belt",   icon: "🪢", type: "belt",        rarity: "normal", cost: 12, desc: "+10 max health.", stats: { maxHealth: 10 } },
+    reinforced_belt:{ name: "Reinforced Belt", icon: "🪢", type: "belt",       rarity: "normal", cost: 28, desc: "+14 health, +3% resist.", stats: { maxHealth: 14, damageReduction: 0.03 }, set: "ironguard" },
+    travel_cloak:   { name: "Travelling Cloak", icon: "🧥", type: "cloak",     rarity: "normal", cost: 18, desc: "+0.7 move speed.", stats: { moveSpeed: 0.7 } },
+    guard_cloak:    { name: "Warding Cloak",  icon: "🧥", type: "cloak",       rarity: "normal", cost: 30, desc: "+18 health, +4% resist.", stats: { maxHealth: 18, damageReduction: 0.04 } },
 
     // ----- Accessories (normal / buyable) -----
     amulet_vigor:   { name: "Amulet of Vigor", icon: "📿", type: "necklace", rarity: "normal", cost: 26, desc: "+25 max health.", stats: { maxHealth: 25 } },
@@ -152,11 +314,18 @@
                       weapon: { ranged: false, damage: 3, cooldown: 0.16, multishot: 1, melee: { range: 2.5, arc: 1.4 }, color: "#ff9db0" }, stats: { lifesteal: 1 } },
     thunder_hammer: { name: "Thunder Hammer", icon: "🔨", type: "weapon", rarity: "rare", hands: 2, value: 130, desc: "Two-handed. Crushing, enormous arc.",
                       weapon: { ranged: false, damage: 10, cooldown: 0.85, multishot: 1, melee: { range: 3.6, arc: 2.7 }, color: "#ffd76a" } },
-    dragon_helm:    { name: "Dragon Helm",   icon: "🐲", type: "helmet",      rarity: "rare", value: 80, desc: "+40 health, +10% resist.", stats: { maxHealth: 40, damageReduction: 0.1 } },
+    dragon_helm:    { name: "Dragon Helm",   icon: "🐲", type: "helmet",      rarity: "rare", value: 80, desc: "+40 health, +10% resist.", stats: { maxHealth: 40, damageReduction: 0.1 }, set: "dragonscale" },
     aegis_plate:    { name: "Aegis Plate",   icon: "🛡️", type: "breastplate", rarity: "rare", value: 100, desc: "+55 health, +16% resist.", stats: { maxHealth: 55, damageReduction: 0.16 } },
     winged_boots:   { name: "Winged Boots",  icon: "🪽", type: "boots",       rarity: "rare", value: 80, desc: "+1.4 speed, +5% resist.", stats: { moveSpeed: 1.4, damageReduction: 0.05 } },
     vampiric_ring:  { name: "Vampiric Ring", icon: "🩸", type: "ring",        rarity: "rare", value: 70, desc: "Heal +3 per kill.", stats: { lifesteal: 3 } },
     titan_pendant:  { name: "Titan Pendant", icon: "💠", type: "necklace",    rarity: "rare", value: 110, desc: "+45 health, +8% resist, +2 damage.", stats: { maxHealth: 45, damageReduction: 0.08, damage: 2 } },
+    dragonscale_plate: { name: "Dragonscale Plate", icon: "🐲", type: "breastplate", rarity: "rare", value: 105, desc: "+50 health, +14% resist.", stats: { maxHealth: 50, damageReduction: 0.14 }, set: "dragonscale" },
+    dragon_pauldrons: { name: "Dragonscale Spaulders", icon: "🐲", type: "pauldrons", rarity: "rare", value: 80, desc: "+30 health, +8% resist.", stats: { maxHealth: 30, damageReduction: 0.08 }, set: "dragonscale" },
+    dragon_gauntlets: { name: "Dragonscale Gauntlets", icon: "🐲", type: "gloves", rarity: "rare", value: 78, desc: "+18 health, +2 damage.", stats: { maxHealth: 18, damage: 2 }, set: "dragonscale" },
+    dragon_belt:    { name: "Dragonscale Belt", icon: "🐲", type: "belt",      rarity: "rare", value: 76, desc: "+22 health, +5% resist.", stats: { maxHealth: 22, damageReduction: 0.05 }, set: "dragonscale" },
+    dragon_cloak:   { name: "Dragonscale Cloak", icon: "🐲", type: "cloak",    rarity: "rare", value: 90, desc: "+0.8 speed, +6% resist.", stats: { moveSpeed: 0.8, damageReduction: 0.06 }, set: "dragonscale" },
+    shadow_cloak:   { name: "Shadow Cloak",  icon: "🌑", type: "cloak",       rarity: "rare", value: 84, desc: "+1.1 speed, +5% resist.", stats: { moveSpeed: 1.1, damageReduction: 0.05 } },
+    swift_gloves:   { name: "Quickhand Gloves", icon: "🤌", type: "gloves",   rarity: "rare", value: 72, desc: "Attack 10% faster.", stats: { haste: 0.9 } },
 
     // ----- EPIC gear (featured shop / blacksmith showcase) -----
     void_scythe:    { name: "Void Scythe", icon: "🌑", type: "weapon", rarity: "epic", hands: 2, value: 200, desc: "Two-handed. A reaping, life-draining arc.",
@@ -165,6 +334,8 @@
                       weapon: { ranged: true, shape: "bolt", damage: 3, cooldown: 0.3, multishot: 5, spread: 0.14, pierce: 1, boltSpeed: 28, boltRadius: 0.95, gravity: 1.1, color: "#ffb24e", haloColor: "#ffe27a" } },
     phoenix_plate:  { name: "Phoenix Plate", icon: "🔥", type: "breastplate", rarity: "epic", value: 180, desc: "+75 health, +20% resist.", stats: { maxHealth: 75, damageReduction: 0.2 } },
     seraph_ring:    { name: "Seraph Ring", icon: "💫", type: "ring", rarity: "epic", value: 150, desc: "+3 damage, +5 lifesteal.", stats: { damage: 3, lifesteal: 5 } },
+    storm_pauldrons:{ name: "Stormforged Spaulders", icon: "⚡", type: "pauldrons", rarity: "epic", value: 160, desc: "+45 health, +12% resist.", stats: { maxHealth: 45, damageReduction: 0.12 } },
+    titan_gauntlets:{ name: "Titan Gauntlets", icon: "🥊", type: "gloves", rarity: "epic", value: 150, desc: "+25 health, +3 damage.", stats: { maxHealth: 25, damage: 3 } },
 
     // ----- LEGENDARY gear (the apex featured / blacksmith showcase) -----
     world_ender:    { name: "World-Ender", icon: "💥", type: "weapon", rarity: "legendary", hands: 2, value: 320, desc: "Two-handed. Cataclysmic, sweeping ruin.",
@@ -172,6 +343,7 @@
     astral_bow:     { name: "Astral Bow", icon: "🌟", type: "weapon", rarity: "legendary", hands: 2, value: 300, desc: "Two-handed. A 5-arrow piercing storm.",
                       weapon: { ranged: true, shape: "arrow", damage: 5, cooldown: 0.4, multishot: 5, spread: 0.1, pierce: 3, boltSpeed: 46, boltRadius: 0.6, gravity: 6, color: "#a8e0ff", haloColor: "#eaffff" } },
     crown_eternal:  { name: "Crown Eternal", icon: "👑", type: "helmet", rarity: "legendary", value: 280, desc: "+90 health, +18% resist, +3 damage.", stats: { maxHealth: 90, damageReduction: 0.18, damage: 3 } },
+    wings_of_dawn:  { name: "Wings of Dawn", icon: "🪽", type: "cloak", rarity: "legendary", value: 300, desc: "+1.6 speed, +35 health, +8% resist.", stats: { moveSpeed: 1.6, maxHealth: 35, damageReduction: 0.08 } },
 
     // ----- Potions / consumables (the potion belt) -----
     minor_potion:   { name: "Minor Health Potion", icon: "🧪", type: "potion", rarity: "normal", cost: 8,  desc: "Restore 30 health.", potion: { heal: 30 } },
@@ -202,6 +374,8 @@
 
 export {
   RARITY, ENHANCE, enhanceRule, instLevel, enhanceMult, enhanceCost, enhanceName,
-  effectiveStats, EQUIP_SLOTS, TWO_HANDED, SLOT_META, FISTS, ITEM_DB, getDef, isGear,
+  effectiveStats, EQUIP_SLOTS, WORN_SLOTS, TWO_HANDED, SLOT_META, FISTS, ITEM_DB, getDef, isGear,
   SHOP_STOCK, POTION_STOCK, RARE_DROPS, FEATURED_POOL,
+  AFFIXES, RARITY_AFFIX_COUNT, AFFIX_TIER_MULT, itemCategory, affixPoolFor, rollAffixes,
+  affixStats, affixMagMult, SETS, setCounts, setBonusStats, activeSets,
 };

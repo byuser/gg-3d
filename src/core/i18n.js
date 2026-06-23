@@ -3,7 +3,7 @@
 // data-table display-name resolvers. The two resolvers that read runtime
 // systems (tWeatherLabel -> Weather, bossDisplayName -> boss archetypes) live
 // in the runtime module instead, to keep this layer dependency-acyclic.
-import { RARITY, SLOT_META, getDef } from "../data/items.js";
+import { RARITY, SLOT_META, getDef, AFFIXES, SETS } from "../data/items.js";
 import {
   MATERIALS, RESOURCE_KINDS, RELICS, CASTLE_PART_BY_ID, LOCATION_BY_ID, NPC_BY_ID,
 } from "../data/content.js";
@@ -128,6 +128,33 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "inv.damage": "💥 Damage",
       "inv.bag": "🎒 Bag ({n}/{cap})",
       "inv.bagEmpty": "Empty — buy gear from the merchant or beat a boss for rare loot.",
+      // ----- Task 12: tabbed bag, filter/sort, compare, sets, enchantments -----
+      "inv.tagline2": "Equip from the bag · click a slot to remove · drink potions.",
+      "inv.tabGear": "Gear",
+      "inv.tabMaterials": "Materials",
+      "inv.tabPotions": "Potions",
+      "inv.filterAll": "All",
+      "inv.filterLabel": "Show",
+      "inv.sortLabel": "Sort",
+      "inv.sortRarity": "Rarity",
+      "inv.sortType": "Type",
+      "inv.sortName": "Name",
+      "inv.matsTitle": "🧺 Materials",
+      "inv.matsEmpty": "No materials yet — chop trees, mine rocks and gather herbs out in the wilds.",
+      "inv.potionsTitle": "🧪 Potion belt",
+      "inv.potionsEmpty": "No potions on the belt — buy or craft some to quaff in a pinch.",
+      "inv.drink": "Drink",
+      "inv.enchantments": "✨ Enchantments",
+      "inv.setBonus": "🏅 Set bonus",
+      "inv.setProgress": "{name} ({n}/{total})",
+      "inv.setNext": "Wear {n} for the next bonus",
+      "inv.setComplete": "Full set!",
+      "inv.compareBetter": "▲ {text}",
+      "inv.compareWorse": "▼ {text}",
+      "inv.compareSame": "= no change",
+      "inv.kindWeapon": "Weapons",
+      "inv.kindArmor": "Armour",
+      "inv.kindJewelry": "Jewelry",
       "anvil.title": "🔨 Blacksmith",
       "anvil.tagline": "Enhance your weapons &amp; equipment. Rarer gear forges further and gains more per level.",
       "anvil.done": "Done",
@@ -383,6 +410,33 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "inv.damage": "💥 Урон",
       "inv.bag": "🎒 Сумка ({n}/{cap})",
       "inv.bagEmpty": "Пусто — купите снаряжение у торговца или одолейте босса ради редкой добычи.",
+      // ----- Task 12 -----
+      "inv.tagline2": "Надевайте из сумки · нажмите на слот, чтобы снять · пейте зелья.",
+      "inv.tabGear": "Снаряжение",
+      "inv.tabMaterials": "Материалы",
+      "inv.tabPotions": "Зелья",
+      "inv.filterAll": "Все",
+      "inv.filterLabel": "Показать",
+      "inv.sortLabel": "Сорт.",
+      "inv.sortRarity": "Редкость",
+      "inv.sortType": "Тип",
+      "inv.sortName": "Имя",
+      "inv.matsTitle": "🧺 Материалы",
+      "inv.matsEmpty": "Материалов пока нет — рубите деревья, добывайте камень и собирайте травы в дикой местности.",
+      "inv.potionsTitle": "🧪 Пояс с зельями",
+      "inv.potionsEmpty": "На поясе нет зелий — купите или сварите их, чтобы выпить в трудную минуту.",
+      "inv.drink": "Выпить",
+      "inv.enchantments": "✨ Чары",
+      "inv.setBonus": "🏅 Бонус комплекта",
+      "inv.setProgress": "{name} ({n}/{total})",
+      "inv.setNext": "Наденьте {n} для следующего бонуса",
+      "inv.setComplete": "Полный комплект!",
+      "inv.compareBetter": "▲ {text}",
+      "inv.compareWorse": "▼ {text}",
+      "inv.compareSame": "= без изменений",
+      "inv.kindWeapon": "Оружие",
+      "inv.kindArmor": "Броня",
+      "inv.kindJewelry": "Украшения",
       "anvil.title": "🔨 Кузнец",
       "anvil.tagline": "Улучшайте оружие и снаряжение. Чем реже предмет, тем дальше его можно усилить и тем больше прирост за уровень.",
       "anvil.done": "Готово",
@@ -596,11 +650,39 @@ import { ZONE_BY_ID } from "../data/zones.js";
       greater_potion: { name: "Большое зелье здоровья", desc: "Восстанавливает 140 здоровья." },
       elixir_might: { name: "Эликсир мощи", desc: "+4 урона на 18 с.", label: "Мощь" },
       elixir_swift: { name: "Эликсир проворства", desc: "+2,5 скорости на 18 с.", label: "Проворство" },
+      // ----- Task 12: new equipment slots, sets & enchanted gear -----
+      leather_pauldrons: { name: "Кожаные наплечники", desc: "+12 к макс. здоровью." },
+      iron_pauldrons: { name: "Железные наплечники", desc: "+18 здоровья, +5% защиты." },
+      leather_gloves: { name: "Кожаные перчатки", desc: "+1 к урону оружия." },
+      iron_gauntlets: { name: "Железные рукавицы", desc: "+12 здоровья, +1 урон." },
+      leather_belt: { name: "Кожаный пояс", desc: "+10 к макс. здоровью." },
+      reinforced_belt: { name: "Укреплённый пояс", desc: "+14 здоровья, +3% защиты." },
+      travel_cloak: { name: "Дорожный плащ", desc: "+0,7 к скорости." },
+      guard_cloak: { name: "Защитный плащ", desc: "+18 здоровья, +4% защиты." },
+      dragonscale_plate: { name: "Латы из драконьей чешуи", desc: "+50 здоровья, +14% защиты." },
+      dragon_pauldrons: { name: "Наплечники из драконьей чешуи", desc: "+30 здоровья, +8% защиты." },
+      dragon_gauntlets: { name: "Рукавицы из драконьей чешуи", desc: "+18 здоровья, +2 урона." },
+      dragon_belt: { name: "Пояс из драконьей чешуи", desc: "+22 здоровья, +5% защиты." },
+      dragon_cloak: { name: "Плащ из драконьей чешуи", desc: "+0,8 скорости, +6% защиты." },
+      shadow_cloak: { name: "Теневой плащ", desc: "+1,1 скорости, +5% защиты." },
+      swift_gloves: { name: "Перчатки ловкача", desc: "Атака на 10% быстрее." },
+      storm_pauldrons: { name: "Наплечники бури", desc: "+45 здоровья, +12% защиты." },
+      titan_gauntlets: { name: "Рукавицы титана", desc: "+25 здоровья, +3 урона." },
+      wings_of_dawn: { name: "Крылья рассвета", desc: "+1,6 скорости, +35 здоровья, +8% защиты." },
       fists: { name: "Кулаки" },
     },
     rarity: { normal: "Обычное", rare: "Редкое", epic: "Эпическое", legendary: "Легендарное" },
-    slot: { helmet: "Шлем", breastplate: "Нагрудник", boots: "Сапоги", necklace: "Ожерелье",
+    slot: { helmet: "Шлем", pauldrons: "Наплечники", breastplate: "Нагрудник", gloves: "Перчатки",
+            belt: "Пояс", boots: "Сапоги", cloak: "Плащ", necklace: "Ожерелье",
             ring: "Кольцо", hand1: "Основная рука", hand2: "Вторая рука" },
+    // Enchantment (affix) labels — shown as chips on item cards (prefix / "of X").
+    affix: {
+      fierce: "Свирепое", keen: "Острое", vampiric: "Вампирское", swift: "Быстрое",
+      sturdy: "Крепкое", guarded: "Защищённое", fleet: "Лёгкое",
+      of_vigor: "бодрости", of_warding: "ограждения", of_power: "мощи", of_haste: "спешки",
+      of_swiftness: "проворства", of_leeching: "вытягивания", of_fortune: "удачи",
+    },
+    set: { ironguard: "Железный страж", dragonscale: "Драконья чешуя" },
     material: { wood: "Дерево", stone: "Камень", water: "Вода", herb: "Трава", fiber: "Волокно", crystal: "Кристалл" },
     resource: { tree: "Срубить дерево", rock: "Добыть камень", herb: "Собрать травы",
                 water: "Набрать воды", fiber: "Срезать волокна", crystal: "Добыть кристалл" },
@@ -730,6 +812,8 @@ import { ZONE_BY_ID } from "../data/zones.js";
   };
   const tRarityLabel = (r) => tFlat("rarity", r, (RARITY[r] || RARITY.normal).label);
   const tSlotLabel = (slot) => tFlat("slot", (slot === "ring1" || slot === "ring2") ? "ring" : slot, (SLOT_META[slot] || {}).label || slot);
+  const tAffixLabel = (id) => tFlat("affix", id, (AFFIXES[id] || {}).label || id);
+  const tSetName = (id) => tFlat("set", id, (SETS[id] || {}).name || id);
   const tMaterialLabel = (id) => tFlat("material", id, (MATERIALS[id] || {}).label || id);
   const tResourceLabel = (k) => tFlat("resource", k, (RESOURCE_KINDS[k] || {}).label || k);
   const tRelicName = (id) => tField("relic", id, "name", (RELICS[id] || {}).name || id);
@@ -766,6 +850,6 @@ export {
   tCastlePartDesc, tCastlePartName, tChapterBlurb, tChapterTitle, tDragonName, tField, tFlat,
   tItemDesc, tItemName, tLairBossIntro, tLairBossName, tLocationName, tMaterialLabel,
   tNpcIntro, tNpcName, tPotionLabel, tQuestStory, tQuestTitle, tQuestWhere, tRarityLabel,
-  tRelicName, tResourceLabel, tSlotLabel, tStoryEndingText, tStoryEndingTitle,
+  tRelicName, tResourceLabel, tSlotLabel, tAffixLabel, tSetName, tStoryEndingText, tStoryEndingTitle,
   tStoryIntroText, tStoryIntroTitle, tStoryTitle, tZoneName,
 };
