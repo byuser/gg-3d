@@ -16,6 +16,10 @@ export default [
       globals: {
         ...globals.browser,
         BABYLON: "readonly",
+        // Google Identity Services, loaded on demand for the opt-in Drive cloud
+        // saves (Task 15). Always feature-detected before use; never required to
+        // boot or run the game.
+        google: "readonly",
       },
     },
     rules: {

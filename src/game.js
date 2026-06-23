@@ -138,6 +138,7 @@ import {
     if (typeof Pause !== "undefined" && typeof paused !== "undefined" && paused) Pause.refreshTexts();
     if (typeof Music !== "undefined" && dom.musicBtn) dom.musicBtn.title = t(Music.on ? "btnTitle.muteMusic" : "btnTitle.playMusic");
     if (typeof AudioUI !== "undefined" && AudioUI.sync) AudioUI.sync();
+    if (typeof CloudUI !== "undefined" && CloudUI.sync) CloudUI.sync();
     if (typeof Fullscreen !== "undefined" && Fullscreen.sync) Fullscreen.sync();
   }
 
@@ -6394,6 +6395,10 @@ import {
 
     scene.onBeforeRenderObservable.add(() => {
       const dt = Math.min(engine.getDeltaTime() / 1000, 0.05);
+      // Opt-in Drive autosave: a cheap, wall-clock-gated tick that keeps running
+      // even while a menu is open (so a 5-min autosave isn't blocked by a pause).
+      // No-ops entirely unless signed in with autosave on (Task 15).
+      CloudSave.tick(Date.now());
       if (!gameStarted) return;                       // hold sim until "Start"
       if (paused) return;                             // pause menu freezes the sim
       if (state.over) { cosmetics(state, dt); return; }
@@ -7606,6 +7611,431 @@ import {
   }
 
   // =========================================================================
+  // Cloud saves — Google Drive `appDataFolder` (Task 15). OPT-IN: the player
+  // signs in with Google (drive.appdata scope only — a private folder no other
+  // app can see). Manual "Save to Drive" + a 5-minute autosave that keeps a
+  // rolling one-hour history of timestamped autosaves, all reusing the SAME
+  // serializeGame()/applySave() JSON as the local file save so versioning +
+  // migration just work (no schema change — the autosave-on preference is a
+  // device setting persisted to localStorage like the locale / graphics tier).
+  //
+  // Everything here degrades gracefully: with no OAuth client id configured, no
+  // `fetch`, or in the headless harness, the feature is cleanly disabled and the
+  // existing local save still works — nothing throws, nothing blocks the main
+  // thread. The Drive client is *injectable* (`CloudSave._setClient`) so the
+  // logic is fully testable against a stub with no network.
+  // =========================================================================
+  const CLOUD_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+  const CLOUD_KEY = "gg3d_cloud";                 // persisted { autosave } preference
+  const CLOUD_AUTOSAVE_MS = 5 * 60 * 1000;        // autosave cadence (5 minutes)
+  const CLOUD_HISTORY_MS = 60 * 60 * 1000;        // rolling history window (1 hour)
+  const CLOUD_MAX_SLOTS = 12;                      // ~12 autosaves in an hour
+  const CLOUD_MANUAL_NAME = "gg3d-save.json";      // the single manual slot
+  const CLOUD_AUTO_PREFIX = "gg3d-auto-";          // autosave files: <prefix><epochMs>.json
+
+  // ---- Pure, testable policy helpers (no browser / no I/O) ----------------
+
+  // Should an autosave fire right now? Pure decision over the scheduler state.
+  // Gated by sign-in + the autosave toggle, paused while the tab is hidden/idle,
+  // debounced against an in-flight write, and only due once the interval elapses.
+  function cloudAutosaveDue(s, now) {
+    if (!s || !s.enabled || !s.signedIn || s.hidden || s.inFlight) return false;
+    const interval = s.intervalMs || CLOUD_AUTOSAVE_MS;
+    return (now - (s.lastAt || 0)) >= interval;
+  }
+
+  // The autosave file name encodes its epoch-ms timestamp so a plain Drive
+  // listing is sortable and prunable without reading file bodies.
+  function cloudAutoName(ts) { return CLOUD_AUTO_PREFIX + Math.floor(ts) + ".json"; }
+  function cloudParseAuto(name) {
+    if (typeof name !== "string" || name.indexOf(CLOUD_AUTO_PREFIX) !== 0) return null;
+    const m = name.slice(CLOUD_AUTO_PREFIX.length).replace(/\.json$/, "");
+    const ts = parseInt(m, 10);
+    return isFinite(ts) && ts > 0 ? ts : null;
+  }
+
+  // Retention/pruning policy: given autosave metas [{id, ts}] and "now", return
+  // the ids to DELETE — anything older than the history window or beyond the slot
+  // cap. `keepNewest` always retains the single most-recent autosave so a player
+  // who returns after a long break never loses their last checkpoint.
+  function cloudPrune(files, now, opts) {
+    opts = opts || {};
+    const maxAgeMs = opts.maxAgeMs != null ? opts.maxAgeMs : CLOUD_HISTORY_MS;
+    const maxCount = opts.maxCount != null ? opts.maxCount : CLOUD_MAX_SLOTS;
+    const keepNewest = opts.keepNewest !== false;
+    const sorted = (files || []).slice().filter((f) => f && isFinite(f.ts)).sort((a, b) => b.ts - a.ts);
+    const del = [];
+    let kept = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      const f = sorted[i];
+      if (i === 0 && keepNewest) { kept++; continue; }   // always keep the latest
+      const tooOld = (now - f.ts) > maxAgeMs;
+      const overCap = kept >= maxCount;
+      if (tooOld || overCap) del.push(f.id);
+      else kept++;
+    }
+    return del;
+  }
+
+  // Reconcile two saves by their `savedAt` ISO timestamps → "a" | "b" | "equal".
+  // Used on load so a cloud save never silently clobbers newer in-progress work.
+  function cloudNewer(a, b) {
+    const ta = a && a.savedAt ? Date.parse(a.savedAt) : NaN;
+    const tb = b && b.savedAt ? Date.parse(b.savedAt) : NaN;
+    const va = isFinite(ta) ? ta : -Infinity, vb = isFinite(tb) ? tb : -Infinity;
+    if (va > vb) return "a";
+    if (vb > va) return "b";
+    return "equal";
+  }
+
+  // Human-readable timestamp for the cloud-saves list (feature-detected).
+  function cloudFmtTime(ts) {
+    try { return new Date(ts).toLocaleString(I18N.locale === "ru" ? "ru-RU" : "en-US"); }
+    catch (e) { try { return new Date(ts).toISOString(); } catch (e2) { return ""; } }
+  }
+
+  // ---- Production Drive client (Google Identity Services + Drive REST) ------
+  // Built lazily only when a client id + `fetch` exist; never touched headless.
+  // Uses raw `fetch` to the Drive REST API (no heavy gapi client) so the site
+  // stays static — only the tiny GIS script loads on demand at first sign-in.
+  function makeGoogleDriveClient(clientId) {
+    let accessToken = null;
+    let tokenClient = null;
+    const API = "https://www.googleapis.com/drive/v3";
+    const UP = "https://www.googleapis.com/upload/drive/v3";
+
+    function gisReady() {
+      return typeof google !== "undefined" && google.accounts && google.accounts.oauth2;
+    }
+    function loadGis() {
+      if (gisReady()) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        try {
+          const s = document.createElement("script");
+          s.src = "https://accounts.google.com/gsi/client";
+          s.async = true; s.defer = true;
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error("gis_load_failed"));
+          (document.head || document.body || document.documentElement).appendChild(s);
+        } catch (e) { reject(e); }
+      });
+    }
+    function ensureTokenClient() {
+      if (tokenClient) return;
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: clientId, scope: CLOUD_SCOPE, callback: () => {},
+      });
+    }
+    function requestToken(prompt) {
+      return new Promise((resolve, reject) => {
+        try {
+          ensureTokenClient();
+          tokenClient.callback = (resp) => {
+            if (resp && resp.access_token) { accessToken = resp.access_token; resolve(accessToken); }
+            else reject(new Error(resp && resp.error ? resp.error : "no_token"));
+          };
+          tokenClient.requestAccessToken({ prompt: prompt || "" });
+        } catch (e) { reject(e); }
+      });
+    }
+    async function authFetch(url, opts) {
+      if (typeof fetch !== "function") throw new Error("no_fetch");
+      opts = opts || {};
+      opts.headers = Object.assign({}, opts.headers, { Authorization: "Bearer " + accessToken });
+      let res = await fetch(url, opts);
+      if (res.status === 401) {                  // token expired → one silent refresh
+        await requestToken("");
+        opts.headers.Authorization = "Bearer " + accessToken;
+        res = await fetch(url, opts);
+      }
+      if (!res.ok) throw new Error("drive_http_" + res.status);
+      return res;
+    }
+
+    return {
+      hasToken() { return !!accessToken; },
+      async signIn() { await loadGis(); await requestToken("consent"); return true; },
+      signOut() {
+        try { if (accessToken && gisReady() && google.accounts.oauth2.revoke) google.accounts.oauth2.revoke(accessToken, () => {}); } catch (e) {}
+        accessToken = null;
+        return Promise.resolve();
+      },
+      async list() {
+        const url = API + "/files?spaces=appDataFolder&pageSize=100&orderBy=modifiedTime%20desc&fields=files(id,name,modifiedTime)";
+        const res = await authFetch(url);
+        const data = await res.json();
+        return (data && data.files) || [];
+      },
+      async upload(name, content, existingId) {
+        if (existingId) {                         // overwrite the manual slot's body
+          const res = await authFetch(UP + "/files/" + existingId + "?uploadType=media&fields=id,name,modifiedTime", {
+            method: "PATCH", headers: { "Content-Type": "application/json" }, body: content,
+          });
+          return await res.json();
+        }
+        const boundary = "gg3d" + Date.now() + Math.random().toString(16).slice(2);
+        const meta = { name, parents: ["appDataFolder"] };
+        const body =
+          "--" + boundary + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" +
+          JSON.stringify(meta) + "\r\n" +
+          "--" + boundary + "\r\nContent-Type: application/json\r\n\r\n" +
+          content + "\r\n--" + boundary + "--";
+        const res = await authFetch(UP + "/files?uploadType=multipart&fields=id,name,modifiedTime", {
+          method: "POST", headers: { "Content-Type": "multipart/related; boundary=" + boundary }, body,
+        });
+        return await res.json();
+      },
+      async download(id) {
+        const res = await authFetch(API + "/files/" + id + "?alt=media");
+        return await res.text();
+      },
+      async remove(id) { await authFetch(API + "/files/" + id, { method: "DELETE" }); return true; },
+    };
+  }
+
+  // ---- The cloud-save controller ------------------------------------------
+  const CloudSave = {
+    client: null,
+    clientId: "",
+    signedIn: false,
+    enabled: false,                  // autosave toggle (persisted to localStorage)
+    hidden: false,                   // tab hidden/idle → autosave pauses
+    busy: false,                     // a manual op is in flight (disables buttons)
+    sched: { lastAt: 0, inFlight: false },
+    _loaded: false,
+
+    // Read the OAuth client id from config (a global injected by an optional,
+    // git-ignored config file, or a <meta> tag). Empty ⇒ "not configured".
+    readClientId() {
+      try { if (typeof window !== "undefined" && window.GG_GOOGLE_CLIENT_ID) return String(window.GG_GOOGLE_CLIENT_ID).trim(); } catch (e) {}
+      try {
+        if (typeof document !== "undefined" && document.querySelector) {
+          const m = document.querySelector('meta[name="gg-google-client-id"]');
+          const c = m && m.getAttribute ? m.getAttribute("content") : "";
+          if (c) return c.trim();
+        }
+      } catch (e) {}
+      return "";
+    },
+    load() {
+      if (this._loaded) return this;
+      this._loaded = true;
+      this.clientId = this.readClientId();
+      try { const raw = localGet(CLOUD_KEY); if (raw) { const o = JSON.parse(raw); if (o && typeof o.autosave === "boolean") this.enabled = o.autosave; } } catch (e) {}
+      return this;
+    },
+    persist() { try { localSet(CLOUD_KEY, JSON.stringify({ autosave: this.enabled })); } catch (e) {} },
+
+    configured() { return !!this.clientId; },
+    // True where the platform can actually reach Drive (configured + browser fetch).
+    available() { return this.configured() && typeof fetch === "function"; },
+
+    ensureClient() { if (!this.client && this.available()) this.client = makeGoogleDriveClient(this.clientId); return this.client; },
+    _setClient(c) { this.client = c; },     // test seam (inject a stub client)
+
+    async signIn() {
+      if (!this.available()) { toast(t("cloud.notConfigured")); return false; }
+      if (this.busy) return false;
+      this.busy = true; this._sync();
+      try {
+        await this.ensureClient().signIn();
+        this.signedIn = true;
+        this.sched.lastAt = Date.now();       // first autosave one interval from now
+        Sfx.play("ui_click");
+        toast(t("toast.cloudSignedIn"));
+        return true;
+      } catch (e) { toast(t("toast.cloudSignInFailed")); return false; }
+      finally { this.busy = false; this._sync(); }
+    },
+    async signOut() {
+      if (this.client) { try { await this.client.signOut(); } catch (e) {} }
+      this.signedIn = false;
+      toast(t("toast.cloudSignedOut"));
+      this._sync();
+    },
+
+    setAutosave(on) {
+      this.enabled = !!on;
+      if (this.enabled) this.sched.lastAt = Date.now();
+      this.persist();
+      this._sync();
+    },
+    toggleAutosave() { Sfx.play("ui_click"); this.setAutosave(!this.enabled); },
+
+    async findManualId() {
+      const files = await this.client.list();
+      const m = files.find((f) => f.name === CLOUD_MANUAL_NAME);
+      return m ? m.id : null;
+    },
+
+    // Manual "Save to Drive" → overwrite the single manual slot.
+    async saveManual() {
+      if (!this.signedIn || !this.client) { toast(t("cloud.signInFirst")); return false; }
+      if (this.busy) return false;
+      const data = serializeGame();
+      if (!data) { toast(t("toast.nothingToSave")); return false; }
+      this.busy = true; this._sync();
+      try {
+        const json = JSON.stringify(data);
+        await this.client.upload(CLOUD_MANUAL_NAME, json, await this.findManualId());
+        toast(t("toast.cloudSaved"));
+        return true;
+      } catch (e) { this._fail(e, {}); return false; }
+      finally { this.busy = false; this._sync(); }
+    },
+
+    // Render-loop hook (cheap, wall-clock gated). Fires an autosave when due;
+    // `lastAt` advances immediately so the cadence can't re-enter.
+    tick(now) {
+      if (!this.signedIn || !this.enabled || !this.client || this.sched.inFlight) return;
+      if (!cloudAutosaveDue({ enabled: this.enabled, signedIn: this.signedIn, hidden: this.hidden, inFlight: this.sched.inFlight, lastAt: this.sched.lastAt, intervalMs: CLOUD_AUTOSAVE_MS }, now)) return;
+      this.sched.lastAt = now;
+      this.doAutosave();
+    },
+    async doAutosave() {
+      if (this.sched.inFlight || !this.client) return;
+      const data = serializeGame();
+      if (!data) return;                          // nothing to save yet (pre-game)
+      this.sched.inFlight = true;
+      try {
+        await this.client.upload(cloudAutoName(Date.now()), JSON.stringify(data), null);
+        await this.pruneAutosaves();
+        toast(t("toast.cloudAutosaved"));
+      } catch (e) { this._fail(e, { silent: true }); }
+      finally { this.sched.inFlight = false; }
+    },
+    async pruneAutosaves() {
+      const files = await this.client.list();
+      const autos = [];
+      for (const f of files) { const ts = cloudParseAuto(f.name); if (ts != null) autos.push({ id: f.id, ts }); }
+      const del = cloudPrune(autos, Date.now(), { maxAgeMs: CLOUD_HISTORY_MS, maxCount: CLOUD_MAX_SLOTS, keepNewest: true });
+      for (const id of del) { try { await this.client.remove(id); } catch (e) {} }
+      return del;
+    },
+
+    // List cloud saves (manual + autosaves) newest-first for the browse overlay.
+    async listSaves() {
+      if (!this.signedIn || !this.client) return [];
+      const files = await this.client.list();
+      const out = [];
+      for (const f of files) {
+        const ts = cloudParseAuto(f.name);
+        if (ts != null) out.push({ id: f.id, kind: "auto", ts });
+        else if (f.name === CLOUD_MANUAL_NAME) out.push({ id: f.id, kind: "manual", ts: f.modifiedTime ? Date.parse(f.modifiedTime) : 0 });
+      }
+      out.sort((a, b) => b.ts - a.ts);
+      return out;
+    },
+
+    // Restore a chosen cloud save: download → validate → reconcile (don't clobber
+    // newer in-progress work) → stash + reload through the same boot path the
+    // local file load uses, so re-seeding/migration is identical.
+    async restore(id) {
+      if (!this.signedIn || !this.client) return false;
+      let json;
+      try { json = await this.client.download(id); } catch (e) { this._fail(e, { load: true }); return false; }
+      let data; try { data = JSON.parse(json); } catch (e) { data = null; }
+      if (!validateSave(data)) { toast(t("toast.cloudLoadFailed")); return false; }
+      if (gameStarted) {
+        const cur = serializeGame();
+        if (cur && cloudNewer({ savedAt: cur.savedAt }, { savedAt: data.savedAt }) === "a") {
+          if (typeof window !== "undefined" && typeof window.confirm === "function" && !window.confirm(t("cloud.confirmOlder"))) return false;
+        }
+      }
+      sessionSet(PENDING_LOAD_KEY, json);
+      try { if (typeof window !== "undefined" && window.location) window.location.reload(); } catch (e) {}
+      return true;
+    },
+
+    // Quiet failure: offline keeps the local save with a soft notice; autosave
+    // failures stay silent so a flaky network never spams the player.
+    _fail(e, opts) {
+      opts = opts || {};
+      if (opts.silent) return;
+      const offline = (typeof navigator !== "undefined" && navigator && navigator.onLine === false);
+      toast(t(offline ? "toast.cloudOffline" : (opts.load ? "toast.cloudLoadFailed" : "toast.cloudSaveFailed")));
+    },
+
+    onVisibility() { this.hidden = (typeof document !== "undefined" && document.hidden === true); },
+    _sync() { if (typeof CloudUI !== "undefined" && CloudUI.sync) CloudUI.sync(); },
+  };
+
+  // ---- Cloud-saves UI: settings controls (start + pause) + browse overlay ---
+  const CloudUI = {
+    groups: [], overlay: null, listEl: null, _wired: false,
+    init() {
+      CloudSave.load();
+      const byId = (id) => { try { return document.getElementById(id); } catch (e) { return null; } };
+      this.groups = [];
+      for (const sfx of ["", "P"]) {
+        const g = {
+          status: byId("cloudStatus" + sfx),
+          signBtn: byId("cloudSignBtn" + sfx),
+          saveBtn: byId("cloudSaveBtn" + sfx),
+          listBtn: byId("cloudListBtn" + sfx),
+          autoBtn: byId("cloudAutoBtn" + sfx),
+        };
+        if (g.signBtn) g.signBtn.addEventListener("click", () => { if (CloudSave.signedIn) CloudSave.signOut(); else CloudSave.signIn(); });
+        if (g.saveBtn) g.saveBtn.addEventListener("click", () => CloudSave.saveManual());
+        if (g.listBtn) g.listBtn.addEventListener("click", () => this.openList());
+        if (g.autoBtn) g.autoBtn.addEventListener("click", () => CloudSave.toggleAutosave());
+        this.groups.push(g);
+      }
+      this.overlay = byId("cloudSaves");
+      this.listEl = byId("cloudList");
+      const close = byId("cloudClose"), done = byId("cloudDone");
+      if (close) close.addEventListener("click", () => this.closeList());
+      if (done) done.addEventListener("click", () => this.closeList());
+      // Pause autosave while the tab is hidden/idle.
+      try { if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("visibilitychange", () => CloudSave.onVisibility()); } catch (e) {}
+      CloudSave.onVisibility();
+      this._wired = true;
+      this.sync();
+    },
+    sync() {
+      const avail = CloudSave.available(), cfg = CloudSave.configured();
+      let st;
+      if (!avail) st = t(cfg ? "cloud.unavailable" : "cloud.notConfigured");
+      else st = t(CloudSave.signedIn ? "cloud.signedIn" : "cloud.signedOut");
+      for (const g of this.groups) {
+        if (g.status) g.status.textContent = st;
+        if (g.signBtn) { g.signBtn.textContent = t(CloudSave.signedIn ? "cloud.signOut" : "cloud.signIn"); g.signBtn.disabled = !avail || CloudSave.busy; }
+        if (g.saveBtn) { g.saveBtn.textContent = t("cloud.save"); g.saveBtn.disabled = !CloudSave.signedIn || CloudSave.busy; }
+        if (g.listBtn) { g.listBtn.textContent = t("cloud.list"); g.listBtn.disabled = !CloudSave.signedIn; }
+        if (g.autoBtn) {
+          g.autoBtn.textContent = t(CloudSave.enabled ? "cloud.autosaveOn" : "cloud.autosaveOff");
+          if (g.autoBtn.classList) g.autoBtn.classList.toggle("active", CloudSave.enabled);
+          g.autoBtn.disabled = !avail;
+        }
+      }
+    },
+    async openList() {
+      if (!this.overlay) return;
+      if (this.overlay.classList) this.overlay.classList.remove("hidden");
+      if (this.listEl) this.listEl.innerHTML = '<p class="cloud-empty">' + t("cloud.loading") + "</p>";
+      let saves = [];
+      try { saves = await CloudSave.listSaves(); } catch (e) { saves = []; }
+      this.renderList(saves);
+    },
+    renderList(saves) {
+      if (!this.listEl) return;
+      if (!saves || !saves.length) { this.listEl.innerHTML = '<p class="cloud-empty">' + t("cloud.empty") + "</p>"; return; }
+      this.listEl.innerHTML = "";
+      for (const s of saves) {
+        const row = document.createElement("div"); row.className = "cloud-row";
+        const label = document.createElement("span"); label.className = "cloud-row-label";
+        label.textContent = t(s.kind === "manual" ? "cloud.manual" : "cloud.autosave") + " · " + cloudFmtTime(s.ts);
+        const btn = document.createElement("button"); btn.className = "start-btn secondary-btn cloud-restore";
+        btn.textContent = t("cloud.restore");
+        btn.addEventListener("click", () => CloudSave.restore(s.id));
+        row.appendChild(label); row.appendChild(btn);
+        this.listEl.appendChild(row);
+      }
+    },
+    closeList() { if (this.overlay && this.overlay.classList) this.overlay.classList.add("hidden"); },
+  };
+
+  // =========================================================================
   // Pause menu — opens mid-game (freezing the sim), with Resume / Save / Restart
   // / Exit. Restart and Exit ask for confirmation to guard against misclicks.
   // =========================================================================
@@ -8450,6 +8880,10 @@ import {
       // Audio mixer controls (volume sliders + mute) on the start screen + pause.
       AudioUI.init();
 
+      // Cloud-saves UI (opt-in Google Drive): sign-in + manual save + autosave
+      // toggle on the start screen and pause settings, plus the browse overlay.
+      CloudUI.init();
+
       // Start-screen "Load progress" -> pick a file -> reload into the save.
       if (dom.loadBtn && dom.loadFile) {
         dom.loadBtn.addEventListener("click", () => dom.loadFile.click());
@@ -8636,6 +9070,10 @@ import {
       tSkillName, tSkillDesc, tElementLabel, tEffectLabel,
       // ---- Audio: mixer, per-zone ambience, footsteps (Task 6) ----
       Mixer, Ambience, AudioUI, Footsteps, LowHealth, surfaceForZone, AUDIO_KEY,
+      // ---- Cloud saves: Google Drive appDataFolder (Task 15) ----
+      CloudSave, CloudUI, makeGoogleDriveClient, CLOUD_KEY,
+      CLOUD_AUTOSAVE_MS, CLOUD_HISTORY_MS, CLOUD_MAX_SLOTS, CLOUD_MANUAL_NAME, CLOUD_AUTO_PREFIX,
+      cloudAutosaveDue, cloudPrune, cloudNewer, cloudAutoName, cloudParseAuto,
       // ---- Internationalization (Task 7) ----
       I18N, LOCALES, RU, t, plural, applyLocale, LOCALE_KEY, localGet,
       tItemName, tItemDesc, tZoneName, tQuestTitle, tQuestStory, tNpcName, tNpcIntro,
