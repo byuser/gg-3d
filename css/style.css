@@ -564,9 +564,62 @@ html, body {
 .inv-stats .stat-row { display: flex; justify-content: space-between; font-size: 13px; }
 .inv-stats .stat-row b { color: var(--accent); }
 
+.inv-right { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .inv-bag { display: grid; gap: 8px; align-content: start; }
 .inv-bag .bag-title { font-size: 13px; font-weight: 700; opacity: 0.75; text-align: left; }
 .equip-btn { background: linear-gradient(135deg, #5be0a0, #6cc6ff); }
+
+/* ---------- Task 12: tabbed bag, filter/sort, enchant chips, set bonuses ---------- */
+.inv-tabs { display: flex; gap: 8px; justify-content: flex-start; flex-wrap: wrap; }
+.inv-controls { display: flex; flex-wrap: wrap; gap: 10px 16px; text-align: left; }
+.inv-ctl { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.inv-ctl-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.55; }
+.chip-btn {
+  appearance: none; cursor: pointer; font-size: 12px; font-weight: 700;
+  color: var(--ink); padding: 4px 10px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12);
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.chip-btn:hover { background: rgba(255, 255, 255, 0.1); }
+.chip-btn.active { background: rgba(108, 198, 255, 0.22); border-color: rgba(108, 198, 255, 0.55); }
+
+/* Enchantment (affix) chips on item cards + equipped slots. */
+.affix-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.affix-chip {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.2px;
+  color: #d9c2ff; background: rgba(170, 130, 255, 0.16);
+  border: 1px solid rgba(170, 130, 255, 0.4); border-radius: 999px; padding: 1px 7px;
+}
+.equip-slot .affix-row { margin-top: 3px; }
+
+/* Compare-vs-equipped delta line. */
+.cmp { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.cmp-same { font-size: 11px; opacity: 0.5; }
+.cmp-chip { font-size: 11px; font-weight: 800; border-radius: 6px; padding: 1px 6px; }
+.cmp-chip.up { color: #74e6a6; background: rgba(91, 224, 160, 0.14); }
+.cmp-chip.down { color: #ff8d8d; background: rgba(255, 93, 93, 0.14); }
+
+/* Set-bonus panel. */
+.inv-sets { display: grid; gap: 8px; text-align: left; }
+.inv-sets:empty { display: none; }
+.set-title { font-size: 12px; font-weight: 800; letter-spacing: 0.4px; opacity: 0.8; text-transform: uppercase; }
+.set-row {
+  background: rgba(255, 209, 102, 0.07); border: 1px solid rgba(255, 209, 102, 0.25);
+  border-radius: 12px; padding: 8px 12px;
+}
+.set-name { font-size: 13px; font-weight: 800; color: #ffd966; }
+.set-chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 5px 0 3px; }
+.set-chip {
+  font-size: 10px; font-weight: 700; border-radius: 999px; padding: 1px 7px;
+  color: #cdd6e6; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12);
+  opacity: 0.6;
+}
+.set-chip.met { color: #15233b; background: linear-gradient(135deg, #ffd966, #ffb24e); opacity: 1; border-color: transparent; }
+.set-foot { font-size: 11px; opacity: 0.7; }
+
+/* Material / potion stack rows. */
+.stack-row .stack-count, .stack-count { font-weight: 800; color: var(--accent); font-size: 15px; flex: 0 0 auto; }
+.stack-count.inline { margin-top: 4px; font-size: 13px; }
 
 /* ---------- Rarity accents (rare / epic / legendary) ---------- */
 .shop-item.rarity-epic { border-color: rgba(199, 125, 255, 0.55); background: rgba(199, 125, 255, 0.09); }

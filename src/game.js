@@ -27,8 +27,9 @@
 import { CONFIG, PALETTE, rng, setSeed, getSeed } from "./core/config.js";
 import {
   RARITY, ENHANCE, enhanceRule, instLevel, enhanceMult, enhanceCost, enhanceName,
-  effectiveStats, EQUIP_SLOTS, TWO_HANDED, SLOT_META, FISTS, ITEM_DB, getDef, isGear,
+  effectiveStats, EQUIP_SLOTS, WORN_SLOTS, TWO_HANDED, SLOT_META, FISTS, ITEM_DB, getDef, isGear,
   SHOP_STOCK, POTION_STOCK, RARE_DROPS, FEATURED_POOL,
+  AFFIXES, rollAffixes, affixStats, SETS, setBonusStats, activeSets, itemCategory,
 } from "./data/items.js";
 import {
   MATERIALS, MATERIAL_IDS, RESOURCE_KINDS, RELICS, CASTLE_PARTS, CASTLE_PART_BY_ID,
@@ -45,7 +46,7 @@ import {
   tCastlePartDesc, tCastlePartName, tChapterBlurb, tChapterTitle, tDragonName,
   tItemDesc, tItemName, tLairBossIntro, tLairBossName, tLocationName, tMaterialLabel,
   tNpcIntro, tNpcName, tPotionLabel, tQuestStory, tQuestTitle, tQuestWhere, tRarityLabel,
-  tRelicName, tResourceLabel, tSlotLabel, tStoryEndingText, tStoryEndingTitle,
+  tRelicName, tResourceLabel, tSlotLabel, tAffixLabel, tSetName, tStoryEndingText, tStoryEndingTitle,
   tStoryIntroText, tStoryIntroTitle, tZoneName,
 } from "./core/i18n.js";
 
@@ -148,6 +149,21 @@ import {
   let _instSeq = 1;
   function makeItem(id) { return { id, uid: _instSeq++ }; }
 
+  // Generate an instance for *found or crafted* gear: a plain instance plus a
+  // deterministic affix roll (rare+ only — normal gear stays clean). Drops and
+  // crafts run through the seeded rng(), so a given seed reproduces the same
+  // enchantments; the rolled affix ids are then persisted on the instance so a
+  // reload never re-rolls. Shop-bought gear stays clean (uses makeItem).
+  function makeLoot(id) {
+    const inst = makeItem(id);
+    const def = getDef(id);
+    if (def && isGear(id)) {
+      const aff = rollAffixes(def, rng);
+      if (aff.length) inst.affixes = aff;
+    }
+    return inst;
+  }
+
   function cloneWeapon(w) {
     const c = Object.assign({}, w);
     if (w.melee) c.melee = Object.assign({}, w.melee);
@@ -156,8 +172,9 @@ import {
 
   // Build the player's *active* weapon profile from whatever is in their hands,
   // folding in flat bonuses (damage/haste/pierce) from armour and accessories.
-  function computeWeapon(player, bonus) {
-    const eq = player.equipment;
+  // Takes an equipment map (the live player's, or a hypothetical one for previews).
+  function computeWeapon(equipment, bonus) {
+    const eq = equipment;
     const i1 = eq.hand1 && eq.hand1 !== TWO_HANDED ? eq.hand1 : null;
     const i2 = eq.hand2 && eq.hand2 !== TWO_HANDED ? eq.hand2 : null;
     const w1 = i1 ? getDef(i1.id) : null;
@@ -186,38 +203,98 @@ import {
     return prof;
   }
 
-  // Recompute every derived player stat from base + equipped gear. Called after
-  // any equip/unequip and on load. Also widens the global coin magnet ranges.
-  function recomputeStats(player) {
-    const base = player.base;
+  // Derive the full stat block from a base + an equipment map + active buffs.
+  // PURE (no side effects, no live-player reads) so it powers both the live
+  // recomputeStats and the hypothetical previewEquip used by compare tooltips.
+  // Folds equipped gear (incl. enchant levels + affixes), set bonuses and buffs.
+  function deriveStats(base, equipment, buffs) {
     let mh = base.maxHealth, dr = 0, ls = 0, spd = base.speed;
     let dmg = 0, haste = 1, pierce = 0, coinRange = 0;
-    for (const slot of EQUIP_SLOTS) {
-      const inst = player.equipment[slot];
-      if (!inst || inst === TWO_HANDED) continue;
-      const s = effectiveStats(inst);
+    const fold = (s) => {
       mh += s.maxHealth || 0; dr += s.damageReduction || 0; ls += s.lifesteal || 0;
       spd += s.moveSpeed || 0; dmg += s.damage || 0; pierce += s.pierce || 0;
       coinRange += s.coinRange || 0;
       if (s.haste) haste *= s.haste;
+    };
+    for (const slot of EQUIP_SLOTS) {
+      const inst = equipment[slot];
+      if (!inst || inst === TWO_HANDED) continue;
+      fold(effectiveStats(inst));
     }
-    // Fold in any active potion buffs (Elixir of Might / Swiftness, …).
-    for (const b of player.buffs || []) {
-      const s = b.stats || {};
-      mh += s.maxHealth || 0; dr += s.damageReduction || 0; ls += s.lifesteal || 0;
-      spd += s.moveSpeed || 0; dmg += s.damage || 0; pierce += s.pierce || 0;
-      if (s.haste) haste *= s.haste;
-    }
-    player.maxHealth = mh;
-    if (player.health > mh) player.health = mh;
-    player.damageReduction = Math.min(0.75, dr);
-    player.lifesteal = ls;
-    player.speed = spd;
-    player.weapon = computeWeapon(player, { damage: dmg, haste, pierce });
+    fold(setBonusStats(equipment));               // equipment-set threshold bonuses
+    for (const b of buffs || []) fold(b.stats || {}); // active potion buffs
+    return {
+      maxHealth: mh,
+      damageReduction: Math.min(0.75, dr),
+      lifesteal: ls,
+      speed: spd,
+      coinRange,
+      weapon: computeWeapon(equipment, { damage: dmg, haste, pierce }),
+    };
+  }
+
+  // Recompute every derived player stat from base + equipped gear. Called after
+  // any equip/unequip and on load. Also widens the global coin magnet ranges and
+  // refreshes the held weapon + worn-gear visuals.
+  function recomputeStats(player) {
+    const d = deriveStats(player.base, player.equipment, player.buffs);
+    player.maxHealth = d.maxHealth;
+    if (player.health > d.maxHealth) player.health = d.maxHealth;
+    player.damageReduction = d.damageReduction;
+    player.lifesteal = d.lifesteal;
+    player.speed = d.speed;
+    player.weapon = d.weapon;
     if (player.refreshWeaponVisual) player.refreshWeaponVisual();
-    coinMagnetRange = CONFIG.coinMagnetRange + coinRange;
-    coinPickupRange = CONFIG.coinPickupRange + coinRange * 0.18;
+    if (player.refreshWornGear) player.refreshWornGear();
+    coinMagnetRange = CONFIG.coinMagnetRange + d.coinRange;
+    coinPickupRange = CONFIG.coinPickupRange + d.coinRange * 0.18;
     updateHealthBar(player.health);
+  }
+
+  // Pure simulate: a NEW equipment map as it would look after equipping `inst`,
+  // applying the same slot rules as equipItem() (2-handed fills both hands; a
+  // one-hander takes a free hand or replaces the main; rings round-robin) without
+  // touching the bag. Powers the compare tooltips.
+  function equippedAfter(equipment, inst) {
+    const eq = Object.assign({}, equipment);
+    const d = getDef(inst.id);
+    if (d.type === "weapon") {
+      if (d.hands === 2) { eq.hand1 = inst; eq.hand2 = TWO_HANDED; }
+      else {
+        if (eq.hand2 === TWO_HANDED) { eq.hand1 = null; eq.hand2 = null; } // free a 2H
+        const slot = !eq.hand1 ? "hand1" : !eq.hand2 ? "hand2" : "hand1";
+        eq[slot] = inst;
+      }
+    } else if (d.type === "ring") {
+      eq[!eq.ring1 ? "ring1" : !eq.ring2 ? "ring2" : "ring1"] = inst;
+    } else {
+      eq[d.type] = inst;
+    }
+    return eq;
+  }
+  // The stat deltas (would-be minus current) for equipping a bag item, for the
+  // inventory's compare tooltips. Only non-zero deltas are returned.
+  function equipDelta(player, inst) {
+    const cur = deriveStats(player.base, player.equipment, player.buffs);
+    const next = deriveStats(player.base, equippedAfter(player.equipment, inst), player.buffs);
+    const out = {};
+    for (const k of ["maxHealth", "damageReduction", "lifesteal", "speed", "coinRange"]) {
+      const dv = (next[k] || 0) - (cur[k] || 0);
+      if (Math.abs(dv) > 1e-6) out[k] = dv;
+    }
+    const dDmg = (next.weapon.damage || 0) - (cur.weapon.damage || 0);
+    if (Math.abs(dDmg) > 1e-6) out.damage = dDmg;
+    return out;
+  }
+
+  // Which worn-gear pieces to build for a graphics tier (pure + testable). The
+  // core silhouette (helmet / breastplate / gloves / boots / cloak) is always
+  // built; the lighter extras (pauldrons, belt) and the per-frame cloak billow
+  // are dropped on the low tier so phones keep their budget. Equip still applies
+  // a missing piece's STATS — only its mesh is skipped.
+  function wornDetailFor(tier) {
+    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, cloak: true, cloakSway: false };
+    return { pauldrons: true, belt: true, gloves: true, cloak: true, cloakSway: true };
   }
 
   // ---- Inventory / equipment operations ----------------------------------
@@ -367,7 +444,7 @@ import {
       if (!potionAdd(player, recipe.out)) { toast(t("toast.beltFull")); Sfx.play("error"); return false; }
     } else {
       if (player.inventory.length >= player.invCap) { toast(t("toast.bagFull")); Sfx.play("error"); return false; }
-      invAdd(player, makeItem(recipe.out));
+      invAdd(player, makeLoot(recipe.out));
     }
     spendMaterials(player, recipe.mats);
     updatePotionBar(player);
@@ -385,7 +462,7 @@ import {
     if (reward.item && getDef(reward.item)) {
       const d = getDef(reward.item);
       if (d.type === "potion") potionAdd(player, reward.item);
-      else invAdd(player, makeItem(reward.item));
+      else invAdd(player, makeLoot(reward.item));
       updatePotionBar(player);
     }
     if (reward.relic) addRelic(player, reward.relic);
@@ -425,6 +502,11 @@ import {
     invEquip: document.getElementById("invEquip"),
     invBag: document.getElementById("invBag"),
     invStats: document.getElementById("invStats"),
+    invSets: document.getElementById("invSets"),
+    invControls: document.getElementById("invControls"),
+    invTabGear: document.getElementById("invTabGear"),
+    invTabMaterials: document.getElementById("invTabMaterials"),
+    invTabPotions: document.getElementById("invTabPotions"),
     invBtn: document.getElementById("invBtn"),
     bagBtn: document.getElementById("bagBtn"),
     musicBtn: document.getElementById("musicBtn"),
@@ -724,8 +806,9 @@ import {
       // derived from the equipped hands by recomputeStats(); FISTS until then.
       this.invCap = 24;
       this.inventory = [];       // owned-but-unequipped item instances
-      this.equipment = { helmet: null, breastplate: null, boots: null,
-                         necklace: null, ring1: null, ring2: null, hand1: null, hand2: null };
+      this.equipment = { helmet: null, pauldrons: null, breastplate: null, gloves: null,
+                         belt: null, boots: null, cloak: null, necklace: null,
+                         ring1: null, ring2: null, hand1: null, hand2: null };
       this.potions = [null, null, null]; // the 3-slot potion belt
       this.buffs = [];           // active timed potion buffs
       this.weapon = cloneWeapon(FISTS);
@@ -819,6 +902,10 @@ import {
       // ---- The MAGIC WAND, held in the right hand. ----
       this._buildWand(scene, shadow);
 
+      // ---- Visible worn gear (helmet, pauldrons, chest, gloves, belt, boots,
+      // cloak), built once + toggled/recoloured on equip so it never leaks. ----
+      this._buildWornGear(scene, shadow);
+
       // Where carried collectibles sit (above the hands / head).
       this.carryAnchor = new BABYLON.TransformNode("carry", scene);
       this.carryAnchor.parent = lean; this.carryAnchor.position.set(0, 2.35, 0.1);
@@ -908,6 +995,123 @@ import {
       } catch (e) { /* hex parse can fail in the headless stub */ }
     }
 
+    // Build every worn-gear mesh once (hidden), parented to the body part it rides
+    // so it animates for free; refreshWornGear() then toggles + recolours them by
+    // what's equipped. Tier-gated via wornDetailFor(); headless-safe (all meshes go
+    // through the proven mesh/material helpers).
+    _buildWornGear(scene, shadow) {
+      const spec = (this._wornSpec = wornDetailFor((typeof Quality !== "undefined" && Quality.tier) || "high"));
+      const g = (this.gear = {});
+      this.gearShown = {};
+      const cast = (m) => { try { shadow.addShadowCaster(m); } catch (e) {} return m; };
+      const off = (m) => { try { m.setEnabled(false); } catch (e) {} return m; };
+      const tone = "#9fb0c8"; // neutral steel base; refreshWornGear tints by rarity
+
+      // Helmet — a domed cap with a small brim, over the head.
+      const helmMat = emat(scene, "gearHelm", tone, 0.06);
+      const helmet = new BABYLON.TransformNode("gearHelmet", scene);
+      helmet.parent = this.lean; helmet.position.set(0, 1.88, 0.02);
+      const dome = sphere(scene, "gearHelmDome", 0.66, helmMat); dome.parent = helmet; dome.scaling.set(1, 0.8, 1); cast(dome);
+      const brim = disc(scene, "gearHelmBrim", 0.36, helmMat); brim.parent = helmet; brim.rotation.x = Math.PI / 2; brim.position.y = -0.16;
+      g.helmet = helmet; g.helmetMat = helmMat; off(helmet);
+
+      // Breastplate — a shell over the torso.
+      const chestMat = emat(scene, "gearChestM", tone, 0.06);
+      const chest = cyl(scene, "gearChest", 0.6, 0.72, 0.62, chestMat);
+      chest.parent = this.lean; chest.position.set(0, 1.16, 0.02); chest.scaling.z = 0.86; cast(chest);
+      g.chest = chest; g.chestMat = chestMat; off(chest);
+
+      // Belt — a band at the waist (tier-gated).
+      if (spec.belt) {
+        const beltMat = emat(scene, "gearBeltM", tone, 0.06);
+        const belt = cyl(scene, "gearBelt", 0.9, 0.9, 0.14, beltMat);
+        belt.parent = this.lean; belt.position.set(0, 0.98, 0); cast(belt);
+        g.belt = belt; g.beltMat = beltMat; off(belt);
+      }
+
+      // Pauldrons — shoulder caps on each arm pivot (tier-gated).
+      if (spec.pauldrons) {
+        const pMat = emat(scene, "gearPauldronM", tone, 0.06);
+        g.pauldrons = []; g.pauldronMat = pMat;
+        for (const arm of [this.armL, this.armR]) {
+          const cap = sphere(scene, "gearPauldron", 0.42, pMat);
+          cap.parent = arm; cap.position.set(0, 0.04, 0); cap.scaling.set(1.05, 0.7, 1.05); cast(cap); off(cap);
+          g.pauldrons.push(cap);
+        }
+      }
+
+      // Gloves — cuffs over the hands (ride the arms).
+      const glMat = emat(scene, "gearGloveM", tone, 0.06);
+      g.gloves = []; g.gloveMat = glMat;
+      for (const arm of [this.armL, this.armR]) {
+        const cuff = sphere(scene, "gearGlove", 0.36, glMat);
+        cuff.parent = arm; cuff.position.set(0, -0.6, 0); cuff.scaling.set(1, 0.95, 1); cast(cuff); off(cuff);
+        g.gloves.push(cuff);
+      }
+
+      // Boots — calf cuffs over the shoes (ride the leg pivots, so they stride).
+      const btMat = emat(scene, "gearBootM", tone, 0.06);
+      g.boots = []; g.bootMat = btMat;
+      for (const leg of [this.legL, this.legR]) {
+        const boot = cyl(scene, "gearBoot", 0.28, 0.33, 0.36, btMat);
+        boot.parent = leg; boot.position.set(0, -0.5, 0.02); cast(boot); off(boot);
+        g.boots.push(boot);
+      }
+
+      // Cloak — hangs from the upper back and billows when moving (tier-gated sway).
+      if (spec.cloak) {
+        const clMat = emat(scene, "gearCloakM", tone, 0.06);
+        const pivot = new BABYLON.TransformNode("cloakPivot", scene);
+        pivot.parent = this.lean; pivot.position.set(0, 1.5, -0.3);
+        const cloak = box(scene, "gearCloak", 0.78, 1.15, 0.05, clMat);
+        cloak.parent = pivot; cloak.position.set(0, -0.55, 0); cast(cloak);
+        this.cloakPivot = pivot; g.cloak = cloak; g.cloakMat = clMat; off(cloak);
+      }
+
+      this.refreshWornGear();
+    }
+
+    // Show/hide + recolour each worn-gear piece from the live equipment. Pure
+    // visual: no allocation (meshes built once), so equipping never leaks. The
+    // rarity colour signals power at a glance; legendary/epic get a faint glow.
+    refreshWornGear() {
+      const g = this.gear; if (!g) return;
+      const shown = this.gearShown || (this.gearShown = {});
+      const paint = (mats, def) => {
+        const col = (RARITY[def.rarity] || RARITY.normal).color;
+        const emi = def.rarity === "legendary" ? 0.24 : def.rarity === "epic" ? 0.15 : def.rarity === "rare" ? 0.09 : 0.05;
+        try {
+          const c = BABYLON.Color3.FromHexString(col);
+          for (const m of mats) { if (!m) continue; m.diffuseColor = c; m.emissiveColor = c.scale(emi); }
+        } catch (e) { /* hex parse can fail headless */ }
+      };
+      const apply = (slot, meshes, mats) => {
+        const inst = this.equipment[slot];
+        const on = !!(inst && inst !== TWO_HANDED);
+        shown[slot] = on;
+        if (meshes) for (const m of (Array.isArray(meshes) ? meshes : [meshes])) { try { m.setEnabled(on); } catch (e) {} }
+        if (on && mats) paint(Array.isArray(mats) ? mats : [mats], getDef(inst.id));
+      };
+      apply("helmet", g.helmet, g.helmetMat);
+      apply("breastplate", g.chest, g.chestMat);
+      apply("belt", g.belt, g.beltMat);
+      apply("pauldrons", g.pauldrons, g.pauldronMat);
+      apply("gloves", g.gloves, g.gloveMat);
+      apply("boots", g.boots, g.bootMat);
+      apply("cloak", g.cloak, g.cloakMat);
+    }
+
+    // Billow the cloak with movement (frame-rate-smoothed lerp like the limbs;
+    // freezes with the pause menu since update() stops being called).
+    _animateCloak() {
+      if (!this.cloakPivot || !this._wornSpec || !this._wornSpec.cloakSway) return;
+      const moving = this.state === "walk";
+      const back = (moving ? -0.5 : -0.06) + Math.sin(this.walkPhase * 1.5) * (moving ? 0.08 : 0.02);
+      const side = Math.sin(this.walkPhase) * (moving ? 0.12 : 0.03);
+      this.cloakPivot.rotation.x = lerp(this.cloakPivot.rotation.x || 0, back, 0.15);
+      this.cloakPivot.rotation.z = lerp(this.cloakPivot.rotation.z || 0, side, 0.15);
+    }
+
     startPickup(itemMesh, onPicked) {
       this.state = "pickup"; this.pickT = 0;
       this.pendingItem = itemMesh; this.onPicked = onPicked;
@@ -967,6 +1171,7 @@ import {
       const rangedStrike = this.swing.kind === "ranged" && this.swing.striking;
       this.wandGlow.intensity = 0.4 + (rangedStrike ? 0.9 : 0) + pulse * 0.1;
 
+      this._animateCloak();
       this.yaw.rotation.y = this.facing;
     }
 
@@ -1867,8 +2072,9 @@ import {
   // to scoop it straight into your inventory (like a coin, but it's gear).
   // =========================================================================
   class ItemDrop {
-    constructor(scene, shadow, pos, id) {
+    constructor(scene, shadow, pos, id, affixes) {
       this.id = id;
+      this.affixes = affixes || null; // rolled enchantments carried to the bag on pickup
       this.life = 60;               // lingers a good while before fading
       this.spin = 0;
       const def = getDef(id);
@@ -4102,9 +4308,12 @@ import {
   // Item cards — shared rendering for the shop and inventory. Builds a row for
   // one item def with its icon, name (rarity-tinted), stat summary and a button.
   // =========================================================================
-  function statSummary(def) {
+  // A one-line stat summary for an item def. When an INSTANCE is supplied the
+  // numbers fold in its enhancement level + rolled affixes (so the bag/anvil show
+  // the item's true power), otherwise the plain base block is shown (shop wares).
+  function statSummary(def, inst) {
     const parts = [];
-    const s = def.stats || {};
+    const s = inst ? effectiveStats(inst) : (def.stats || {});
     if (def.potion) {
       const p = def.potion;
       if (p.heal) parts.push(t("stat.healthRestore", { n: p.heal }));
@@ -4113,23 +4322,53 @@ import {
     }
     if (def.weapon) {
       const w = def.weapon;
+      const mult = inst ? enhanceMult(def, instLevel(inst)) : 1;
       parts.push(w.ranged ? (w.shape === "arrow" ? t("stat.rangedArrow") : t("stat.rangedBolt")) : t("stat.melee"));
-      parts.push(t("stat.dmg", { n: w.damage }));
+      parts.push(t("stat.dmg", { n: +(w.damage * mult).toFixed(1) }));
       if (w.multishot > 1) parts.push(t("stat.multishot", { n: w.multishot }));
-      if (w.pierce) parts.push(t("stat.pierce", { n: w.pierce }));
+      const pierce = (w.pierce || 0) + (inst ? (s.pierce || 0) : 0);
+      if (pierce) parts.push(t("stat.pierce", { n: pierce }));
       parts.push(def.hands === 2 ? t("stat.twoHanded") : t("stat.oneHanded"));
     }
-    if (s.maxHealth) parts.push(t("stat.hp", { n: s.maxHealth }));
+    if (s.maxHealth) parts.push(t("stat.hp", { n: Math.round(s.maxHealth) }));
     if (s.damageReduction) parts.push(t("stat.resist", { n: Math.round(s.damageReduction * 100) }));
-    if (s.moveSpeed) parts.push(t("stat.speed", { n: s.moveSpeed }));
-    if (s.damage) parts.push(t("stat.damageBonus", { n: s.damage }));
+    if (s.moveSpeed) parts.push(t("stat.speed", { n: +s.moveSpeed.toFixed(1) }));
+    if (s.damage) parts.push(t("stat.damageBonus", { n: +s.damage.toFixed(1) }));
     if (s.haste) parts.push(t("stat.haste", { n: Math.round((1 - s.haste) * 100) }));
-    if (s.lifesteal) parts.push(t("stat.lifestealBonus", { n: s.lifesteal }));
+    if (s.lifesteal) parts.push(t("stat.lifestealBonus", { n: +s.lifesteal.toFixed(1) }));
     if (s.coinRange) parts.push(t("stat.coinMagnet"));
     return parts.join(" · ");
   }
 
-  function itemCard(def, btnLabel, btnClass, disabled, onClick, extraTag, level) {
+  // The enchantment chips (prefixes first, then suffixes) for an item instance.
+  function affixChipsHtml(inst) {
+    if (!inst || !inst.affixes || !inst.affixes.length) return "";
+    const order = (id) => (AFFIXES[id] && AFFIXES[id].kind === "prefix" ? 0 : 1);
+    const ids = inst.affixes.slice().sort((a, b) => order(a) - order(b));
+    const chips = ids.map((id) => `<span class="affix-chip">✦ ${tAffixLabel(id)}</span>`).join("");
+    return `<div class="affix-row">${chips}</div>`;
+  }
+
+  // A compact "what changes if I equip this" line for the bag's compare tooltips.
+  function compareDeltaHtml(player, inst) {
+    const d = equipDelta(player, inst);
+    const keys = Object.keys(d);
+    if (!keys.length) return `<div class="cmp cmp-same">${t("inv.compareSame")}</div>`;
+    const fmt = (k, v) => {
+      const sg = v > 0 ? "+" : "−", a = Math.abs(v);
+      if (k === "maxHealth") return `${sg}${Math.round(a)} ❤`;
+      if (k === "damageReduction") return `${sg}${Math.round(a * 100)}% 🛡️`;
+      if (k === "speed") return `${sg}${a.toFixed(1)} 👟`;
+      if (k === "lifesteal") return `${sg}${+a.toFixed(1)} 🩸`;
+      if (k === "damage") return `${sg}${+a.toFixed(1)} 💥`;
+      if (k === "coinRange") return `${sg}${Math.round(a)} 🪙`;
+      return `${sg}${+a.toFixed(1)}`;
+    };
+    const parts = keys.map((k) => `<span class="cmp-chip ${d[k] > 0 ? "up" : "down"}">${fmt(k, d[k])}</span>`).join("");
+    return `<div class="cmp">${parts}</div>`;
+  }
+
+  function itemCard(def, btnLabel, btnClass, disabled, onClick, extraTag, level, inst, belowHtml) {
     const row = document.createElement("div");
     row.className = "shop-item rarity-" + def.rarity;
     const rar = RARITY[def.rarity] || RARITY.normal;
@@ -4138,7 +4377,7 @@ import {
     row.innerHTML =
       `<div class="icon">${def.icon}</div>` +
       `<div class="info"><div class="name" style="color:${rar.color}">${tItemName(def)}${lvl}${tag}</div>` +
-      `<div class="desc">${statSummary(def) || tItemDesc(def)}</div></div>`;
+      `<div class="desc">${statSummary(def, inst) || tItemDesc(def)}</div>${affixChipsHtml(inst)}${belowHtml || ""}</div>`;
     const btn = document.createElement("button");
     btn.className = btnClass; btn.textContent = btnLabel; btn.disabled = !!disabled;
     if (!disabled && onClick) btn.addEventListener("click", onClick);
@@ -4270,7 +4509,7 @@ import {
           const def = getDef(inst.id);
           const worth = def.value + Math.round(def.value * 0.5 * instLevel(inst));
           const card = itemCard(def, t("btn.sellWorth", { worth }), "buy-btn sell-btn", false,
-            () => this.sell(inst), def.rarity !== "normal" ? tRarityLabel(def.rarity).toUpperCase() : "", instLevel(inst));
+            () => this.sell(inst), def.rarity !== "normal" ? tRarityLabel(def.rarity).toUpperCase() : "", instLevel(inst), inst);
           dom.shopItems.appendChild(card);
         }
       }
@@ -4290,6 +4529,9 @@ import {
   // =========================================================================
   const Inventory = {
     state: null, player: null, open: false,
+    tab: "gear",        // gear | materials | potions
+    filter: "all",      // all | weapon | armor | jewelry  (gear tab)
+    sort: "rarity",     // rarity | type | name            (gear tab)
 
     init(state, player) { this.state = state; this.player = player; },
 
@@ -4308,14 +4550,29 @@ import {
       dom.inventory.classList.add("hidden");
     },
 
+    setTab(tab) { this.tab = tab; this.render(); },
+    setFilter(f) { this.filter = f; this.render(); },
+    setSort(s) { this.sort = s; this.render(); },
     equip(inst) { equipItem(this.player, inst); this.render(); if (Shop.open) Shop.render(); },
     unequip(slot) { unequipSlot(this.player, slot); recomputeStats(this.player); this.render(); },
+    drink(slot) { if (potionUse(this.player, slot)) this.render(); },
 
     render() {
       if (!this.open) return;
       const p = this.player;
+      this._renderEquip(p);
+      this._renderSets(p);
+      this._renderStats(p);
+      this._renderTabs();
+      this._renderControls();
+      if (this.tab === "materials") this._renderMaterials(p);
+      else if (this.tab === "potions") this._renderPotions(p);
+      else this._renderGear(p);
+    },
 
-      // ---- Equipment slots ----
+    // The 12-slot paper-doll. Filled gear slots show rarity colour + level +
+    // enchantment chips and unequip on click.
+    _renderEquip(p) {
       dom.invEquip.innerHTML = "";
       for (const slot of EQUIP_SLOTS) {
         const meta = SLOT_META[slot];
@@ -4331,7 +4588,8 @@ import {
           const rar = RARITY[def.rarity] || RARITY.normal;
           cell.classList.add("filled");
           cell.innerHTML = `<div class="slot-label">${slotLabel}</div>` +
-            `<div class="slot-item" style="color:${rar.color}">${def.icon} ${enhanceName(tItemName(def), instLevel(occ))}</div>`;
+            `<div class="slot-item" style="color:${rar.color}">${def.icon} ${enhanceName(tItemName(def), instLevel(occ))}</div>` +
+            affixChipsHtml(occ);
           cell.title = t("inv.unequipTitle", { name: tItemName(def) });
           cell.addEventListener("click", () => this.unequip(slot));
         } else {
@@ -4339,34 +4597,149 @@ import {
         }
         dom.invEquip.appendChild(cell);
       }
+    },
 
-      // ---- Live stat block ----
+    // Active equipment-set progress + which threshold bonuses are live.
+    _renderSets(p) {
+      if (!dom.invSets) return;
+      const sets = activeSets(p.equipment);
+      if (!sets.length) { dom.invSets.innerHTML = ""; return; }
+      let html = `<div class="set-title">${t("inv.setBonus")}</div>`;
+      for (const s of sets) {
+        const chips = s.bonuses.map((b) =>
+          `<span class="set-chip ${b.met ? "met" : ""}">${b.threshold}: ${statSummary({ stats: b.stats })}</span>`).join("");
+        const foot = s.next ? t("inv.setNext", { n: s.next }) : t("inv.setComplete");
+        html += `<div class="set-row"><div class="set-name">${t("inv.setProgress", { name: tSetName(s.id), n: s.count, total: s.total })}</div>` +
+          `<div class="set-chips">${chips}</div><div class="set-foot">${foot}</div></div>`;
+      }
+      dom.invSets.innerHTML = html;
+    },
+
+    _renderStats(p) {
       const w = p.weapon;
       dom.invStats.innerHTML =
         `<div class="stat-row"><span>${t("inv.maxHealth")}</span><b>${Math.round(p.maxHealth)}</b></div>` +
         `<div class="stat-row"><span>${t("inv.resist")}</span><b>${Math.round(p.damageReduction * 100)}%</b></div>` +
         `<div class="stat-row"><span>${t("inv.speed")}</span><b>${p.speed.toFixed(1)}</b></div>` +
-        `<div class="stat-row"><span>${t("inv.lifesteal")}</span><b>${p.lifesteal}</b></div>` +
+        `<div class="stat-row"><span>${t("inv.lifesteal")}</span><b>${+p.lifesteal.toFixed(1)}</b></div>` +
         `<div class="stat-row"><span>${t("inv.weapon")}</span><b>${w.name}</b></div>` +
         `<div class="stat-row"><span>${t("inv.damage")}</span><b>${(+w.damage.toFixed(1))}${w.multishot > 1 ? " ×" + w.multishot : ""}</b></div>`;
+    },
 
-      // ---- Bag ----
+    _renderTabs() {
+      const set = (el, on) => { if (el && el.classList) el.classList.toggle("active", on); };
+      set(dom.invTabGear, this.tab === "gear");
+      set(dom.invTabMaterials, this.tab === "materials");
+      set(dom.invTabPotions, this.tab === "potions");
+    },
+
+    // Filter + sort toggles, shown only on the gear tab.
+    _renderControls() {
+      if (!dom.invControls) return;
+      if (this.tab !== "gear") { dom.invControls.innerHTML = ""; return; }
+      dom.invControls.innerHTML = "";
+      const group = (label, current, opts, on) => {
+        const wrap = document.createElement("div");
+        wrap.className = "inv-ctl";
+        wrap.innerHTML = `<span class="inv-ctl-label">${label}</span>`;
+        for (const o of opts) {
+          const b = document.createElement("button");
+          b.className = "chip-btn" + (current === o.id ? " active" : "");
+          b.textContent = o.label;
+          b.addEventListener("click", o.act);
+          wrap.appendChild(b);
+        }
+        return wrap;
+      };
+      dom.invControls.appendChild(group(t("inv.filterLabel"), this.filter, [
+        { id: "all", label: t("inv.filterAll"), act: () => this.setFilter("all") },
+        { id: "weapon", label: t("inv.kindWeapon"), act: () => this.setFilter("weapon") },
+        { id: "armor", label: t("inv.kindArmor"), act: () => this.setFilter("armor") },
+        { id: "jewelry", label: t("inv.kindJewelry"), act: () => this.setFilter("jewelry") },
+      ]));
+      dom.invControls.appendChild(group(t("inv.sortLabel"), this.sort, [
+        { id: "rarity", label: t("inv.sortRarity"), act: () => this.setSort("rarity") },
+        { id: "type", label: t("inv.sortType"), act: () => this.setSort("type") },
+        { id: "name", label: t("inv.sortName"), act: () => this.setSort("name") },
+      ]));
+    },
+
+    // The filtered + sorted bag of gear, each card carrying enchant chips and a
+    // live compare-vs-equipped delta line.
+    _renderGear(p) {
       dom.invBag.innerHTML = "";
-      const bagTitle = document.createElement("div");
-      bagTitle.className = "bag-title";
-      bagTitle.textContent = t("inv.bag", { n: p.inventory.length, cap: p.invCap });
-      dom.invBag.appendChild(bagTitle);
-      if (p.inventory.length === 0) {
+      const title = document.createElement("div");
+      title.className = "bag-title";
+      title.textContent = t("inv.bag", { n: p.inventory.length, cap: p.invCap });
+      dom.invBag.appendChild(title);
+
+      let list = p.inventory.filter((it) => isGear(it.id));
+      if (this.filter !== "all") list = list.filter((it) => itemCategory(getDef(it.id)) === this.filter);
+      const rank = (it) => (RARITY[getDef(it.id).rarity] || RARITY.normal).tier;
+      list = list.slice().sort((a, b) => {
+        if (this.sort === "name") return tItemName(getDef(a.id)).localeCompare(tItemName(getDef(b.id)));
+        if (this.sort === "type") return getDef(a.id).type.localeCompare(getDef(b.id).type) || rank(b) - rank(a);
+        return rank(b) - rank(a) || instLevel(b) - instLevel(a); // rarity (desc)
+      });
+
+      if (list.length === 0) {
         const empty = document.createElement("div");
         empty.className = "shop-empty"; empty.textContent = t("inv.bagEmpty");
         dom.invBag.appendChild(empty);
+        return;
       }
-      for (const inst of p.inventory.slice()) {
+      for (const inst of list) {
         const def = getDef(inst.id);
         const card = itemCard(def, t("btn.equip"), "buy-btn equip-btn", false,
           () => this.equip(inst),
           def.rarity !== "normal" ? tRarityLabel(def.rarity).toUpperCase() : "",
-          instLevel(inst));
+          instLevel(inst), inst, compareDeltaHtml(p, inst));
+        dom.invBag.appendChild(card);
+      }
+    },
+
+    // Crafting materials, surfaced as stacks (read-only; spent by crafting/quests).
+    _renderMaterials(p) {
+      dom.invBag.innerHTML = "";
+      const title = document.createElement("div");
+      title.className = "bag-title"; title.textContent = t("inv.matsTitle");
+      dom.invBag.appendChild(title);
+      const owned = MATERIAL_IDS.filter((id) => (p.materials[id] || 0) > 0);
+      if (owned.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "shop-empty"; empty.textContent = t("inv.matsEmpty");
+        dom.invBag.appendChild(empty);
+        return;
+      }
+      for (const id of owned) {
+        const m = MATERIALS[id] || {};
+        const row = document.createElement("div");
+        row.className = "shop-item stack-row";
+        row.innerHTML = `<div class="icon">${m.icon || "▫"}</div>` +
+          `<div class="info"><div class="name">${tMaterialLabel(id)}</div></div>` +
+          `<div class="stack-count">×${p.materials[id]}</div>`;
+        dom.invBag.appendChild(row);
+      }
+    },
+
+    // The 3-slot potion belt, quaffable straight from the bag.
+    _renderPotions(p) {
+      dom.invBag.innerHTML = "";
+      const title = document.createElement("div");
+      title.className = "bag-title"; title.textContent = t("inv.potionsTitle");
+      dom.invBag.appendChild(title);
+      const slots = p.potions.map((s, i) => ({ s, i })).filter((x) => x.s && x.s.count > 0);
+      if (slots.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "shop-empty"; empty.textContent = t("inv.potionsEmpty");
+        dom.invBag.appendChild(empty);
+        return;
+      }
+      for (const { s, i } of slots) {
+        const def = getDef(s.id);
+        const below = `<div class="stack-count inline">×${s.count}</div>`;
+        const card = itemCard(def, t("inv.drink"), "buy-btn potion-buy-btn", false,
+          () => this.drink(i), "", 0, null, below);
         dom.invBag.appendChild(card);
       }
     },
@@ -4443,7 +4816,7 @@ import {
         const cost = atMax ? 0 : enhanceCost(def, level);
         const label = atMax ? t("anvil.max") : t("btn.buyCost", { cost });
         const card = itemCard(def, label, "buy-btn enhance-anvil-btn", atMax || this.state.coins < cost,
-          () => this.enhance(inst), `${where} · ${level}/${max}`, level);
+          () => this.enhance(inst), `${where} · ${level}/${max}`, level, inst);
         dom.anvilItems.appendChild(card);
       }
     },
@@ -5571,10 +5944,13 @@ import {
         state.coinsList.push(new Coin(state.scene, state.shadow,
           new BABYLON.Vector3(m.position.x + off(), 0, m.position.z + off()), v));
       }
-      // A boss always drops a guaranteed RARE item — the only way to get one.
+      // A boss always drops a guaranteed RARE item — the only way to get one. Its
+      // enchantments are rolled here (in the seeded rng stream) and carried by the
+      // drop so the bag instance matches exactly.
       const rareId = RARE_DROPS[(rng() * RARE_DROPS.length) | 0];
+      const rareAffixes = rollAffixes(getDef(rareId), rng);
       const dpos = new BABYLON.Vector3(m.position.x, 0, m.position.z + 2);
-      state.drops.push(new ItemDrop(state.scene, state.shadow, dpos, rareId));
+      state.drops.push(new ItemDrop(state.scene, state.shadow, dpos, rareId, rareAffixes));
       // The Gelatin Hydra bursts into a final knot of sweets on death.
       if (m.archId === "splitter") {
         const n = 3 + Math.min(5, m.cycle || 1);
@@ -5624,7 +6000,9 @@ import {
       const got = d.update(dt, player.position);
       if (got) {
         const def = getDef(d.id);
-        if (invAdd(player, makeItem(d.id))) {
+        const inst = makeItem(d.id);
+        if (d.affixes && d.affixes.length) inst.affixes = d.affixes.slice();
+        if (invAdd(player, inst)) {
           toast(t("toast.pickedUp", { item: tItemName(def) }));
           if (Inventory.open) Inventory.render();
         } else {
@@ -5881,7 +6259,7 @@ import {
   // monsters, the boss, artifacts and dropped coins, plus the wave clock) is
   // serialized explicitly so the run resumes exactly where it left off.
   // =========================================================================
-  const SAVE_VERSION = 6;
+  const SAVE_VERSION = 7;
   const PENDING_LOAD_KEY = "gg3d_pending_load"; // sessionStorage hand-off across reload
   const AUTOSTART_KEY = "gg3d_autostart";       // restart -> skip the start screen
 
@@ -5920,8 +6298,9 @@ import {
         facing: round(player.facing),
         pos: xz(player.position),
         // The gear *is* the build now: save the bag + equipped slots (with their
-        // enhancement levels) and the stat block rebuilds via recomputeStats().
-        inventory: player.inventory.map((it) => ({ id: it.id, lvl: instLevel(it) })),
+        // enhancement levels + rolled affixes) and the stat block rebuilds via
+        // recomputeStats().
+        inventory: player.inventory.map(serializeInst),
         equipment: serializeEquipment(player),
         // The 3-slot potion belt.
         potions: player.potions.map((s) => (s ? { id: s.id, count: s.count } : null)),
@@ -5947,18 +6326,27 @@ import {
     };
   }
 
-  // Equipment → a plain { slot: {id,lvl} | "__2H__" | null } map for the save.
+  // One item instance → a compact { id, lvl, aff } save entry (aff omitted when the
+  // item carries no enchantments, keeping older-style saves byte-identical).
+  function serializeInst(inst) {
+    const out = { id: inst.id, lvl: instLevel(inst) };
+    if (inst.affixes && inst.affixes.length) out.aff = inst.affixes.slice();
+    return out;
+  }
+
+  // Equipment → a plain { slot: {id,lvl,aff} | "__2H__" | null } map for the save.
   function serializeEquipment(player) {
     const out = {};
     for (const slot of EQUIP_SLOTS) {
       const occ = player.equipment[slot];
-      out[slot] = occ === TWO_HANDED ? TWO_HANDED : occ ? { id: occ.id, lvl: instLevel(occ) } : null;
+      out[slot] = occ === TWO_HANDED ? TWO_HANDED : occ ? serializeInst(occ) : null;
     }
     return out;
   }
 
-  // Rebuild an item instance from a save entry: a plain id string (legacy v2)
-  // or a { id, lvl } object (v3+). Returns null for unknown items.
+  // Rebuild an item instance from a save entry: a plain id string (legacy v2) or a
+  // { id, lvl, aff } object (v3+; affixes added in v7). Unknown items/affixes are
+  // dropped so a foreign/older file still loads cleanly.
   function itemFromSave(entry) {
     if (entry == null) return null;
     const id = typeof entry === "string" ? entry : entry.id;
@@ -5966,6 +6354,10 @@ import {
     const inst = makeItem(id);
     const lvl = typeof entry === "object" ? (entry.lvl | 0) : 0;
     if (lvl > 0) inst.level = lvl;
+    if (typeof entry === "object" && Array.isArray(entry.aff)) {
+      const aff = entry.aff.filter((a) => AFFIXES[a]);
+      if (aff.length) inst.affixes = aff;
+    }
     return inst;
   }
 
@@ -6905,6 +7297,9 @@ import {
       if (dom.bagBtn) dom.bagBtn.addEventListener("click", () => { Sfx.play("ui_click"); Inventory.toggle(); });
       if (dom.invClose) dom.invClose.addEventListener("click", () => Inventory.close());
       if (dom.invDone) dom.invDone.addEventListener("click", () => Inventory.close());
+      if (dom.invTabGear) dom.invTabGear.addEventListener("click", () => { Sfx.play("ui_click"); Inventory.setTab("gear"); });
+      if (dom.invTabMaterials) dom.invTabMaterials.addEventListener("click", () => { Sfx.play("ui_click"); Inventory.setTab("materials"); });
+      if (dom.invTabPotions) dom.invTabPotions.addEventListener("click", () => { Sfx.play("ui_click"); Inventory.setTab("potions"); });
 
       // Adventure overlays: dialogue, crafting, castle, quest log.
       if (dom.dlgClose) dom.dlgClose.addEventListener("click", () => Dialogue.close());
@@ -7074,10 +7469,13 @@ import {
     window.__GG_TEST__ = {
       CONFIG, Projectile, Hazard, Monster, Boss, Coin, ItemDrop, Shop, Inventory, Anvil,
       ITEM_DB, RARE_DROPS, SHOP_STOCK, POTION_STOCK, FEATURED_POOL, BOSS_ARCHES,
-      ENHANCE, RARITY, getDef, makeItem,
-      equipItem, unequipSlot, recomputeStats, TWO_HANDED, EQUIP_SLOTS,
+      ENHANCE, RARITY, getDef, makeItem, makeLoot,
+      equipItem, unequipSlot, recomputeStats, TWO_HANDED, EQUIP_SLOTS, WORN_SLOTS, SLOT_META,
       potionAdd, potionUse, POTION_SLOTS, enhanceItem, enhanceCost, enhanceMult,
       effectiveStats, featuredForWave, computeWeapon, Sfx, spawnArtifact,
+      // ---- Items & equipment depth (Task 12): affixes, sets, derived stats ----
+      AFFIXES, SETS, rollAffixes, affixStats, setBonusStats, activeSets, itemCategory,
+      deriveStats, equippedAfter, equipDelta, wornDetailFor, isGear,
       // ---- Audio: mixer, per-zone ambience, footsteps (Task 6) ----
       Mixer, Ambience, AudioUI, Footsteps, LowHealth, surfaceForZone, AUDIO_KEY,
       // ---- Internationalization (Task 7) ----

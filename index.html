@@ -196,13 +196,22 @@
     <div class="inv-panel">
       <button id="invClose" class="shop-close" data-i18n-title="btn.close" title="Close" aria-label="Close inventory">×</button>
       <h2 data-i18n-html="inv.title">🎒 Inventory &amp; Equipment</h2>
-      <p class="shop-tagline" data-i18n="inv.tagline">Click a bag item to equip it; click an equipped slot to remove it.</p>
+      <p class="shop-tagline" data-i18n="inv.tagline2">Equip from the bag · click a slot to remove · drink potions.</p>
       <div class="inv-cols">
         <div class="inv-left">
           <div id="invEquip" class="equip-grid"></div>
+          <div id="invSets" class="inv-sets"></div>
           <div id="invStats" class="inv-stats"></div>
         </div>
-        <div id="invBag" class="inv-bag"></div>
+        <div class="inv-right">
+          <div class="inv-tabs">
+            <button id="invTabGear" class="shop-tab active" data-i18n="inv.tabGear">Gear</button>
+            <button id="invTabMaterials" class="shop-tab" data-i18n="inv.tabMaterials">Materials</button>
+            <button id="invTabPotions" class="shop-tab" data-i18n="inv.tabPotions">Potions</button>
+          </div>
+          <div id="invControls" class="inv-controls"></div>
+          <div id="invBag" class="inv-bag"></div>
+        </div>
       </div>
       <button id="invDone" class="start-btn shop-done" data-i18n="inv.done">Done</button>
     </div>
