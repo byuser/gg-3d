@@ -29,6 +29,9 @@ test("boots the canvas with no console errors and opens core overlays", async ({
   await startBtn.click();
   await expect(page.locator("#hud")).not.toHaveClass(/hidden/, { timeout: 15_000 });
 
+  // The corner minimap is part of the HUD and renders on a real canvas.
+  await expect(page.locator("#minimap")).toBeVisible();
+
   // Let a few frames render so any per-frame exception would surface.
   await page.waitForTimeout(1500);
 
@@ -50,6 +53,19 @@ test("boots the canvas with no console errors and opens core overlays", async ({
   await expect(page.locator("#skillsList")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator("#skills")).toHaveClass(/hidden/);
+
+  // World map opens with the 🗺️ button, renders its canvas, searches by name,
+  // switches to the world overview, and closes — proving the new DOM/canvas
+  // wiring boots cleanly (the guide/waypoint/compass logic is covered in depth by
+  // the Vitest unit + functional suites).
+  await page.locator("#mapBtn").click();
+  await expect(page.locator("#worldmap")).not.toHaveClass(/hidden/);
+  await expect(page.locator("#mapCanvas")).toBeVisible();
+  await page.fill("#mapSearch", "frost");
+  await expect(page.locator("#mapResults .map-result").first()).toBeVisible();
+  await page.locator("#mapTabWorld").click();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#worldmap")).toHaveClass(/hidden/);
 
   // Casting the slotted skill with the "1" hotkey must not throw.
   await page.keyboard.press("Digit1");

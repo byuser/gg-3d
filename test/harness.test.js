@@ -228,7 +228,7 @@ pl.health = 33;
 pl.materials.wood = 5; st.bossesCleared = { caverns: true }; st.totalKills = 17;
 
 const save = T.serializeGame();
-ok(save && save.v === 8, "serializeGame produced a versioned save");
+ok(save && save.v === 9, "serializeGame produced a versioned save");
 ok(T.validateSave(save), "save passes structural validation");
 ok(save.zone === st.zoneId, "current zone captured");
 ok(save.bossesCleared && save.bossesCleared.caverns === true, "cleared lair captured");
@@ -777,7 +777,7 @@ Story.introSeen = true; Story.beats = { ch2: true, ch3: true }; Story.sideTurnIn
 Q.completed = ["m_cull", "m_cornerstone"]; Q.reached = { ruins: true }; Q.talked = { mayor: true };
 const chBefore = Story.currentChapterId();
 const sSave = T.serializeGame();
-ok(sSave.v === 8 && sSave.story, "save is v8 with a story block");
+ok(sSave.v === 9 && sSave.story, "save is v9 with a story block");
 ok(sSave.story.intro === true && sSave.story.beats.includes("ch2"), "story flags serialized");
 ok(sSave.story.sideTurnIns.sq_pests === 2, "repeatable side tallies serialized");
 Story.introSeen = false; Story.beats = {}; Story.sideTurnIns = {};

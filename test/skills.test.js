@@ -291,7 +291,7 @@ describe("Task 14 — save / load round-trip + migration", () => {
     p.progress.focus = 33;
 
     const save = T.serializeGame();
-    expect(save.v).toBe(8);
+    expect(save.v).toBe(9);
     expect(save.player.progress.level).toBe(3);
     expect(save.player.progress.fused[fused.id]).toBeTruthy();
 
