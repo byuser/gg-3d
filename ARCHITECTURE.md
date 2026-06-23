@@ -28,6 +28,9 @@ src/
 │   ├── items.js       RARITY/ENHANCE, ITEM_DB, the 12 equip slots, AFFIXES + SETS,
 │   │                  and pure stat helpers (effectiveStats, rollAffixes,
 │   │                  setBonusStats, activeSets, enhance*) + derived shop/drop pools.
+│   ├── skills.js      SKILL_DB (base + boss-only active skills), ELEMENTS/EFFECTS,
+│   │                  the level/focus curve (xpToNext, maxFocusForLevel, …) and the
+│   │                  pure, deterministic FUSION blend (fuseSkills/fusionCost).
 │   ├── content.js     Crafting materials, resource kinds, relics, castle parts,
 │   │                  recipes, monster abilities, world locations + story NPCs.
 │   ├── story.js       The declarative campaign: STORY chapters, ordered MISSIONS,
@@ -112,7 +115,7 @@ cache-buster.
 
 ## Where to make a change
 
-- **Balance / new items, recipes, relics** → `src/data/`.
+- **Balance / new items, skills, recipes, relics** → `src/data/`.
 - **New user-facing strings / translations** → `src/core/i18n.js` (add to both
   `en` and `ru`).
 - **RNG / global tunables** → `src/core/config.js`.

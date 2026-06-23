@@ -41,7 +41,9 @@ and gear without ever blocking the main line. Slay the dragon to **win**.
 | Look | drag mouse | drag the screen |
 | Zoom | mouse wheel | two-finger pinch |
 | Attack (weapon) | `Space` or `F` (hold) | ✨ button (bottom-right) |
-| Use potion (belt 1/2/3) | `1` `2` `3` | tap a potion slot (bottom-left) |
+| Cast a skill (quick bar 1/2/3) | `1` `2` `3` | tap a quick-bar slot (bottom-centre) |
+| Use potion (belt 4/5/6) | `4` `5` `6` | tap a potion slot (bottom-left) |
+| Skills &amp; fusion | `K` | ✨ button (top-right) |
 | Inventory / equipment | `I` (or `B`) | 🎒 button |
 | Crafting bench | `C` | 🛠️ button (top-right) |
 | Quest log | `J` (or `L`) | 📜 button (top-right) |
@@ -268,7 +270,7 @@ index.html              # markup, overlays, HUD, CDN script tags, module entry
 css/style.css           # HUD, overlays, touch controls, responsive styling
 src/main.js             # composition root (Vite entry → imports the game)
 src/core/               # config (RNG + CONFIG), i18n (EN/RU)
-src/data/               # pure content tables: items, content, story, zones
+src/data/               # pure content tables: items, skills, content, story, zones
 src/game.js             # the runtime: entities, world, systems, UI, save/load
 test/setup/stubs.js     # Babylon + DOM + Web Audio stubs for the Vitest suites
 test/*.test.js          # Vitest unit/logic (ported harness) + functional flows
@@ -348,7 +350,16 @@ loadout + **equip rules** (`equippedAfter` mirrors `equipItem` for 2-handed / du
 rings), the **compare-vs-equipped deltas**, the **visible worn gear** (core silhouette +
 high-tier extras, **tier-gated**, toggled with **no mesh reallocation** across
 equip/unequip), the **tabbed inventory** (filter / sort / potion consume), and the **v7
-save round-trip** of affixes + the new slots **plus migration** from an older (v6) file.
+save round-trip** of affixes + the new slots **plus migration** from an older (v6) file,
+and the **skill & leveling** suite (`test/skills.test.js`) that locks in Task 14: the
+**XP curve + focus math** (pure), **level-up** grants (health + focus + auto-learned skills),
+**focus regen + cooldown** ticking, the **quick-bar** assign (deduplicated) + **activate**
+(volley fires bolts, nova damages + **chills**, buff/heal apply; focus + cooldown gating), the
+**deterministic 3-skill fusion** blend (effect priority, blended power/AoE/count, inherited
+slow/lifesteal, mixed element) + **cost** + coin/crystal charge, **boss-loot skills** (seeded →
+reproducible, boss-only, drying up once all owned), the headless-safe **skills overlay** render +
+fusion preview, the skill **i18n** (names/labels + RU completeness), and the **v8 save round-trip**
+of level/xp/focus/owned/fused/slots **plus migration** from an older (v7) file.
 On top of that, a
 **functional** suite (`test/functional.test.js`) boots the assembled game in
 isolation and drives whole flows (start → zone travel → save/reload round-trip),
@@ -413,6 +424,38 @@ whole thing is unit-testable without a GPU:
   slots; older saves (no affixes / no new slots) load with clean defaults.
 - **Value / weight.** Items carry a coin **value** (resale, scaled by enhancement); **weight /
   encumbrance** was considered and deferred (noted as a follow-up — no durability/repair economy).
+
+#### Skill, leveling & fusion model (Task 14)
+
+A second declarative, **data-driven** layer in `src/data/skills.js` — pure level math + a
+deterministic fusion blend, so the whole system is unit-testable headless:
+
+- **Leveling & focus.** Defeating foes, turning in quests and gathering grant **XP** (`Skills.xpFor`);
+  `xpToNext(level)` is a smooth super-linear curve. Each level grants **+max health** (folded into the
+  player's `base`, so the gear `recomputeStats` pipeline is untouched) and **+max focus** — the
+  spell resource that regenerates over time (`maxFocusForLevel`). Newly-unlocked base skills are
+  **auto-learned** on level-up.
+- **Active skills.** `SKILL_DB` defines each skill's `effect` the runtime resolves — **volley** (a
+  fan of element-tinted bolts), **nova** (an AoE burst around the player, with frost _slow_ /
+  shadow _lifesteal_), **buff** (a timed self buff via the existing buff system) or **heal** — plus
+  the numeric **attributes** (power, focus cost, cooldown, count/radius/duration, element + flags)
+  that fusion blends. Effects reuse the proven `Projectile` / nova / `applyBuff` paths and
+  feature-detect Babylon, so they never throw headless.
+- **Quick bar.** Up to **three** skills slot onto a HUD bar by the shoot button — cast with hotkeys
+  `1` `2` `3` or a tap, with a radial cooldown sweep and a focus-cost readout. (The potion belt
+  moved one set over to `4` `5` `6`.)
+- **Fusion (the marquee feature).** `fuseSkills(defs)` is **pure + deterministic**: it blends 2–3
+  owned skills into a brand-new one — the strongest effect wins, power/cooldown/cost/AoE/count and
+  the slow/lifesteal/pierce flags are combined, and the element is the shared school or _Prismatic_
+  if mixed. It costs **coins + crystals** (`fusionCost`, tier-scaled); the result is a real,
+  slottable, savable skill (reproduced exactly on reload, never re-rolled).
+- **Boss-loot skills.** A pool of powerful skills drops **only** from bosses, rolled through the
+  seeded `rng()` after the existing coin/gear draws (so drop determinism is untouched) and added to
+  the roster — one unowned boss skill per kill until all are collected.
+- **Persistence.** `SAVE_VERSION` **8** stores `progress` (level/xp, focus, owned + fused skills, the
+  quick-bar slots) in the player block; older saves (no `progress`) load at level 1 with the starter
+  skill and default sanely.
+
 - **`Projectile` / `Hazard`** — gravity-bound, life-capped ballistic projectiles. The
   player's bolts/arrows (`Projectile`) and the bosses' hostile candy bolts (`Hazard`)
   both arc under gravity and die on ground/timeout, so nothing flies forever.
@@ -626,4 +669,12 @@ Source: GitHub Actions**.
       **tabbed inventory** (Gear / Materials / Potions) with **filter + sort**, **compare-vs-equipped**
       deltas and drink-from-bag potions; the full loadout (affixes + new slots) **round-trips through
       save/load** (v7, older saves still load) — `test/items.test.js`
+- [x] **Skill & leveling system** — gain **XP** (combat / quests / gathering), **level up** for more
+      health + **focus** (a regenerating spell resource) and auto-learned skills; a **`SKILL_DB`** of
+      active skills (volley / nova / buff / heal, with frost slow & shadow lifesteal) cast from a
+      **3-slot quick bar** (hotkeys `1`/`2`/`3`, potions moved to `4`/`5`/`6`); **3-skill fusion** —
+      a **pure, deterministic** blend of up to three owned skills into a new one, paid for with
+      **coins + crystals**; and **boss-only skills** that drop solely from bosses (seeded); all of it
+      (level/xp/focus/owned/fused/slots) **round-trips through save/load** (v8, older saves still
+      load) — `test/skills.test.js`
 - [ ] Puzzles (levers, plates, gated doors)

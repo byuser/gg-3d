@@ -16,21 +16,21 @@ built from an **ES-module source tree** under `src/` by **Vite** into a hashed
 **static bundle** in `dist/` that is deployed to **GitHub Pages** from `master`.
 (Babylon stays on its CDN as a global, so it is not bundled — the published site
 stays 100% static files.) The source is `src/main.js` (composition root) →
-`src/core/` (`config`, `i18n`), `src/data/` (`items`, `content`, `story`,
-`zones`) and the runtime monolith `src/game.js`, plus `index.html`,
+`src/core/` (`config`, `i18n`), `src/data/` (`items`, `skills`, `content`,
+`story`, `zones`) and the runtime monolith `src/game.js`, plus `index.html`,
 `css/style.css`, and a layered **test suite** under `test/` (Vitest unit/logic +
 functional flows that stub Babylon + the DOM, and a Playwright real-browser
 smoke). See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full map.
 
 Architecture quick-map (which module to grep): `CONFIG`/`rng`/`setSeed`
 (`src/core/config.js`); i18n `t()` + resolvers (`src/core/i18n.js`); `ITEM_DB`
-(`src/data/items.js`); `ZONES`/`HUB_ZONE` (`src/data/zones.js`); `STORY`/
-`MISSIONS` (`src/data/story.js`); `LOCATIONS`/`NPC_DATA`/`MONSTER_ABILITIES`
-(`src/data/content.js`); and the runtime — `Player`, `Monster`, `Boss`,
-`Dragon`, `buildWorld`, `SpawnDirector`, `ZoneManager`, `teardownZone`,
-`DayNight`, `Weather`, `Sfx`/`Music`, `QUEST_BY_ID`, the `dom` map,
-`serializeGame`/`applySave`, and the test seam `window.__GG_TEST__` — in
-`src/game.js`.
+(`src/data/items.js`); `SKILL_DB`/`fuseSkills`/`xpToNext` (`src/data/skills.js`);
+`ZONES`/`HUB_ZONE` (`src/data/zones.js`); `STORY`/`MISSIONS` (`src/data/story.js`);
+`LOCATIONS`/`NPC_DATA`/`MONSTER_ABILITIES` (`src/data/content.js`); and the
+runtime — `Player`, `Monster`, `Boss`, `Dragon`, `buildWorld`, `SpawnDirector`,
+`ZoneManager`, `teardownZone`, `DayNight`, `Weather`, `Skills`/`SkillsUI`,
+`Sfx`/`Music`, `QUEST_BY_ID`, the `dom` map, `serializeGame`/`applySave`, and the
+test seam `window.__GG_TEST__` — in `src/game.js`.
 
 ## Golden rules (apply to EVERY change)
 

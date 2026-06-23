@@ -802,7 +802,16 @@ A task is **done** only when **all** of these are true:
   clean stylized 2D map is the target.
 
 ### Task 14 — Skill & leveling system (Skyrim‑grade) with 3‑skill fusion, a quick‑access bar & boss‑only skills
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-23 · Shipped an XP/leveling layer (XP from combat/quests/gathering, a
+  super‑linear curve, +health/+focus per level, auto‑learned base skills) over a new pure
+  `src/data/skills.js` (`SKILL_DB` 6 base + 4 boss‑only active skills, `ELEMENTS`/`EFFECTS`, level/focus
+  math + the deterministic `fuseSkills`/`fusionCost`). Active skills (volley/nova/buff/heal, frost slow +
+  shadow lifesteal) cast from a **3‑slot quick bar** (hotkeys 1/2/3; potions moved to 4/5/6) spending a
+  regenerating **focus** resource + a cooldown. The marquee **3‑skill fusion** blends 2–3 owned skills into
+  a brand‑new equippable/savable one for **coins + crystals** (pure + reproducible). **Boss‑only skills**
+  drop solely from bosses (seeded, after the existing coin/gear draws). New ✨ Skills overlay (`K`), HUD
+  level/XP + focus bars, EN/RU i18n. `SAVE_VERSION` → 8 (player `progress`; older saves default to level 1).
+  New `test/skills.test.js` (27 cases; Vitest 53 → 80) + the E2E opens the overlay & casts a skill.
 - **Depends on:** pairs with **Task 12** (shared stat pipeline); benefits from the
   Task 13 HUD for the toolbar. Keep save schema coordinated with Task 12.
 - **Goal.** Research how large RPGs (Skyrim and peers) model **skills and

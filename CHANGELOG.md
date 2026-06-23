@@ -24,6 +24,50 @@ delta it shipped with, since later tasks reference those.
 
 _Nothing pending._
 
+## [2026-06-23] — Task 14 — Skill & leveling system with 3-skill fusion, a quick-access bar & boss-only skills
+
+Added a full RPG progression layer on top of combat: **leveling + a focus resource**, a roster of
+**active skills**, a **3-slot quick bar**, the marquee **3-skill fusion**, and **boss-only skill
+drops** — all data-driven and pure-function-tested. **`SAVE_VERSION` → 8** (a new `progress` block
+on the player); older saves load at level 1 with the starter skill.
+
+- **Data layer (`src/data/skills.js`).** A new pure module: `SKILL_DB` (6 base skills learned by
+  leveling + 4 boss-only skills), `ELEMENTS`/`EFFECTS`, the level/focus curve (`xpToNext`,
+  `totalXpToReach`, `maxFocusForLevel`, `levelHealthBonus`, `skillsUnlockedAt`) and the
+  **deterministic** fusion math (`fuseSkills`, `fusionCost`, `canFuse`, `skillTier`) — no
+  DOM/Babylon refs, so it stays in the type-checked data layer and is unit-tested directly.
+- **Leveling & focus.** Kills (scaled by boss/dragon), quest turn-ins and gathering grant **XP**
+  (`Skills.xpFor`); a level-up grants **+8 max health** (folded into the player's `base` so the gear
+  `recomputeStats` pipeline is untouched), **+8 max focus**, and **auto-learns** newly-unlocked base
+  skills. **Focus** is a spell resource that regenerates over time and gates casting. A HUD **level
+  badge + XP bar** (top row) and a **focus bar** (under the health bar) read it out live.
+- **Active skills.** Four effect families the runtime resolves on the existing systems: **volley**
+  (a fan of element-tinted `Projectile`s), **nova** (an AoE burst — with frost **slow** via a new
+  isolated `Monster.applySlow`/`slowMul`, and shadow **lifesteal**), **buff** (a timed self buff via
+  `applyBuff`) and **heal**. All feature-detect Babylon and never throw headless.
+- **Quick bar (hotkeys 1/2/3).** Up to three skills slot onto a bottom-centre HUD bar (cast with
+  `1`/`2`/`3` or a tap) with a radial cooldown sweep + focus-cost readout. The **potion belt moved
+  one set over to `4`/`5`/`6`** (still fully tap-usable; help text + belt labels updated).
+- **Skill fusion (marquee).** Select 2–3 owned skills in the new **✨ Skills & Fusion** overlay
+  (`K`) and forge a brand-new skill whose attributes are the pure deterministic blend (strongest
+  effect wins; power/cooldown/cost/AoE/count + slow/lifesteal/pierce combined; shared element or
+  _Prismatic_ if mixed). It costs **coins + crystals** (tier-scaled); the result is a real,
+  slottable, savable skill, reproduced exactly on reload (never re-rolled).
+- **Boss-loot skills.** A pool of powerful skills drops **only** from bosses — rolled through the
+  seeded `rng()` **after** the existing coin/gear draws (so drop determinism is untouched) and added
+  to the roster, one unowned boss skill per kill until all are collected.
+- **Persistence.** The whole `progress` block (level/xp, focus, owned + fused skills, the quick-bar
+  slots) serializes in the player; legacy < v8 saves default sanely (level 1, starter skill, full
+  focus). New procedural SFX cues (`levelup`, `skill_cast`, `fuse`) and full **EN/RU i18n**
+  (UI strings + a `skill`/`element`/`effect` RU group + `tSkillName`/`tSkillDesc`/`tElementLabel`/
+  `tEffectLabel` resolvers).
+- **Tests.** New `test/skills.test.js` (27 cases; Vitest **53 → 80**) covers the curve/focus math,
+  level-ups, focus regen + cooldowns, quick-bar assign/activate (volley/nova/buff/heal + gating),
+  the fusion blend determinism + cost + charge, boss-drop determinism, the headless-safe overlay,
+  skill i18n + RU completeness, and the **v8 save round-trip + migration**. The Playwright boot smoke
+  now opens the skills overlay + casts a skill. Full pipeline green; desktop + mobile screenshots
+  confirmed the HUD, quick bar and overlay.
+
 ## [2026-06-23] — Task 12 — Deep item & equipment system with visible worn gear + a real inventory
 
 Took the gear layer from a flat 8-slot catalogue to a Skyrim-flavoured analog: a **12-slot**
