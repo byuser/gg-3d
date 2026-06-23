@@ -10,7 +10,11 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: 1,
   reporter: process.env.CI ? "list" : "list",
-  timeout: 60_000,
+  // The single smoke test drives the whole UI end-to-end (boot Babylon on a real
+  // WebGL canvas — fetched from the CDN — then open every core overlay). On a
+  // cold CI runner that first boot is slow, so give the whole test a generous
+  // budget (the web server already gets 120s) to avoid flaky timeouts.
+  timeout: 120_000,
   use: {
     baseURL: "http://localhost:4173",
     trace: "on-first-retry",
