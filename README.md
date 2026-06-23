@@ -47,6 +47,8 @@ and gear without ever blocking the main line. Slay the dragon to **win**.
 | Inventory / equipment | `I` (or `B`) | 🎒 button |
 | Crafting bench | `C` | 🛠️ button (top-right) |
 | Quest log | `J` (or `L`) | 📜 button (top-right) |
+| World map / search / guide | `Tab` | 🗺️ button (top-right) |
+| Toggle the minimap | `N` | tap the minimap to open the full map |
 | Talk / collect / gather / shop / build (`E`) | `E` | action button (bottom-right) |
 | Travel to another land | walk into a path / bridge / cave portal | same |
 | Music on/off | `M` | 🔊 button (top-right) |
@@ -359,7 +361,18 @@ and the **skill & leveling** suite (`test/skills.test.js`) that locks in Task 14
 slow/lifesteal, mixed element) + **cost** + coin/crystal charge, **boss-loot skills** (seeded →
 reproducible, boss-only, drying up once all owned), the headless-safe **skills overlay** render +
 fusion preview, the skill **i18n** (names/labels + RU completeness), and the **v8 save round-trip**
-of level/xp/focus/owned/fused/slots **plus migration** from an older (v7) file.
+of level/xp/focus/owned/fused/slots **plus migration** from an older (v7) file,
+and the **world-map** suite (`test/worldmap.test.js`) that locks in Task 13: the
+**zone graph** derived from the portals + **BFS route-finding** (shortest path,
+the next-hop **portal** to take) and its **symmetry**, the **bearing/distance** +
+**8-point compass** math and the **camera-relative** arrow, the searchable
+**map-target** derivation (every land / landmark / NPC, no duplication) with
+**diacritic-folding search**, the deterministic **world-overview layout**, the
+runtime **waypoint resolution** (same-zone bearing vs cross-zone next-portal),
+**set / clear / arrival** auto-clearing, **fog-of-war** discovery on travel, the
+headless-safe **overlay + minimap** (open / search / select / guide / close), and
+the **v9 save round-trip** of discovered lands + the active waypoint **plus
+migration** from an older (v8) file.
 On top of that, a
 **functional** suite (`test/functional.test.js`) boots the assembled game in
 isolation and drives whole flows (start → zone travel → save/reload round-trip),
@@ -455,6 +468,36 @@ deterministic fusion blend, so the whole system is unit-testable headless:
 - **Persistence.** `SAVE_VERSION` **8** stores `progress` (level/xp, focus, owned + fused skills, the
   quick-bar slots) in the player block; older saves (no `progress`) load at level 1 with the starter
   skill and default sanely.
+
+#### Minimap, world map & guided waypoint (Task 13)
+
+The map layer is split into a **pure** module (`src/data/worldmap.js`) and the
+runtime UI (`WorldMap` / `WorldMapUI` in `src/game.js`), so the navigation logic
+is fully testable headless:
+
+- **Zone graph + routing.** `ZONE_ADJ` is derived straight from each zone's
+  `portals`; `findRoute(from, to)` is a **BFS shortest path** and
+  `nextZoneStep(from, to)` is the first hop — the **portal to walk into next** —
+  so a cross-land waypoint always points at the right gateway.
+- **Geometry.** `bearingRad` / `dist2D` / `compass8` and the camera-relative
+  `relativeHeading` drive the on-screen **compass arrow** + distance; all pure.
+- **Targets + search.** `MAP_TARGETS` derives every **land / landmark / NPC** from
+  `ZONES` / `LOCATIONS` / `NPC_DATA` (no duplicated names — the UI resolves names
+  through i18n); `searchTargets` matches on diacritic-folded display names.
+- **Minimap (`WorldMap`).** A north-up **corner canvas** showing the current land's
+  fence, the player + facing, portals (coloured by kind), NPCs (status-coloured),
+  resources, monsters, vendors, the castle and the waypoint marker — redrawn on a
+  throttle, **feature-detected** (no `2d` context ⇒ silent no-op). Toggle with `N`.
+- **Full map (`WorldMapUI`).** A pannable/zoomable overlay with a **current-land**
+  view and a **world overview** of the portal graph (`worldLayout`, discovered vs
+  **fog-of-war**), a name **search** with results, and a **"Guide me there"** that
+  sets the waypoint. Opens with `Tab` / the 🗺️ button.
+- **Waypoint.** `resolveWaypoint` returns live guidance (in-zone bearing, or the
+  next portal across lands) and **auto-clears on arrival**; the compass shows the
+  next portal to take when the target is in another land.
+- **Persistence.** `SAVE_VERSION` **9** stores `discovered` (the lands you've
+  visited) + the active `waypoint` (`{ kind, id }`); older saves (no map block)
+  default to "only the saved land known", no waypoint.
 
 - **`Projectile` / `Hazard`** — gravity-bound, life-capped ballistic projectiles. The
   player's bolts/arrows (`Projectile`) and the bosses' hostile candy bolts (`Hazard`)
@@ -677,4 +720,13 @@ Source: GitHub Actions**.
       **coins + crystals**; and **boss-only skills** that drop solely from bosses (seeded); all of it
       (level/xp/focus/owned/fused/slots) **round-trips through save/load** (v8, older saves still
       load) — `test/skills.test.js`
+- [x] **Minimap + full world map, search & a guided waypoint** — a live north-up **corner minimap**
+      (player + facing, portals, NPCs, resources, monsters, vendors, the castle and the active
+      waypoint), a **full-screen map** with a detailed **current-land** view and a **world overview**
+      of the portal graph (discovered vs **fog-of-war**), a name **search** across every land /
+      landmark / NPC (i18n-aware, diacritic-folding), and a **guided waypoint** — an on-screen
+      **compass** (with the next **portal** to take across lands, via pure BFS route-finding) that
+      **clears on arrival**; discovered lands + the active waypoint **round-trip through save/load**
+      (v9, older saves still load) — pure helpers in `src/data/worldmap.js`, covered by
+      `test/worldmap.test.js`
 - [ ] Puzzles (levers, plates, gated doors)

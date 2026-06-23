@@ -35,7 +35,11 @@ src/
 │   │                  recipes, monster abilities, world locations + story NPCs.
 │   ├── story.js       The declarative campaign: STORY chapters, ordered MISSIONS,
 │   │                  optional SIDE_QUESTS, and the derived quest indices.
-│   └── zones.js       The explorable ZONES (themed streamable worlds + portals).
+│   ├── zones.js       The explorable ZONES (themed streamable worlds + portals).
+│   └── worldmap.js    The map graph + pure helpers: the zone adjacency derived
+│                      from portals, BFS route-finding (findRoute/nextZoneStep),
+│                      bearing/distance + the 8-point compass, the searchable
+│                      MAP_TARGETS (zones/landmarks/NPCs) and the world layout.
 │
 ├── game.js            The runtime monolith (≈6.8k lines moved verbatim from the
 │                      old IIFE). Imports config/i18n/data and holds everything
@@ -43,7 +47,8 @@ src/
 │                      Boss, Dragon, Projectile), buildWorld/ZoneManager/
 │                      SpawnDirector, the systems (Quests/Story, Inventory/Shop/
 │                      Anvil, Crafting, DayNight, Weather, Quality/lighting,
-│                      Sfx/Music/Mixer/Ambience), the HUD + overlays + Pause,
+│                      Sfx/Music/Mixer/Ambience), the minimap + world map +
+│                      guided waypoint (WorldMap/WorldMapUI), the HUD + overlays + Pause,
 │                      createScene/boot, combat resolution, save/load, and the
 │                      mesh/material builders. Self-boots on import and installs
 │                      the test seam.
@@ -55,14 +60,19 @@ src/
 
 ```
 data/{items,content,story,zones}.js   (pure leaves, no imports between them)
-              ▲                    ▲
-              │                    │
+              ▲        ▲           ▲
+              │        │           │   data/worldmap.js imports zones + content
+              │   data/worldmap.js │   (still pure data — only reads other tables)
         core/i18n.js          core/config.js
               ▲                    ▲
               └──────── game.js ───┘     (imports config + i18n + all data)
                            ▲
                         main.js          (imports game.js for side effects)
 ```
+
+`data/worldmap.js` is the one data module that reads sibling tables (`zones`,
+`content`) to derive its graph and target list, but it still imports nothing from
+`core/` or `game.js`, so the layer stays acyclic.
 
 The `data/` and `core/` modules never import `game.js`, so there are no import
 cycles. Two i18n resolvers that read runtime systems (`tWeatherLabel` → `Weather`,

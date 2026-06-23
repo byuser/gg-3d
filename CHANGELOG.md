@@ -24,6 +24,47 @@ delta it shipped with, since later tasks reference those.
 
 _Nothing pending._
 
+## [2026-06-23] — Task 13 — Minimap + full world map with locations, NPCs, search & a guided waypoint
+
+Added the navigation layer large open-world RPGs lean on: a live **corner minimap**, a
+**full-screen world map** (current-land detail + a world overview of the portal graph), a name
+**search** across every land / landmark / NPC, and a **guided waypoint** that routes the player —
+hopping portals across lands — with an on-screen **compass** that clears on arrival. **`SAVE_VERSION`
+→ 9** (zones discovered + the active waypoint); older saves still load (only the saved land known, no
+waypoint). Vitest **80 → 100** (new `test/worldmap.test.js`, 20 cases); the Playwright smoke now
+opens the map, searches and sets a waypoint.
+
+- **Pure data layer (`src/data/worldmap.js`).** A new headless-safe module derived entirely from
+  `ZONES` / `LOCATIONS` / `NPC_DATA`: the zone **adjacency graph** (`ZONE_ADJ`, `zoneEdges`), **BFS
+  route-finding** (`findRoute`, `nextZoneStep` → the next portal to take), bearing/distance +
+  the **8-point compass** (`bearingRad`, `dist2D`, `compass8`, camera-relative `relativeHeading`),
+  the searchable **`MAP_TARGETS`** (every land/landmark/NPC, names resolved by the UI via i18n so the
+  index stays translation-agnostic), diacritic-folding **search** (`searchTargets`/`matchesQuery`),
+  and the deterministic **world-overview layout** (`worldLayout`). All unit-tested directly.
+- **Minimap (`WorldMap`).** A north-up corner **2D canvas** showing the current land's fence, the
+  player + facing, portals (coloured by kind), NPCs (status-coloured), resources, monsters, vendors,
+  the castle and the active-waypoint marker — redrawn on a throttle so it never costs a frame, and
+  **feature-detected** (no `2d` context ⇒ silent no-op). Toggle with `N`; tap it to open the full map.
+- **Full world map (`WorldMapUI`).** A `Tab` / 🗺️ overlay with a **This Land** view (detailed,
+  pannable + zoomable) and a **World** overview of the portal graph (discovered vs **fog-of-war**), a
+  live **search** box with a results list, and a **"Guide me there"** button. Mutually exclusive with
+  the other menus, localized EN/RU, mobile-friendly tap targets.
+- **Guided waypoint.** `resolveWaypoint` returns live guidance — an in-zone bearing + distance, or
+  (across lands) the **next portal to take** routed through the graph — driving an on-screen
+  **compass arrow** (camera-relative) + label that **auto-clears on arrival**.
+- **Persistence.** `serializeGame`/`applySave` round-trip `discovered` (fog-of-war) + the active
+  `waypoint`; **`SAVE_VERSION` → 9**, older saves default gracefully. Zones are revealed on travel
+  (`ZoneManager._swap`) and on load.
+- **Tests.** New `test/worldmap.test.js` (20 cases): graph derivation + symmetry, BFS routing &
+  next-hop, bearing/distance/compass + camera-relative arrow, target derivation + folding search, the
+  world layout, runtime waypoint resolution (same-zone vs cross-zone), set/clear/arrival, fog-of-war
+  discovery on travel, the v9 save round-trip + v8 migration + invalid-waypoint drop, and a
+  headless-safe overlay/minimap drive. The save-version assertions in the harness / items / skills
+  suites were bumped 8 → 9. The Playwright smoke gained a world-map flow.
+- **UI.** `index.html`/`css`: the minimap, the compass, the 🗺️ HUD button and the world-map overlay
+  (search · tabs · zoom · guide), plus a new **Map** row in the start-screen controls; `applyStaticI18n`
+  now also resolves `data-i18n-ph` placeholders. No `?v=` to bump (content-hashed build).
+
 ## [2026-06-23] — Task 14 — Skill & leveling system with 3-skill fusion, a quick-access bar & boss-only skills
 
 Added a full RPG progression layer on top of combat: **leveling + a focus resource**, a roster of

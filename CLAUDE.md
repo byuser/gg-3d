@@ -25,10 +25,13 @@ smoke). See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full map.
 Architecture quick-map (which module to grep): `CONFIG`/`rng`/`setSeed`
 (`src/core/config.js`); i18n `t()` + resolvers (`src/core/i18n.js`); `ITEM_DB`
 (`src/data/items.js`); `SKILL_DB`/`fuseSkills`/`xpToNext` (`src/data/skills.js`);
-`ZONES`/`HUB_ZONE` (`src/data/zones.js`); `STORY`/`MISSIONS` (`src/data/story.js`);
+`ZONES`/`HUB_ZONE` (`src/data/zones.js`); the map graph + route-finding
+`findRoute`/`nextZoneStep`/`MAP_TARGETS` (`src/data/worldmap.js`);
+`STORY`/`MISSIONS` (`src/data/story.js`);
 `LOCATIONS`/`NPC_DATA`/`MONSTER_ABILITIES` (`src/data/content.js`); and the
 runtime — `Player`, `Monster`, `Boss`, `Dragon`, `buildWorld`, `SpawnDirector`,
 `ZoneManager`, `teardownZone`, `DayNight`, `Weather`, `Skills`/`SkillsUI`,
+`WorldMap`/`WorldMapUI` (minimap, world map + guided waypoint),
 `Sfx`/`Music`, `QUEST_BY_ID`, the `dom` map, `serializeGame`/`applySave`, and the
 test seam `window.__GG_TEST__` — in `src/game.js`.
 

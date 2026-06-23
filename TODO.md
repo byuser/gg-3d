@@ -757,7 +757,17 @@ A task is **done** only when **all** of these are true:
   through i18n (Golden Rule 9); reuse the existing enhancement multipliers.
 
 ### Task 13 — Minimap + full‑screen world map with locations, NPCs, search & a guided waypoint
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-23 · Shipped the navigation layer over a new pure `src/data/worldmap.js`
+  (zone adjacency from portals, **BFS route-finding** `findRoute`/`nextZoneStep`, bearing/distance +
+  an 8-point compass + camera-relative arrow, the searchable `MAP_TARGETS` derived from
+  ZONES/LOCATIONS/NPC_DATA, diacritic-folding search, and a deterministic world layout). A live north-up
+  **corner minimap** (`WorldMap`, feature-detected 2D canvas: player+facing, portals, NPCs, resources,
+  monsters, vendors, castle, waypoint), a `Tab`/🗺️ **full map** (`WorldMapUI`) with a detailed
+  current-land view + a fog-of-war **world overview** of the portal graph, a name **search** + results,
+  and a **"Guide me there"** waypoint — an on-screen **compass** (with the next portal to take across
+  lands) that **clears on arrival**. Discovered lands + the active waypoint **round-trip** through
+  save/load (`SAVE_VERSION` → **9**; older saves default). New `test/worldmap.test.js` (20 cases;
+  Vitest 80 → 100) + a Playwright map flow. EN/RU localized; `data-i18n-ph` placeholders added.
 - **Depends on:** none (reads `ZONES`/`LOCATIONS`/`NPC_DATA`); complements the
   story tracker from Task 2.
 - **Goal.** Add a corner **minimap** and a **full‑screen world/zone map** showing
