@@ -133,9 +133,39 @@ html, body {
   transition: width 0.25s ease, background 0.25s ease;
 }
 
+/* ---------- Focus (spell resource) bar — sits just under the health bar ---- */
+.focuswrap {
+  position: absolute; top: max(78px, calc(env(safe-area-inset-top) + 64px)); left: 50%;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; pointer-events: none;
+}
+.focuswrap .focus-rune { font-size: 14px; color: #8fd0ff; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+.focusbar {
+  width: min(200px, 50vw); height: 8px; border-radius: 999px;
+  background: rgba(11, 15, 26, 0.6); border: 1px solid rgba(143, 208, 255, 0.3);
+  overflow: hidden;
+}
+.focus-fill {
+  height: 100%; width: 100%;
+  background: linear-gradient(90deg, #4aa6ff, #9f7dff);
+  transition: width 0.2s ease;
+}
+
+/* ---------- Level badge + XP track (in the top stat row) ---------- */
+.lvl-stat { display: flex; align-items: center; gap: 8px; }
+.lvl-stat #levelBadge { color: #ffe27a; font-weight: 800; }
+.lvl-stat .xp-track {
+  width: 56px; height: 6px; border-radius: 999px; overflow: hidden;
+  background: rgba(255, 255, 255, 0.14);
+}
+.lvl-stat .xp-fill {
+  display: block; height: 100%; width: 0%;
+  background: linear-gradient(90deg, #ffd34e, #ff944e); transition: width 0.25s ease;
+}
+
 /* ---------- Boss health bar ---------- */
 .boss-bar {
-  position: absolute; left: 50%; top: max(82px, calc(env(safe-area-inset-top) + 68px));
+  position: absolute; left: 50%; top: max(98px, calc(env(safe-area-inset-top) + 84px));
   transform: translateX(-50%);
   width: min(420px, 86vw); display: flex; flex-direction: column; align-items: center; gap: 4px;
   pointer-events: none;
@@ -494,12 +524,24 @@ html, body {
 }
 .icon-btn:hover { background: rgba(11, 15, 26, 0.85); }
 .icon-btn:active { transform: scale(0.92); }
-/* Row, right→left: fullscreen, pause(+52), inventory(+104), craft(+156),
-   quest(+208), music(+260). */
-.inv-btn   { right: calc(max(12px, env(safe-area-inset-right)) + 104px); }
-.craft-btn { right: calc(max(12px, env(safe-area-inset-right)) + 156px); }
-.quest-btn { right: calc(max(12px, env(safe-area-inset-right)) + 208px); }
-.music-btn { right: calc(max(12px, env(safe-area-inset-right)) + 260px); }
+/* Row, right→left: fullscreen, pause(+52), inventory(+104), skills(+156),
+   craft(+208), quest(+260), music(+312). */
+.inv-btn    { right: calc(max(12px, env(safe-area-inset-right)) + 104px); }
+.skills-btn { right: calc(max(12px, env(safe-area-inset-right)) + 156px); }
+.craft-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 208px); }
+.quest-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 260px); }
+.music-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 312px); }
+/* On phones the row holds seven buttons; shrink + tighten them so the row keeps
+   the same footprint it had before the ✨ skills button (no crowding the chips). */
+@media (pointer: coarse) {
+  .fs-btn, .pause-btn, .icon-btn { width: 38px; height: 38px; font-size: 18px; }
+  .pause-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 44px); }
+  .inv-btn    { right: calc(max(12px, env(safe-area-inset-right)) + 88px); }
+  .skills-btn { right: calc(max(12px, env(safe-area-inset-right)) + 132px); }
+  .craft-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 176px); }
+  .quest-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 220px); }
+  .music-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 264px); }
+}
 
 /* ---------- Shop Buy/Sell tabs ---------- */
 .shop-tabs { display: flex; gap: 8px; justify-content: center; margin: 0 0 14px; }
@@ -687,6 +729,107 @@ html, body {
   .buff-bar { bottom: 232px; }
   .potion-slot { width: 48px; height: 48px; }
 }
+
+/* ---------- Skill quick bar (HUD, bottom-centre — hotkeys 1/2/3) ---------- */
+.skill-bar {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: max(16px, env(safe-area-inset-bottom));
+  display: flex; gap: 8px; pointer-events: none; z-index: 22;
+}
+.skill-slot {
+  position: relative; width: 54px; height: 54px; border-radius: 14px; overflow: hidden;
+  background: rgba(11, 15, 26, 0.62); border: 1px solid rgba(159, 125, 255, 0.4);
+  color: var(--ink); cursor: pointer; pointer-events: auto;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.1s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.skill-slot.filled:hover { background: rgba(159, 125, 255, 0.18); }
+.skill-slot.filled:active { transform: scale(0.92); }
+.skill-slot.empty { opacity: 0.5; }
+.skill-slot.nofocus { filter: grayscale(0.45); opacity: 0.7; }
+.skill-slot .sk-key {
+  position: absolute; top: 3px; left: 6px; font-size: 11px; font-weight: 800; opacity: 0.7; z-index: 3;
+}
+.skill-slot .sk-icon, .skill-slot .sk-empty { font-size: 26px; line-height: 1; z-index: 2; }
+.skill-slot .sk-empty { opacity: 0.4; }
+.skill-slot .sk-cost {
+  position: absolute; bottom: 2px; right: 4px; font-size: 10px; font-weight: 800; color: #8fd0ff; z-index: 3;
+}
+.skill-slot .sk-cd {
+  position: absolute; font-size: 19px; font-weight: 900; color: #fff; z-index: 4;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+}
+.skill-slot .sk-cdmask {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 0%;
+  background: rgba(8, 10, 20, 0.66); z-index: 1; transition: height 0.12s linear;
+}
+@media (pointer: coarse) {
+  .skill-bar { bottom: 110px; }
+  .skill-slot { width: 50px; height: 50px; }
+}
+
+/* ---------- Skills & fusion overlay ---------- */
+.skills-panel { max-width: 720px; }
+.skills-header {
+  display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px; padding: 10px 14px;
+}
+.sk-hd-level { font-weight: 800; color: #ffe27a; font-size: 16px; }
+.sk-hd-bar { height: 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+.sk-hd-xp { height: 100%; background: linear-gradient(90deg, #ffd34e, #ff944e); }
+.sk-hd-sub { font-size: 12px; opacity: 0.8; }
+.sk-section-title { font-weight: 800; font-size: 14px; margin: 4px 0 6px; opacity: 0.9; }
+.skills-toolbar { margin-bottom: 12px; }
+.sk-slots { display: flex; gap: 10px; flex-wrap: wrap; }
+.sk-slot-card {
+  flex: 1 1 0; min-width: 120px; position: relative;
+  background: rgba(11, 15, 26, 0.5); border: 2px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px; padding: 10px; text-align: center;
+}
+.sk-slot-key { position: absolute; top: 4px; left: 8px; font-size: 12px; font-weight: 800; opacity: 0.6; }
+.sk-slot-icon { font-size: 26px; }
+.sk-slot-name { font-size: 12px; font-weight: 700; margin: 2px 0 6px; }
+.sk-slot-empty { font-size: 12px; opacity: 0.5; padding: 14px 0; }
+.skills-fusion {
+  margin-bottom: 12px; background: rgba(159, 125, 255, 0.08);
+  border: 1px solid rgba(159, 125, 255, 0.3); border-radius: 12px; padding: 10px 14px;
+}
+.sk-fuse-hint { font-size: 13px; opacity: 0.8; margin: 4px 0; }
+.sk-fuse-row { font-weight: 700; margin: 4px 0; }
+.sk-fuse-result {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  border: 2px solid #888; border-radius: 10px; padding: 8px 10px; margin: 6px 0;
+}
+.sk-fuse-cost { font-weight: 800; margin: 6px 0; }
+.sk-fuse-cost .bad { color: #ff6a6a; }
+.skills-list { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.skill-card {
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: 4px solid #888; border-radius: 12px; padding: 10px 12px;
+}
+.skill-card.selected { background: rgba(159, 125, 255, 0.16); border-color: rgba(159, 125, 255, 0.5); }
+.sk-card-head { display: flex; align-items: center; gap: 6px; }
+.sk-card-icon { font-size: 22px; }
+.sk-card-name { font-weight: 800; flex: 1; }
+.sk-src { font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.4px; }
+.sk-src.base { background: rgba(108, 198, 255, 0.18); color: #8fd0ff; }
+.sk-src.boss { background: rgba(255, 93, 93, 0.18); color: #ff8a8a; }
+.sk-src.fused { background: rgba(199, 125, 255, 0.2); color: #d8b0ff; }
+.sk-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.sk-chip { font-size: 11px; font-weight: 700; background: rgba(255, 255, 255, 0.08); border-radius: 999px; padding: 2px 8px; }
+.sk-card-desc { font-size: 12px; opacity: 0.82; margin-bottom: 8px; }
+.sk-card-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sk-assign { display: inline-flex; gap: 4px; }
+.sk-mini {
+  appearance: none; cursor: pointer; font-size: 12px; font-weight: 700; color: var(--ink);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px; padding: 4px 8px; transition: background 0.12s ease;
+}
+.sk-mini:hover { background: rgba(255, 255, 255, 0.14); }
+.sk-mini.on { background: linear-gradient(135deg, var(--accent2), #8be0ff); color: #15233b; border-color: transparent; }
+.sk-mini.danger { color: #ff9a9a; }
+.sk-mini.fuse-pick.on { background: linear-gradient(135deg, #c77dff, #9f7dff); color: #fff; }
 
 /* ---------- Adventure HUD: materials, relics, quest tracker ---------- */
 .materials-bar {

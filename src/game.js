@@ -42,12 +42,19 @@ import {
 } from "./data/story.js";
 import { ZONES, ZONE_BY_ID, HUB_ZONE } from "./data/zones.js";
 import {
+  SKILL_DB, getSkill, ELEMENTS, EFFECTS, BASE_SKILL_IDS, BOSS_SKILL_IDS, STARTER_SKILL_IDS,
+  SKILL_SLOTS, MAX_FUSE_INPUTS, FOCUS_REGEN, XP_PER_GATHER, XP_PER_QUEST,
+  xpToNext, totalXpToReach, maxFocusForLevel, levelHealthBonus, skillsUnlockedAt,
+  skillTier, canFuse, fuseSkills, fusionCost,
+} from "./data/skills.js";
+import {
   I18N, LOCALES, LOCALE_KEY, RU, localGet, localSet, plural, t, tFlat,
   tCastlePartDesc, tCastlePartName, tChapterBlurb, tChapterTitle, tDragonName,
   tItemDesc, tItemName, tLairBossIntro, tLairBossName, tLocationName, tMaterialLabel,
   tNpcIntro, tNpcName, tPotionLabel, tQuestStory, tQuestTitle, tQuestWhere, tRarityLabel,
   tRelicName, tResourceLabel, tSlotLabel, tAffixLabel, tSetName, tStoryEndingText, tStoryEndingTitle,
   tStoryIntroText, tStoryIntroTitle, tZoneName,
+  tElementLabel, tEffectLabel, tSkillName, tSkillDesc,
 } from "./core/i18n.js";
 
   // ---- i18n resolvers that read runtime systems (relocated from the i18n
@@ -100,6 +107,7 @@ import {
       updateMaterialsHud(playerRef);
       updateRelicHud(playerRef);
       updatePotionBar(playerRef);
+      if (typeof updateSkillsHud === "function") updateSkillsHud(playerRef);
     }
     if (typeof stateRef !== "undefined" && stateRef) {
       updateLocationHud(ZONE_BY_ID[stateRef.zoneId]);
@@ -116,6 +124,7 @@ import {
     if (typeof Crafting !== "undefined" && Crafting.open) Crafting.render();
     if (typeof CastleUI !== "undefined" && CastleUI.open) CastleUI.render();
     if (typeof QuestLog !== "undefined" && QuestLog.open) QuestLog.render();
+    if (typeof SkillsUI !== "undefined" && SkillsUI.open) SkillsUI.render();
     if (typeof Dialogue !== "undefined" && Dialogue.open && Dialogue.npc) Dialogue.render();
     if (typeof Pause !== "undefined" && typeof paused !== "undefined" && paused) Pause.refreshTexts();
     if (typeof Music !== "undefined" && dom.musicBtn) dom.musicBtn.title = t(Music.on ? "btnTitle.muteMusic" : "btnTitle.playMusic");
@@ -563,6 +572,14 @@ import {
     weather: document.getElementById("weather"),
     craftBtn: document.getElementById("craftBtn"),
     questBtn: document.getElementById("questBtn"),
+    skillsBtn: document.getElementById("skillsBtn"),
+    // ---- Skills, leveling & focus HUD (Task 14) ----
+    levelBadge: document.getElementById("levelBadge"),
+    xpWrap: document.getElementById("xpWrap"),
+    xpFill: document.getElementById("xpFill"),
+    focusWrap: document.getElementById("focusWrap"),
+    focusFill: document.getElementById("focusFill"),
+    skillBar: document.getElementById("skillBar"),
     // ---- Victory screen ----
     win: document.getElementById("win"),
     winText: document.getElementById("winText"),
@@ -592,6 +609,14 @@ import {
     questLogItems: document.getElementById("questLogItems"),
     questLogClose: document.getElementById("questLogClose"),
     questLogDone: document.getElementById("questLogDone"),
+    // ---- Skills & fusion overlay (Task 14) ----
+    skills: document.getElementById("skills"),
+    skillsClose: document.getElementById("skillsClose"),
+    skillsDone: document.getElementById("skillsDone"),
+    skillsHeader: document.getElementById("skillsHeader"),
+    skillsToolbar: document.getElementById("skillsToolbar"),
+    skillsFusion: document.getElementById("skillsFusion"),
+    skillsList: document.getElementById("skillsList"),
   };
 
   const isTouch = window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
@@ -818,6 +843,11 @@ import {
       for (const id of MATERIAL_IDS) this.materials[id] = 0;
       this.relics = [];          // relic ids collected but not yet built in
 
+      // Skill & leveling progression (Task 14): level/xp, the focus resource, the
+      // owned + fused skills, the 3-slot quick bar and per-skill cooldowns. Lives
+      // on the player so it serializes with the rest of the run.
+      this.progress = newProgress();
+
       this._build(scene, shadow);
     }
 
@@ -830,6 +860,8 @@ import {
       // A couple of starter potions so the belt is useful from the first wave.
       potionAdd(this, "minor_potion");
       potionAdd(this, "minor_potion");
+      // Learn the level-1 skill(s) + slot the first on the quick bar.
+      Skills.init(this);
       recomputeStats(this);
     }
 
@@ -1450,6 +1482,7 @@ import {
       this.attackTimer = 1 + rng() * 2;             // jumper leap / shooter spit cadence
       this.jumpT = 0;                               // >0 while mid-leap
       this.kx = 0; this.kz = 0;                     // knockback velocity (impact feedback)
+      this.slowT = 0;                               // >0 while chilled (frost skills) → half pace
       this._abScale = ab.scale || 1;
       // RPG roaming: a home patch the sweet wanders, and the aggro radius at
       // which it drops roaming to pursue the player. The spawner may tune these.
@@ -1591,6 +1624,11 @@ import {
       this.kx += (dx / d) * force; this.kz += (dz / d) * force;
     }
 
+    // A frost chill: halve movement for `time` seconds (skills only; cosmetic-safe
+    // — never throws, decays in update()). slowMul folds into every move step.
+    applySlow(time) { this.slowT = Math.max(this.slowT, time || 0); }
+    get slowMul() { return this.slowT > 0 ? 0.5 : 1; }
+
     // Amble around the home patch at half pace, picking a fresh roaming target
     // every few seconds. Used when the player is beyond the aggro radius.
     _wander(dt) {
@@ -1603,7 +1641,7 @@ import {
       const dx = this._wt.x - this.root.position.x, dz = this._wt.z - this.root.position.z;
       const d = Math.hypot(dx, dz);
       if (d > 0.4) {
-        const step = Math.min(this.speed * 0.5 * dt, d);   // amble at half pace
+        const step = Math.min(this.speed * 0.5 * this.slowMul * dt, d);   // amble at half pace
         this.root.position.x += (dx / d) * step;
         this.root.position.z += (dz / d) * step;
         this.body.rotation.y = lerpAngle(this.body.rotation.y, Math.atan2(dx / d, dz / d), 0.1);
@@ -1616,6 +1654,7 @@ import {
     // lets ranged "shooter" sweets launch hostile bolts into the world.
     update(dt, playerPos, state) {
       if (this.biteTimer > 0) this.biteTimer -= dt;
+      if (this.slowT > 0) this.slowT = Math.max(0, this.slowT - dt);
       const s = this._abScale;
       if (this.dying > 0) {
         this.dying -= dt;
@@ -1668,8 +1707,8 @@ import {
       // ---- Shooter: hang back at a standoff and spit candy bolts. ----
       if (this.ability === "shooter") {
         const standoff = ab.standoff || 11;
-        if (dist > standoff + 0.4) this.root.position.addInPlace(to.scale(Math.min(this.speed * dt, dist - standoff) / dist));
-        else if (dist < standoff - 1.5) this.root.position.addInPlace(to.scale(-this.speed * 0.7 * dt / dist));
+        if (dist > standoff + 0.4) this.root.position.addInPlace(to.scale(Math.min(this.speed * this.slowMul * dt, dist - standoff) / dist));
+        else if (dist < standoff - 1.5) this.root.position.addInPlace(to.scale(-this.speed * this.slowMul * 0.7 * dt / dist));
         if (this.attackTimer <= 0 && state && state.enemyBolts && dist < standoff + 6) {
           this.attackTimer = 2.2 + rng() * 1.2;
           const origin = this.root.position.add(new BABYLON.Vector3(0, 1.6, 0));
@@ -1694,7 +1733,7 @@ import {
 
       // ---- Default pursuit (chaser / runner / brute / bomber). ----
       if (dist > 0.001) {
-        const step = Math.min(this.speed * dt, Math.max(0, dist - 1.0));
+        const step = Math.min(this.speed * this.slowMul * dt, Math.max(0, dist - 1.0));
         this.root.position.addInPlace(to.scale(step / dist));
       }
       // Hoppy bob (brutes lumber slower).
@@ -2366,6 +2405,7 @@ import {
       const [lo, hi] = this.def.amount;
       const n = lo + ((rng() * (hi - lo + 1)) | 0);
       addMaterial(this.player, this.def.mat, n);
+      Skills.gainXp(this.player, XP_PER_GATHER); // gathering earns a little XP too
       if (this.player && this.player.gather) this.player.gather(); // chop/reach motion
       spawnImpact(this.state, this.root.position, "#cfe0b0", { y: 0.8, count: 7, spread: 3 });
       // A surface-matched harvest cue: pickaxe ring for rock/crystal, a softer chop otherwise.
@@ -4746,6 +4786,191 @@ import {
   };
 
   // =========================================================================
+  // Skills overlay (Task 14) — manage the skill roster, FUSE up to three owned
+  // skills into a new one, and assign skills to the 3-slot quick bar. Opens with
+  // the ✨ button or the "K" key. Mirrors the Inventory overlay's open/close/
+  // render contract; freezes gameplay (uiPaused) while open.
+  // =========================================================================
+  const SkillsUI = {
+    state: null, player: null, open: false,
+    sel: [],   // skill ids selected for fusion (up to MAX_FUSE_INPUTS)
+
+    init(state, player) { this.state = state; this.player = player; },
+
+    toggle() { if (this.open) this.close(); else this.openUI(); },
+    openUI() {
+      if (this.open) return;
+      if (Shop.open) Shop.closeShop();
+      if (Anvil.open) Anvil.close();
+      if (Inventory.open) Inventory.close();
+      this.open = true; uiPaused = true;
+      this.sel = [];
+      if (dom.skills) dom.skills.classList.remove("hidden");
+      this.render();
+    },
+    close() {
+      if (!this.open) return;
+      this.open = false; uiPaused = false;
+      if (dom.skills) dom.skills.classList.add("hidden");
+    },
+
+    // Toggle a skill in/out of the fusion selection (cap at MAX_FUSE_INPUTS).
+    pick(id) {
+      const i = this.sel.indexOf(id);
+      if (i >= 0) this.sel.splice(i, 1);
+      else if (this.sel.length < MAX_FUSE_INPUTS) this.sel.push(id);
+      Sfx.play("ui_click");
+      this.render();
+    },
+    assign(slot, id) { Skills.assignSlot(this.player, slot, id); Sfx.play("ui_click"); this.render(); },
+    clear(slot) { Skills.clearSlot(this.player, slot); Sfx.play("ui_click"); this.render(); },
+    doFuse() {
+      const made = Skills.fuse(this.state, this.player, this.sel);
+      if (made) { this.sel = []; updateSkillsHud(this.player); this.render(); }
+    },
+
+    render() {
+      if (!this.open || !this.player) return;
+      this._renderHeader();
+      this._renderToolbar();
+      this._renderFusion();
+      this._renderList();
+    },
+
+    // Stat chips for a skill card (power/heal + cost + cooldown + effect extras).
+    _chips(def) {
+      const c = [];
+      if (def.effect === "heal") c.push(`<span class="sk-chip">${t("skills.statHeal", { power: def.power })}</span>`);
+      else if (def.effect === "buff") c.push(`<span class="sk-chip">${t("skills.statBuff", { s: def.duration || 0 })}</span>`);
+      else c.push(`<span class="sk-chip">${t("skills.statPower", { power: def.power || 0 })}${def.count ? "×" + def.count : ""}</span>`);
+      if (def.effect === "nova") c.push(`<span class="sk-chip">${t("skills.statAoe", { radius: def.radius || 0 })}</span>`);
+      c.push(`<span class="sk-chip">${t("skills.statCost", { cost: def.cost || 0 })}</span>`);
+      c.push(`<span class="sk-chip">${t("skills.statCooldown", { s: def.cooldown || 0 })}</span>`);
+      return c.join("");
+    },
+    _srcTag(def) {
+      const k = def.generated ? "srcFused" : def.source === "boss" ? "srcBoss" : "srcBase";
+      return `<span class="sk-src ${def.generated ? "fused" : def.source}">${t("skills." + k)}</span>`;
+    },
+
+    _renderHeader() {
+      if (!dom.skillsHeader) return;
+      const pr = this.player.progress;
+      dom.skillsHeader.innerHTML =
+        `<div class="sk-hd-level">${t("skills.level", { level: pr.level })}</div>` +
+        `<div class="sk-hd-bar"><div class="sk-hd-xp" style="width:${Math.min(100, (pr.xp / (xpToNext(pr.level) || 1)) * 100)}%"></div></div>` +
+        `<div class="sk-hd-sub">${t("skills.xp", { xp: pr.xp, next: xpToNext(pr.level) })} · ${t("skills.focus", { focus: Math.floor(pr.focus), max: maxFocusForLevel(pr.level) })}</div>`;
+    },
+
+    // A small button element with a direct listener (avoids querySelector so the
+    // headless DOM stub — which has no querySelector — never throws on render).
+    _btn(cls, label, onClick, asHtml) {
+      const b = document.createElement("button");
+      b.className = cls;
+      if (asHtml) b.innerHTML = label; else b.textContent = label;
+      b.addEventListener("click", onClick);
+      return b;
+    },
+
+    _renderToolbar() {
+      if (!dom.skillsToolbar) return;
+      const pr = this.player.progress;
+      dom.skillsToolbar.innerHTML = "";
+      const title = document.createElement("div");
+      title.className = "sk-section-title"; title.textContent = t("skills.toolbar");
+      dom.skillsToolbar.appendChild(title);
+      const row = document.createElement("div");
+      row.className = "sk-slots";
+      for (let i = 0; i < SKILL_SLOTS; i++) {
+        const def = Skills.def(this.player, pr.slots[i]);
+        const card = document.createElement("div");
+        card.className = "sk-slot-card" + (def ? " filled" : "");
+        if (def) card.style.borderColor = (ELEMENTS[def.element] || {}).color || "#888";
+        card.innerHTML = `<div class="sk-slot-key">${i + 1}</div>` +
+          (def ? `<div class="sk-slot-icon">${def.icon}</div><div class="sk-slot-name">${tSkillName(def)}</div>`
+               : `<div class="sk-slot-empty">${t("skills.slotEmpty")}</div>`);
+        if (def) card.appendChild(this._btn("sk-mini danger", t("skills.clear"), () => this.clear(i)));
+        row.appendChild(card);
+      }
+      dom.skillsToolbar.appendChild(row);
+    },
+
+    _renderFusion() {
+      if (!dom.skillsFusion) return;
+      dom.skillsFusion.innerHTML = "";
+      const title = document.createElement("div");
+      title.className = "sk-section-title"; title.textContent = t("skills.fusion");
+      dom.skillsFusion.appendChild(title);
+      const defs = this.sel.map((id) => Skills.def(this.player, id)).filter(Boolean);
+      if (defs.length < 2) {
+        const hint = document.createElement("p");
+        hint.className = "sk-fuse-hint";
+        hint.textContent = defs.length === 1 ? t("skills.fuseNeedMore", { n: 1 }) : t("skills.fuseHint");
+        dom.skillsFusion.appendChild(hint);
+        return;
+      }
+      const preview = fuseSkills(defs);
+      const cost = fusionCost(defs);
+      const coinsOk = this.state.coins >= cost.coins;
+      const crysOk = (this.player.materials.crystal || 0) >= cost.crystal;
+      const body = document.createElement("div");
+      body.innerHTML =
+        `<div class="sk-fuse-row">${defs.map((d) => `${d.icon} ${tSkillName(d)}`).join(" + ")}</div>` +
+        `<div class="sk-fuse-result" style="border-color:${(ELEMENTS[preview.element] || {}).color}">` +
+          `<span class="sk-slot-icon">${preview.icon}</span> ` +
+          `<span>${t("skills.fuseResult", { name: tSkillName(preview) })}</span>` +
+          `<span class="sk-chips">${this._chips(preview)}</span></div>` +
+        `<div class="sk-fuse-cost"><span class="${coinsOk ? "" : "bad"}">🪙 ${cost.coins}</span> · ` +
+          `<span class="${crysOk ? "" : "bad"}">🔮 ${cost.crystal}</span></div>`;
+      dom.skillsFusion.appendChild(body);
+      const btn = this._btn("start-btn", t("skills.fuseBtn"), () => this.doFuse(), false);
+      if (!(coinsOk && crysOk)) btn.disabled = true;
+      dom.skillsFusion.appendChild(btn);
+    },
+
+    _renderList() {
+      if (!dom.skillsList) return;
+      dom.skillsList.innerHTML = "";
+      const defs = Skills.ownedDefs(this.player);
+      if (!defs.length) {
+        const e = document.createElement("p");
+        e.className = "shop-tagline"; e.textContent = t("skills.none");
+        dom.skillsList.appendChild(e); return;
+      }
+      // Sort: source (base, boss, fused) then tier desc.
+      const order = { base: 0, boss: 1, fused: 2 };
+      defs.sort((a, b) => (order[a.generated ? "fused" : a.source] - order[b.generated ? "fused" : b.source]) || (skillTier(b) - skillTier(a)));
+      const pr = this.player.progress;
+      for (const def of defs) {
+        const id = def.id;
+        const selected = this.sel.includes(id);
+        const card = document.createElement("div");
+        card.className = "skill-card" + (selected ? " selected" : "");
+        card.style.borderLeftColor = (ELEMENTS[def.element] || {}).color || "#888";
+        const top = document.createElement("div");
+        top.innerHTML =
+          `<div class="sk-card-head"><span class="sk-card-icon">${def.icon}</span>` +
+          `<span class="sk-card-name">${tSkillName(def)}</span>${this._srcTag(def)}</div>` +
+          `<div class="sk-chips">${this._chips(def)}</div>` +
+          `<div class="sk-card-desc">${tSkillDesc(def)}</div>`;
+        card.appendChild(top);
+        const actions = document.createElement("div");
+        actions.className = "sk-card-actions";
+        actions.appendChild(this._btn("sk-mini fuse-pick" + (selected ? " on" : ""),
+          (selected ? "✓ " : "+ ") + t("skills.fuseTag"), () => this.pick(id)));
+        const assignWrap = document.createElement("span");
+        assignWrap.className = "sk-assign";
+        for (let i = 0; i < SKILL_SLOTS; i++)
+          assignWrap.appendChild(this._btn("sk-mini" + (pr.slots[i] === id ? " on" : ""),
+            t("skills.assignSlot", { n: i + 1 }), () => this.assign(i, id)));
+        actions.appendChild(assignWrap);
+        card.appendChild(actions);
+        dom.skillsList.appendChild(card);
+      }
+    },
+  };
+
+  // =========================================================================
   // Enhancement — raise an item instance's level for coins at the blacksmith.
   // =========================================================================
   function enhanceItem(player, inst, state) {
@@ -4913,6 +5138,8 @@ import {
       if (q.line === "side" && q.repeatable) Story.sideTurnIns[id] = (Story.sideTurnIns[id] || 0) + 1;
       else this.completed.push(id);
       grantReward(this.player, this.state, q.reward);
+      // Completing a quest also grants XP toward the next level.
+      Skills.gainXp(this.player, q.line === "side" ? Math.round(XP_PER_QUEST * 0.6) : XP_PER_QUEST);
       Sfx.play("quest_turnin");
       const r = q.reward || {};
       const bits = [];
@@ -5665,9 +5892,11 @@ import {
     Dialogue.init(state, player);
     Crafting.init(state, player);
     CastleUI.init(state, player);
+    SkillsUI.init(state, player);
     updatePotionBar(player);
     updateMaterialsHud(player);
     updateRelicHud(player);
+    updateSkillsHud(player);
     updateQuestTracker(Quests);
 
     // Day/night + weather systems drive the sky, sun, fog and rain.
@@ -5735,6 +5964,7 @@ import {
       if (state.merchant) state.merchant.update(dt);
       if (state.blacksmith) state.blacksmith.update(dt);
       updateBuffs(player, dt);
+      Skills.update(state, player, dt); // focus regen + skill cooldowns (pause-safe)
 
       // Attacking — ranged weapons fire ballistic bolts/arrows (possibly a
       // multishot spread); melee weapons sweep an arc in front of the player.
@@ -5919,6 +6149,8 @@ import {
       playerRef.health = Math.min(playerRef.maxHealth, playerRef.health + playerRef.lifesteal);
       updateHealthBar(playerRef.health);
     }
+    // Every kill grants XP toward the next level (bosses + the dragon pay more).
+    if (playerRef) Skills.gainXp(playerRef, Skills.xpFor(m));
     // The dragon is the climax: felling it wins the game.
     if (m.isDragon) {
       addScore(state, CONFIG.dragonScore);
@@ -5961,6 +6193,10 @@ import {
           state.waveTotal++;
         }
       }
+      // Rare SKILLS drop only from bosses (seeded → reproducible). Rolled after
+      // the coins / rare-gear / splitter draws so existing drop determinism is
+      // untouched; learns one unowned boss skill (until all are collected).
+      if (playerRef) Skills.rollBossSkill(playerRef);
       hideBossBar();
       if (state.boss === m) state.boss = null;
       Sfx.play("boss_death");
@@ -5991,6 +6227,313 @@ import {
     maybeDropCoin(state, m.position);
     Quests.onKill(playerRef, state);
   }
+
+  // =========================================================================
+  // Skills, leveling & fusion (Task 14)
+  // -------------------------------------------------------------------------
+  // The player gains XP from combat / quests / gathering, LEVELS UP (more max
+  // health + focus, and auto-learns base skills as they unlock), slots up to
+  // three ACTIVE skills on a quick bar (hotkeys 1/2/3), spends FOCUS + a per-skill
+  // cooldown to cast them, FUSES up to three owned skills into a brand-new one,
+  // and unlocks rare skills from BOSS loot. All progression lives on
+  // player.progress so it serializes with the player; the curve + the
+  // deterministic fusion math live in the pure data module (src/data/skills.js).
+  // Everything is headless-safe: the effects reuse the proven Projectile / nova /
+  // buff systems and feature-detect Babylon, so the stubbed harness never throws.
+  // =========================================================================
+  function newProgress() {
+    return {
+      level: 1, xp: 0, focus: maxFocusForLevel(1),
+      owned: [],                                 // skill ids known (base + boss + fused)
+      fused: {},                                 // generated fused defs, keyed by id
+      fusedSeq: 0,                               // sequence for stable fused ids
+      slots: new Array(SKILL_SLOTS).fill(null),  // quick-bar: skill ids | null
+      cooldowns: {},                             // skill id -> seconds remaining
+    };
+  }
+
+  // Bump the player's BASE max health to include the level bonus, so the normal
+  // recomputeStats() pipeline (gear + sets + buffs) layers on top unchanged.
+  function applyLevelToBase(player) {
+    const lvl = (player.progress && player.progress.level) || 1;
+    player.base.maxHealth = CONFIG.maxHealth + levelHealthBonus(lvl);
+  }
+
+  // A small sparkle burst at the player for self-targeted skills (buff / heal).
+  function spawnSelfFx(state, player, el) {
+    if (!state || !player) return;
+    const p = player.position;
+    spawnImpact(state, new BABYLON.Vector3(p.x, 1.1, p.z), (el && el.color) || "#b794ff",
+      { y: 1.1, count: 14, spread: 1.4, up: 3, life: 0.6 });
+  }
+
+  const Skills = {
+    // Resolve a skill id to its def (base/boss from SKILL_DB, fused from player).
+    def(player, id) {
+      if (!id) return null;
+      return SKILL_DB[id] || (player && player.progress && player.progress.fused[id]) || null;
+    },
+    maxFocus(player) { return maxFocusForLevel(player.progress.level); },
+    ownedDefs(player) { return (player.progress.owned || []).map((id) => this.def(player, id)).filter(Boolean); },
+
+    // Fresh player's progression: base-health for the level, the level-1 skill(s)
+    // learned, and the first auto-slotted so the quick bar is useful immediately.
+    init(player) {
+      if (!player.progress) player.progress = newProgress();
+      applyLevelToBase(player);
+      for (const id of STARTER_SKILL_IDS) this.learn(player, id, true);
+      const pr = player.progress;
+      if (!pr.slots.some(Boolean) && pr.owned.length) pr.slots[0] = pr.owned[0];
+      pr.focus = Math.min(pr.focus, this.maxFocus(player));
+    },
+
+    learn(player, id, silent) {
+      const pr = player.progress;
+      if (!id || pr.owned.includes(id) || !this.def(player, id)) return false;
+      pr.owned.push(id);
+      if (!silent) toast(t("toast.skillLearned", { name: tSkillName(this.def(player, id)) }));
+      return true;
+    },
+
+    // Award XP, resolving any level-ups (a loop, in case a big chunk crosses
+    // several levels). Each level: +max health (via base), +max focus, a focus
+    // top-up, and auto-learns newly-unlocked base skills.
+    gainXp(player, amount) {
+      if (!player || !player.progress || amount <= 0) return;
+      const pr = player.progress;
+      pr.xp += Math.round(amount);
+      let leveled = false;
+      while (pr.xp >= xpToNext(pr.level)) {
+        pr.xp -= xpToNext(pr.level);
+        pr.level++;
+        leveled = true;
+        applyLevelToBase(player);
+        const hpGain = levelHealthBonus(pr.level) - levelHealthBonus(pr.level - 1);
+        const focusGain = maxFocusForLevel(pr.level) - maxFocusForLevel(pr.level - 1);
+        pr.focus = Math.min(this.maxFocus(player), pr.focus + focusGain + 12);
+        for (const id of skillsUnlockedAt(pr.level)) this.learn(player, id, true);
+        Sfx.play("levelup");
+        toast(t("toast.levelUp", { level: pr.level, hp: hpGain, focus: focusGain }));
+      }
+      if (leveled) { recomputeStats(player); updateSkillBar(player); }
+      updateXpHud(player);
+      updateFocusHud(player);
+      if (SkillsUI.open) SkillsUI.render();
+    },
+
+    // ---- Quick bar -------------------------------------------------------
+    assignSlot(player, slotIndex, id) {
+      const pr = player.progress;
+      if (slotIndex < 0 || slotIndex >= SKILL_SLOTS) return false;
+      if (id && !pr.owned.includes(id)) return false;
+      // No duplicate slotting: clear any other slot already holding this skill.
+      if (id) for (let i = 0; i < pr.slots.length; i++) if (i !== slotIndex && pr.slots[i] === id) pr.slots[i] = null;
+      pr.slots[slotIndex] = id || null;
+      updateSkillBar(player);
+      return true;
+    },
+    clearSlot(player, slotIndex) { return this.assignSlot(player, slotIndex, null); },
+
+    cooldownLeft(player, id) { return Math.max(0, player.progress.cooldowns[id] || 0); },
+    // Whether the skill in a slot can fire right now (owned, off cooldown, focus).
+    ready(player, slotIndex) {
+      const id = player.progress.slots[slotIndex];
+      const def = this.def(player, id);
+      return !!def && this.cooldownLeft(player, id) <= 0 && player.progress.focus >= (def.cost || 0);
+    },
+
+    // Fire the skill in a quick-bar slot. Returns true if it actually cast.
+    activate(state, player, slotIndex) {
+      if (!state || !player || !player.progress || player.health <= 0) return false;
+      const pr = player.progress;
+      const id = pr.slots[slotIndex];
+      if (!id) { toast(t("toast.skillEmpty")); return false; }
+      const def = this.def(player, id);
+      if (!def) return false;
+      if (this.cooldownLeft(player, id) > 0) { toast(t("toast.skillCooling")); Sfx.play("error"); return false; }
+      if (pr.focus < (def.cost || 0)) { toast(t("toast.noFocus")); Sfx.play("error"); return false; }
+      pr.focus -= (def.cost || 0);
+      pr.cooldowns[id] = def.cooldown || 0;
+      this._cast(state, player, def);
+      updateFocusHud(player);
+      updateSkillBar(player);
+      return true;
+    },
+
+    // Skill power scales gently with level so leveling keeps mattering.
+    power(player, def) {
+      const lvl = (player.progress && player.progress.level) || 1;
+      return Math.round((def.power || 0) * (1 + (lvl - 1) * 0.05));
+    },
+
+    // Resolve a skill's combat effect onto the world using the existing systems.
+    _cast(state, player, def) {
+      const el = ELEMENTS[def.element] || ELEMENTS.arcane;
+      const power = this.power(player, def);
+      if (def.effect === "volley") this._castVolley(state, player, def, el, power);
+      else if (def.effect === "nova") this._castNova(state, player, def, el, power);
+      else if (def.effect === "buff") this._castBuff(state, player, def, el);
+      else if (def.effect === "heal") this._castHeal(state, player, def, el, power);
+      Sfx.play("skill_cast");
+    },
+
+    _castVolley(state, player, def, el, power) {
+      const origin = (player.wandTip && player.wandTip.getAbsolutePosition)
+        ? player.wandTip.getAbsolutePosition().clone()
+        : new BABYLON.Vector3(player.position.x, 1.2, player.position.z);
+      const n = Math.max(1, def.count || 1);
+      const spread = 0.18;
+      for (let i = 0; i < n; i++) {
+        const offset = n === 1 ? 0 : (i - (n - 1) / 2) * spread;
+        const ang = player.facing + offset;
+        const dir = new BABYLON.Vector3(Math.sin(ang), 0.04, Math.cos(ang)).normalize();
+        state.bolts.push(new Projectile(state.scene, state.shadow, origin.clone(), dir, {
+          speed: 24, radius: 0.95, damage: power, pierce: def.pierce || 0,
+          color: el.color, haloColor: el.color, gravity: 1.2,
+        }));
+      }
+      // The wand flares on a ranged skill, mirroring a normal cast.
+      if (player.swing && player.swing.trigger) player.swing.trigger("ranged");
+    },
+
+    _castNova(state, player, def, el, power) {
+      const radius = def.radius || 6;
+      const p = player.position;
+      spawnImpact(state, new BABYLON.Vector3(p.x, 0.6, p.z), el.color,
+        { y: 0.6, count: 24, spread: radius, up: 3, life: 0.7 });
+      let healed = 0;
+      for (const m of state.monsters) {
+        if (!m.alive || m.dying > 0) continue;
+        const dx = m.position.x - p.x, dz = m.position.z - p.z;
+        if (Math.hypot(dx, dz) > radius + m.radius) continue;
+        const killed = m.hit(power);
+        spawnImpact(state, m.position, el.color, { y: 1.0, count: killed ? 10 : 6, spread: 3 });
+        if (m.knockback) m.knockback(dx, dz, def.knock || 6);
+        if (def.slow && m.applySlow) m.applySlow(2.5);          // frost chills
+        if (def.lifesteal) healed += killed ? 8 : 4;            // shadow drains
+        if (killed) onMonsterDefeated(state, m);
+      }
+      if (healed > 0 && player.health > 0) {
+        player.health = Math.min(player.maxHealth, player.health + healed);
+        updateHealthBar(player.health);
+      }
+    },
+
+    _castBuff(state, player, def, el) {
+      applyBuff(player, { id: "skill_" + (def.id || def.element), label: tSkillName(def), stats: def.buff || {}, time: def.duration || 10 });
+      recomputeStats(player);
+      updateBuffBar(player);
+      spawnSelfFx(state, player, el);
+    },
+
+    _castHeal(state, player, def, el, power) {
+      player.health = Math.min(player.maxHealth, player.health + power);
+      updateHealthBar(player.health);
+      spawnSelfFx(state, player, el);
+    },
+
+    // ---- Fusion (the marquee feature) ------------------------------------
+    // Validate 2..3 selected skills, charge coins + crystals, then create + learn
+    // a new fused skill whose attributes are the pure deterministic blend.
+    fuse(state, player, ids) {
+      const pr = player.progress;
+      const defs = (ids || []).map((id) => this.def(player, id)).filter(Boolean);
+      if (!canFuse(defs)) { toast(t("toast.fuseSelect")); Sfx.play("error"); return null; }
+      const cost = fusionCost(defs);
+      if (state.coins < cost.coins || (player.materials.crystal || 0) < cost.crystal) {
+        toast(t("toast.fuseNeed", cost)); Sfx.play("error"); return null;
+      }
+      state.coins -= cost.coins; updateCoins(state);
+      player.materials.crystal -= cost.crystal; updateMaterialsHud(player);
+      const fused = fuseSkills(defs);
+      const id = "fused_" + (++pr.fusedSeq);
+      fused.id = id;
+      pr.fused[id] = fused;
+      pr.owned.push(id);
+      Sfx.play("fuse");
+      toast(t("toast.skillFused", { name: tSkillName(fused) }));
+      return fused;
+    },
+
+    // ---- Per-frame: regen focus + tick cooldowns (dt-driven → pause-safe) ----
+    update(state, player, dt) {
+      if (!player || !player.progress) return;
+      const pr = player.progress;
+      const max = this.maxFocus(player);
+      if (pr.focus < max) pr.focus = Math.min(max, pr.focus + FOCUS_REGEN * dt);
+      else if (pr.focus > max) pr.focus = max; // defensive: never sit above the cap
+      let ticking = false;
+      for (const id in pr.cooldowns) {
+        if (pr.cooldowns[id] > 0) { pr.cooldowns[id] = Math.max(0, pr.cooldowns[id] - dt); ticking = true; }
+      }
+      updateFocusHud(player);
+      if (ticking) updateSkillBar(player);
+    },
+
+    // The XP a defeated monster is worth (bosses + the dragon pay far more).
+    xpFor(m) {
+      if (!m) return 0;
+      if (m.isDragon) return 600;
+      if (m.isBoss) return 60 + (m.cycle || 1) * 25;
+      return 6 + (m.wave || 1) * 2;
+    },
+
+    // On a boss kill, deterministically drop one rare boss-skill the player
+    // doesn't own yet (seeded rng → reproducible) and slot it if there's room.
+    rollBossSkill(player) {
+      const pr = player.progress;
+      const pool = BOSS_SKILL_IDS.filter((id) => !pr.owned.includes(id));
+      if (!pool.length) return null;
+      const id = pool[(rng() * pool.length) | 0];
+      pr.owned.push(id);
+      const free = pr.slots.indexOf(null);
+      if (free >= 0 && !pr.slots.includes(id)) pr.slots[free] = id;
+      toast(t("toast.bossSkill", { name: tSkillName(SKILL_DB[id]) }));
+      Sfx.play("levelup");
+      updateSkillBar(player);
+      if (SkillsUI.open) SkillsUI.render();
+      return id;
+    },
+
+    // ---- Save / load -----------------------------------------------------
+    serialize(player) {
+      const pr = player.progress || newProgress();
+      return {
+        level: pr.level, xp: pr.xp, focus: Math.round(pr.focus),
+        owned: pr.owned.slice(),
+        fused: JSON.parse(JSON.stringify(pr.fused || {})),
+        fusedSeq: pr.fusedSeq | 0,
+        slots: pr.slots.slice(),
+      };
+    },
+    restore(player, data) {
+      const pr = newProgress();
+      if (data && typeof data === "object") {
+        pr.level = Math.max(1, data.level | 0 || 1);
+        pr.xp = Math.max(0, data.xp | 0);
+        pr.fusedSeq = Math.max(0, data.fusedSeq | 0);
+        if (data.fused && typeof data.fused === "object") {
+          for (const id in data.fused) {
+            const f = data.fused[id];
+            if (f && f.effect && f.element) { f.id = id; f.generated = true; f.source = "fused"; pr.fused[id] = f; }
+          }
+        }
+        const known = (id) => SKILL_DB[id] || pr.fused[id];
+        pr.owned = (data.owned || []).filter(known);
+        pr.fusedSeq = Math.max(pr.fusedSeq, ...Object.keys(pr.fused).map((id) => parseInt(id.replace("fused_", ""), 10) || 0), 0);
+        const slots = data.slots || [];
+        for (let i = 0; i < SKILL_SLOTS; i++) pr.slots[i] = (slots[i] && pr.owned.includes(slots[i])) ? slots[i] : null;
+      }
+      player.progress = pr;
+      applyLevelToBase(player);
+      // Ensure level-unlocked base skills are owned (covers legacy saves + any
+      // catalogue additions), then default + clamp the quick bar and focus.
+      for (const id of skillsUnlockedAt(pr.level)) if (!pr.owned.includes(id)) pr.owned.push(id);
+      if (!pr.owned.length) for (const id of STARTER_SKILL_IDS) pr.owned.push(id);
+      if (!pr.slots.some(Boolean) && pr.owned.length) pr.slots[0] = pr.owned[0];
+      pr.focus = (data && data.focus != null) ? Math.min(maxFocusForLevel(pr.level), Math.max(0, data.focus | 0)) : maxFocusForLevel(pr.level);
+    },
+  };
 
   // Spin/float dropped rare loot; scoop it into the bag when the player nears.
   function updateItemDrops(state, player, dt) {
@@ -6164,7 +6707,7 @@ import {
     dom.potionBar.innerHTML = "";
     for (let i = 0; i < POTION_SLOTS; i++) {
       const slot = player.potions[i];
-      const key = i + 1;
+      const key = i + 4; // 4 / 5 / 6 — the quick bar (1/2/3) now casts skills
       const cell = document.createElement("button");
       cell.className = "potion-slot" + (slot ? " filled" : " empty");
       if (slot) {
@@ -6179,6 +6722,72 @@ import {
       dom.potionBar.appendChild(cell);
     }
     updateBuffBar(player);
+  }
+
+  // ---- Skills, leveling & focus HUD (Task 14) ----------------------------
+  // Level badge + XP progress bar (top-left, by the location/score row).
+  function updateXpHud(player) {
+    if (!player || !player.progress) return;
+    const pr = player.progress;
+    if (dom.levelBadge) dom.levelBadge.textContent = t("hud.levelBadge", { level: pr.level });
+    if (dom.xpFill) {
+      const need = xpToNext(pr.level);
+      dom.xpFill.style.width = Math.max(0, Math.min(100, (pr.xp / (need || 1)) * 100)) + "%";
+    }
+    const wrap = dom.xpWrap;
+    if (wrap) wrap.title = t("skills.xp", { xp: pr.xp, next: xpToNext(pr.level) });
+  }
+
+  // Focus (spell resource) bar, shown under the health bar.
+  function updateFocusHud(player) {
+    if (!player || !player.progress || !dom.focusFill) return;
+    const max = maxFocusForLevel(player.progress.level) || 1;
+    dom.focusFill.style.width = Math.max(0, Math.min(100, (player.progress.focus / max) * 100)) + "%";
+    if (dom.focusWrap) dom.focusWrap.title = t("skills.focus", { focus: Math.floor(player.progress.focus), max });
+  }
+
+  // The 3-slot quick bar (hotkeys 1/2/3): icon + key, a radial cooldown sweep,
+  // and a dim when there isn't enough focus. Tapping a slot casts it (mobile).
+  function updateSkillBar(player) {
+    if (!dom.skillBar || !player || !player.progress) return;
+    const pr = player.progress;
+    dom.skillBar.innerHTML = "";
+    for (let i = 0; i < SKILL_SLOTS; i++) {
+      const id = pr.slots[i];
+      const def = Skills.def(player, id);
+      const cell = document.createElement("button");
+      cell.className = "skill-slot" + (def ? " filled" : " empty");
+      const key = i + 1;
+      if (def) {
+        const cd = Skills.cooldownLeft(player, id);
+        const onCd = cd > 0;
+        const lowFocus = pr.focus < (def.cost || 0);
+        if (onCd) cell.classList.add("cooling");
+        if (lowFocus) cell.classList.add("nofocus");
+        const cdPct = onCd ? Math.min(100, (cd / (def.cooldown || 1)) * 100) : 0;
+        cell.innerHTML =
+          `<span class="sk-key">${key}</span><span class="sk-icon">${def.icon || "✨"}</span>` +
+          `<span class="sk-cost">🔵${def.cost || 0}</span>` +
+          (onCd ? `<span class="sk-cd">${Math.ceil(cd)}</span>` : "") +
+          `<span class="sk-cdmask" style="height:${cdPct}%"></span>`;
+        cell.title = `${tSkillName(def)} — ${tSkillDesc(def)}`;
+        cell.addEventListener("click", () => {
+          if (gameStarted && !paused && !uiPaused) Skills.activate(stateRef, player, i);
+        });
+      } else {
+        cell.innerHTML = `<span class="sk-key">${key}</span><span class="sk-empty">✨</span>`;
+        cell.title = t("skills.slotEmpty");
+        cell.addEventListener("click", () => { if (gameStarted && !paused && !uiPaused) { Sfx.play("ui_click"); SkillsUI.openUI(); } });
+      }
+      dom.skillBar.appendChild(cell);
+    }
+  }
+
+  // Refresh every skills HUD readout at once.
+  function updateSkillsHud(player) {
+    updateXpHud(player);
+    updateFocusHud(player);
+    updateSkillBar(player);
   }
 
   // Active timed potion buffs render as small countdown pills above the belt.
@@ -6259,7 +6868,7 @@ import {
   // monsters, the boss, artifacts and dropped coins, plus the wave clock) is
   // serialized explicitly so the run resumes exactly where it left off.
   // =========================================================================
-  const SAVE_VERSION = 7;
+  const SAVE_VERSION = 8;
   const PENDING_LOAD_KEY = "gg3d_pending_load"; // sessionStorage hand-off across reload
   const AUTOSTART_KEY = "gg3d_autostart";       // restart -> skip the start screen
 
@@ -6307,6 +6916,9 @@ import {
         // Adventure state: gathered materials + collected castle relics.
         materials: Object.assign({}, player.materials),
         relics: player.relics.slice(),
+        // Skill & leveling progression (Task 14, v8): level/xp, focus, owned +
+        // fused skills, and the 3-slot quick bar.
+        progress: Skills.serialize(player),
       },
       // Story progression: quests, the campaign-flow state, the castle build
       // state, day/night + weather.
@@ -6411,10 +7023,15 @@ import {
     if (ps.materials) for (const k in ps.materials) if (k in player.materials) player.materials[k] = ps.materials[k] | 0;
     player.relics = (ps.relics || []).filter((id) => RELICS[id]);
     player.buffs = [];
+    // Skill & leveling progression (defaults sanely for legacy < v8 saves: level 1,
+    // the starter skill, full focus). Restored BEFORE recompute so the level's
+    // bonus max-health is folded into the stat block.
+    Skills.restore(player, ps.progress);
     recomputeStats(player);
     updatePotionBar(player);
     updateMaterialsHud(player);
     updateRelicHud(player);
+    updateSkillsHud(player);
 
     // Story progression: kills, quests, the campaign-flow state, win flag.
     // Unknown ids (e.g. from a pre-campaign save) drop out, defaulting cleanly.
@@ -6834,6 +7451,12 @@ import {
                              this._noise(t, { dur: 0.5, peak: 0.08, cutoff: 1800 }); break;
           case "lowhp":      this._tone(t, { freq: 880, dur: 0.12, type: "sine", peak: 0.18 });
                              this._tone(t, { freq: 880, dur: 0.12, type: "sine", peak: 0.18, delay: 0.18 }); break;
+          // ---- Skills, leveling & fusion (Task 14) ----
+          case "levelup":    [0, 4, 7, 12, 16].forEach((s, i) => this._tone(t, { freq: 523.25 * Math.pow(2, s / 12), dur: 0.26, type: "triangle", peak: 0.18, delay: i * 0.05 })); break;
+          case "skill_cast": this._tone(t, { freq: 640, freq2: 1200, dur: 0.24, type: "sine", peak: 0.22 });
+                             this._tone(t, { freq: 320, freq2: 600, dur: 0.2, type: "triangle", peak: 0.1, delay: 0.02 }); break;
+          case "fuse":       [0, 7, 12].forEach((s, i) => this._tone(t, { freq: 392 * Math.pow(2, s / 12), dur: 0.34, type: "sine", peak: 0.18, delay: i * 0.07 }));
+                             this._noise(t, { dur: 0.4, peak: 0.06, cutoff: 2200 }); break;
           default: break;
         }
       } catch (e) { /* never let a sound break the game */ }
@@ -7311,6 +7934,10 @@ import {
       if (dom.questBtn) dom.questBtn.addEventListener("click", () => { Sfx.play("ui_click"); QuestLog.toggle(); });
       if (dom.questLogClose) dom.questLogClose.addEventListener("click", () => QuestLog.close());
       if (dom.questLogDone) dom.questLogDone.addEventListener("click", () => QuestLog.close());
+      // Skills & fusion overlay: open via the ✨ button or the "K" key.
+      if (dom.skillsBtn) dom.skillsBtn.addEventListener("click", () => { Sfx.play("ui_click"); SkillsUI.toggle(); });
+      if (dom.skillsClose) dom.skillsClose.addEventListener("click", () => SkillsUI.close());
+      if (dom.skillsDone) dom.skillsDone.addEventListener("click", () => SkillsUI.close());
       if (dom.winReplayBtn) dom.winReplayBtn.addEventListener("click", () => window.location.reload());
 
       // Music toggle (🔊 / 🔇).
@@ -7335,21 +7962,32 @@ import {
       // open, otherwise toggles the pause menu (or backs out of a confirm).
       Pause.init();
       window.addEventListener("keydown", (e) => {
-        // Potion belt hotkeys 1 / 2 / 3 — quaff the matching slot mid-fight.
+        // Quick-bar SKILL hotkeys 1 / 2 / 3 — cast the slotted skill mid-fight.
         if ((e.code === "Digit1" || e.code === "Digit2" || e.code === "Digit3") &&
             gameStarted && !paused && !uiPaused && playerRef) {
-          potionUse(playerRef, e.code.charCodeAt(5) - 49); // "1"->0, "2"->1, "3"->2
+          Skills.activate(stateRef, playerRef, e.code.charCodeAt(5) - 49); // "1"->0, "2"->1, "3"->2
+          e.preventDefault(); return;
+        }
+        // Potion belt hotkeys 4 / 5 / 6 — quaff the matching slot (the number row's
+        // 1/2/3 now casts skills, so the belt moved one set over).
+        if ((e.code === "Digit4" || e.code === "Digit5" || e.code === "Digit6") &&
+            gameStarted && !paused && !uiPaused && playerRef) {
+          potionUse(playerRef, e.code.charCodeAt(5) - 52); // "4"->0, "5"->1, "6"->2
           e.preventDefault(); return;
         }
         // Inventory hotkey (only once playing, and not while another menu is up).
-        if ((e.code === "KeyI" || e.code === "KeyB") && gameStarted && !paused && !Shop.open && !Anvil.open && !Dialogue.open && !Crafting.open && !CastleUI.open) {
+        if ((e.code === "KeyI" || e.code === "KeyB") && gameStarted && !paused && !Shop.open && !Anvil.open && !Dialogue.open && !Crafting.open && !CastleUI.open && !SkillsUI.open) {
           Inventory.toggle(); e.preventDefault(); return;
         }
+        // Skills & fusion (K) hotkey.
+        if (e.code === "KeyK" && gameStarted && !paused && !Shop.open && !Anvil.open && !Inventory.open && !Dialogue.open && !Crafting.open && !CastleUI.open) {
+          SkillsUI.toggle(); e.preventDefault(); return;
+        }
         // Crafting bench (C) and quest log (J) hotkeys.
-        if (e.code === "KeyC" && gameStarted && !paused && !Shop.open && !Anvil.open && !Inventory.open && !Dialogue.open && !CastleUI.open) {
+        if (e.code === "KeyC" && gameStarted && !paused && !Shop.open && !Anvil.open && !Inventory.open && !Dialogue.open && !CastleUI.open && !SkillsUI.open) {
           Crafting.toggle(); e.preventDefault(); return;
         }
-        if ((e.code === "KeyJ" || e.code === "KeyL") && gameStarted && !paused && !Shop.open && !Anvil.open && !Inventory.open && !Dialogue.open && !Crafting.open) {
+        if ((e.code === "KeyJ" || e.code === "KeyL") && gameStarted && !paused && !Shop.open && !Anvil.open && !Inventory.open && !Dialogue.open && !Crafting.open && !SkillsUI.open) {
           QuestLog.toggle(); e.preventDefault(); return;
         }
         if (e.code === "KeyM") { Music.toggle(); return; }
@@ -7357,6 +7995,7 @@ import {
         if (Shop.open) { Shop.closeShop(); return; }
         if (Anvil.open) { Anvil.close(); return; }
         if (Inventory.open) { Inventory.close(); return; }
+        if (SkillsUI.open) { SkillsUI.close(); return; }
         if (Dialogue.open) { Dialogue.close(); return; }
         if (Crafting.open) { Crafting.close(); return; }
         if (CastleUI.open) { CastleUI.close(); return; }
@@ -7476,6 +8115,12 @@ import {
       // ---- Items & equipment depth (Task 12): affixes, sets, derived stats ----
       AFFIXES, SETS, rollAffixes, affixStats, setBonusStats, activeSets, itemCategory,
       deriveStats, equippedAfter, equipDelta, wornDetailFor, isGear,
+      // ---- Skills, leveling & fusion (Task 14) ----
+      Skills, SkillsUI, SKILL_DB, getSkill, ELEMENTS, EFFECTS,
+      BASE_SKILL_IDS, BOSS_SKILL_IDS, STARTER_SKILL_IDS, SKILL_SLOTS, MAX_FUSE_INPUTS,
+      xpToNext, totalXpToReach, maxFocusForLevel, levelHealthBonus, skillsUnlockedAt,
+      skillTier, canFuse, fuseSkills, fusionCost, newProgress,
+      tSkillName, tSkillDesc, tElementLabel, tEffectLabel,
       // ---- Audio: mixer, per-zone ambience, footsteps (Task 6) ----
       Mixer, Ambience, AudioUI, Footsteps, LowHealth, surfaceForZone, AUDIO_KEY,
       // ---- Internationalization (Task 7) ----

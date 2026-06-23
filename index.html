@@ -25,6 +25,7 @@
       <ul class="controls">
         <li><b data-i18n="ctrl.move">Move</b><span data-i18n="ctrl.moveKeys">WASD / Arrows · or the on-screen stick</span></li>
         <li><b data-i18n="ctrl.attack">Attack</b><span data-i18n="ctrl.attackKeys">Space / F · or the ✨ button</span></li>
+        <li><b data-i18n="ctrl.skills">Skills</b><span data-i18n="ctrl.skillsKeys">1 / 2 / 3 · or tap a quick-bar slot</span></li>
         <li><b data-i18n="ctrl.interact">Interact / talk / gather</b><span data-i18n="ctrl.interactKeys">E · or the action button</span></li>
         <li><b data-i18n="ctrl.inventory">Inventory</b><span data-i18n="ctrl.inventoryKeys">I · or the 🎒 button</span></li>
         <li><b data-i18n="ctrl.craft">Craft · Quests</b><span data-i18n="ctrl.craftKeys">C · J · or the 🛠️ 📜 buttons</span></li>
@@ -56,6 +57,8 @@
   <div id="hud" class="hud hidden">
     <div class="hud-top">
       <div class="stat loc-stat">📍 <span id="location">Meadowgate Vale</span></div>
+      <div class="stat lvl-stat" id="xpWrap"><span id="levelBadge">Lv 1</span>
+        <span class="xp-track"><span id="xpFill" class="xp-fill"></span></span></div>
       <div class="stat">⭐ <span id="score">0</span></div>
       <div class="stat">🪙 <span id="coins">0</span></div>
       <div class="stat">👹 <span id="monsters">0</span></div>
@@ -71,6 +74,11 @@
       <span class="heart">❤</span>
       <div class="healthbar"><div id="healthFill" class="health-fill"></div></div>
     </div>
+    <!-- Focus (the spell resource for skills): regenerates over time. -->
+    <div class="focuswrap" id="focusWrap" data-i18n-title="hud.focusLabel" title="Focus">
+      <span class="focus-rune">✦</span>
+      <div class="focusbar"><div id="focusFill" class="focus-fill"></div></div>
+    </div>
 
     <!-- Boss health bar: shown only while a Sweet King boss is alive. -->
     <div id="bossBar" class="boss-bar hidden">
@@ -81,7 +89,10 @@
     <!-- Zone/location banner: shows the name of the land you've just entered. -->
     <div id="waveBanner" class="wave-banner"></div>
 
-    <!-- Potion belt: up to 3 stackable potion slots (use with 1/2/3 or a tap),
+    <!-- Skill quick bar: up to 3 active skills (cast with 1/2/3 or a tap). -->
+    <div id="skillBar" class="skill-bar"></div>
+
+    <!-- Potion belt: up to 3 stackable potion slots (use with 4/5/6 or a tap),
          with active-buff countdown pills above it. -->
     <div id="buffBar" class="buff-bar"></div>
     <div id="potionBar" class="potion-bar"></div>
@@ -89,6 +100,7 @@
     <button id="fsBtn" class="fs-btn" data-i18n-title="btnTitle.fullscreen" data-i18n-aria="btnAria.fullscreen" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
     <button id="pauseBtn" class="pause-btn" data-i18n-title="btnTitle.menu" data-i18n-aria="btnAria.menu" title="Menu (Esc)" aria-label="Open menu">☰</button>
     <button id="invBtn" class="icon-btn inv-btn" data-i18n-title="btnTitle.inventory" data-i18n-aria="btnAria.inventory" title="Inventory (I)" aria-label="Open inventory">🎒</button>
+    <button id="skillsBtn" class="icon-btn skills-btn" data-i18n-title="btnTitle.skills" data-i18n-aria="btnAria.skills" title="Skills (K)" aria-label="Open skills">✨</button>
     <button id="craftBtn" class="icon-btn craft-btn" data-i18n-title="btnTitle.crafting" data-i18n-aria="btnAria.crafting" title="Crafting (C)" aria-label="Open crafting">🛠️</button>
     <button id="questBtn" class="icon-btn quest-btn" data-i18n-title="btnTitle.questLog" data-i18n-aria="btnAria.questLog" title="Quest log (J)" aria-label="Open quest log">📜</button>
     <button id="musicBtn" class="icon-btn music-btn" data-i18n-title="btnTitle.muteMusic" data-i18n-aria="btnAria.music" title="Mute music (M)" aria-label="Toggle music">🔊</button>
@@ -263,6 +275,21 @@
       <div class="shop-coins">🪙 <span id="castleCoins">0</span> <span data-i18n="castleui.coins">coins ·</span> <span id="castleProgress">0/5 parts raised</span></div>
       <div id="castleItems" class="shop-items"></div>
       <button id="castleDone" class="start-btn shop-done" data-i18n="castleui.done">Done</button>
+    </div>
+  </div>
+
+  <!-- Skills & fusion: opened with ✨ / K. Manage the roster, fuse up to three
+       skills into one, and slot three on the quick bar. -->
+  <div id="skills" class="shop-overlay hidden">
+    <div class="shop-panel skills-panel">
+      <button id="skillsClose" class="shop-close" data-i18n-title="btn.close" title="Close" aria-label="Close skills">×</button>
+      <h2 data-i18n-html="skills.title">✨ Skills &amp; Fusion</h2>
+      <p class="shop-tagline" data-i18n-html="skills.tagline">Learn skills as you level, <b>fuse up to three</b> into a new one, and slot three on your quick bar.</p>
+      <div id="skillsHeader" class="skills-header"></div>
+      <div id="skillsToolbar" class="skills-toolbar"></div>
+      <div id="skillsFusion" class="skills-fusion"></div>
+      <div id="skillsList" class="shop-items skills-list"></div>
+      <button id="skillsDone" class="start-btn shop-done" data-i18n="skills.done">Done</button>
     </div>
   </div>
 
