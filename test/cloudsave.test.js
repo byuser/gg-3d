@@ -219,8 +219,11 @@ describe("Task 15 — local↔cloud payload parity (save versioning just works)"
     await CS.saveManual();
     const manual = [...drive._files.values()].find((f) => f.name === T.CLOUD_MANUAL_NAME);
     const cloudJson = manual.content;
-    // The cloud payload is byte-identical to a fresh local serialize.
-    expect(cloudJson).toBe(JSON.stringify(T.serializeGame()));
+    // The cloud payload matches a fresh local serialize field-for-field (only the
+    // volatile `savedAt` wall-clock stamp differs between two serialize calls).
+    const norm = (o) => { const c = JSON.parse(JSON.stringify(o)); delete c.savedAt; return c; };
+    expect(norm(JSON.parse(cloudJson))).toEqual(norm(T.serializeGame()));
+    expect(JSON.parse(cloudJson).savedAt).toEqual(expect.any(String));
     // And it restores cleanly through the same applySave path the local file uses.
     T.state.score = 0;
     expect(() => T.applySave(JSON.parse(cloudJson))).not.toThrow();
