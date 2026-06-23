@@ -289,7 +289,7 @@ describe("Task 12 — save / load round-trip + migration", () => {
     T.recomputeStats(p);
     const hp = p.maxHealth,
       save = T.serializeGame();
-    expect(save.v).toBe(7);
+    expect(save.v).toBe(8);
     expect(save.player.equipment.cloak.aff).toEqual(["fleet", "of_warding"]);
 
     clearEquip(p);

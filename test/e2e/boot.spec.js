@@ -44,5 +44,16 @@ test("boots the canvas with no console errors and opens core overlays", async ({
   await page.keyboard.press("Escape");
   await expect(page.locator("#inventory")).toHaveClass(/hidden/);
 
+  // Skills & fusion overlay opens with "K", shows the quick-bar/list, closes.
+  await page.keyboard.press("KeyK");
+  await expect(page.locator("#skills")).not.toHaveClass(/hidden/);
+  await expect(page.locator("#skillsList")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#skills")).toHaveClass(/hidden/);
+
+  // Casting the slotted skill with the "1" hotkey must not throw.
+  await page.keyboard.press("Digit1");
+  await page.waitForTimeout(300);
+
   expect(errors, `console errors during boot:\n${errors.join("\n")}`).toEqual([]);
 });
