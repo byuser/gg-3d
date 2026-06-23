@@ -20,6 +20,12 @@ test("boots the canvas with no console errors and opens core overlays", async ({
   await page.goto("/");
   await expect(page).toHaveTitle(/Good Game 3D/);
 
+  // The opt-in cloud-saves panel (Task 15) is present on the start screen and
+  // cleanly disabled when no Google client id is configured (the default ship
+  // state) — it must never throw or block boot.
+  await expect(page.locator("#cloudStatus")).toBeVisible();
+  await expect(page.locator("#cloudSignBtn")).toBeDisabled();
+
   // The render canvas exists and the engine reports ready (Start gets enabled).
   await expect(page.locator("#renderCanvas")).toBeVisible();
   const startBtn = page.locator("#startBtn");
@@ -38,6 +44,10 @@ test("boots the canvas with no console errors and opens core overlays", async ({
   // Pause menu opens on Escape and closes again.
   await page.keyboard.press("Escape");
   await expect(page.locator("#pauseMenu")).not.toHaveClass(/hidden/);
+  // The pause settings carry the cloud-saves controls; with no client id the
+  // sign-in/save/autosave controls are present but disabled (graceful default).
+  await expect(page.locator("#cloudSignBtnP")).toBeVisible();
+  await expect(page.locator("#cloudAutoBtnP")).toBeDisabled();
   await page.locator("#resumeBtn").click();
   await expect(page.locator("#pauseMenu")).toHaveClass(/hidden/);
 
