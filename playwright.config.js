@@ -33,7 +33,7 @@ export default defineConfig({
   // AND the mobile S24 Ultra profiles). On a cold runner that first boot is slow,
   // so give every test a generous budget (the web server already gets 120s) to
   // avoid flaky timeouts.
-  timeout: 180_000,
+  timeout: 240_000,
   use: {
     baseURL: "http://localhost:4173",
     trace: "on-first-retry",

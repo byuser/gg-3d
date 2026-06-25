@@ -153,6 +153,16 @@ html, body {
   position: absolute; top: max(14px, env(safe-area-inset-top)); left: 0; right: 0;
   display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; padding: 0 14px;
 }
+/* On phones the top-right corner is owned by the icon-button row + the tappable
+   minimap, so reserve that column: the centred status chips wrap to the LEFT of
+   it and never slide under the minimap at narrow widths (Task 16 — no overlap). */
+@media (pointer: coarse) {
+  .hud-top {
+    justify-content: flex-start;
+    padding-right: calc(max(12px, env(safe-area-inset-right)) + 132px);
+    row-gap: 6px;
+  }
+}
 .stat {
   background: rgba(11, 15, 26, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.1);
