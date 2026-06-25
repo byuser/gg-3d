@@ -22,7 +22,18 @@ delta it shipped with, since later tasks reference those.
 
 ## [Unreleased]
 
-_Nothing pending._
+### Fixed
+
+- **Pause-menu sub-panels are reliably tappable at the bottom of a short landscape
+  viewport.** The `.sub-panel` `<details>` clipped its own box with `overflow:
+  hidden`; when a sub-panel (e.g. **Cloud Saves**) scrolled to the bottom edge of
+  the S24 Ultra landscape pause menu, Chromium reported the `<details>` itself as
+  the topmost hit-test element at the summary's centre, so taps on the summary were
+  swallowed (`<div class="panel menu-panel"> / <details class="sub-panel">
+  intercepts pointer events`). The summary now rounds its own corners instead of
+  the panel clipping them, restoring the click target. Unblocks the
+  `session-s24-landscape` Playwright E2E (resume-via-Continue → open pause → open
+  Cloud Saves), which previously timed out on `master`.
 
 ## [2026-06-25] — Task 17 — Durable session persistence
 

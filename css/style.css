@@ -82,14 +82,23 @@ html, body {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
-  overflow: hidden;
+  /* NB: no `overflow: hidden` here. On a short landscape viewport the pause menu
+     scrolls and a sub-panel can land at the bottom edge; with the <details>
+     clipping its own box it became the topmost hit-test element at the summary's
+     centre, so the summary swallowed no taps (Chromium reports the <details>
+     intercepting pointer events). The summary clips its own corners instead. */
 }
 .sub-panel > summary {
   cursor: pointer; list-style: none;
   padding: 12px 16px; font-size: 15px; font-weight: 700; color: var(--accent2);
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   min-height: 44px; box-sizing: border-box;
+  /* Round the summary itself (instead of clipping the panel) so the header's
+     hover/background still hugs the panel's rounded corners. */
+  border-radius: 13px;
 }
+/* Once open, the summary's bottom edge meets the panel body — square it off. */
+.sub-panel[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .sub-panel > summary::-webkit-details-marker { display: none; }
 .sub-panel > summary::after {
   content: "▸"; font-size: 13px; opacity: 0.7; transition: transform 0.15s ease;
