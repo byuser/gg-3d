@@ -4079,13 +4079,15 @@ import {
         sign.isPickable = false;
       }
 
-      // The road-edge trigger spec (no orb). exitR is set a touch inside the
-      // gateway so the player reliably crosses it; placePlayerAtArrival arrives
-      // BELOW it (stepped inward) so they don't instantly bounce back. `ang` is
-      // the CHOSEN (possibly road-snapped) outward angle.
+      // The road-edge trigger spec (no orb). exitR sits just PAST the gateway,
+      // right at the fence, so travel fires only when the player walks the road
+      // all the way to the boundary (not merely when they wander near a far
+      // corner) — yet they can still reach it before moveActor's fence clamp
+      // (RADIUS - playerRadius). placePlayerAtArrival drops them well BELOW it so
+      // they don't instantly bounce back. `ang` is the CHOSEN (road-snapped) angle.
       portals.push({
         to: def.to, kind: def.kind, dir, ang: portAng,
-        exitR: RADIUS - 4.5, half: PORTAL_ROAD_HALF,
+        exitR: RADIUS - 1.6, half: PORTAL_ROAD_HALF,
         x: gx, z: gz, name: tgt ? tgt.name : def.to, icon: tgt ? tgt.icon : "➡️",
       });
     }
