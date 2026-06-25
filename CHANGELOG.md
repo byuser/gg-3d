@@ -35,6 +35,55 @@ delta it shipped with, since later tasks reference those.
   `session-s24-landscape` Playwright E2E (resume-via-Continue → open pause → open
   Cloud Saves), which previously timed out on `master`.
 
+## [2026-06-25] — Task 22 — Environment rewrite (stable resource generation + natural road-edge teleporters)
+
+Two environment problems that broke immersion are fixed.
+
+**(A) Stable, time-based resource generation — no pile-ups, no phantom nodes.**
+A zone's resource set is now **deterministic and persistent**, keyed by zone id
+(`state.zoneRes[id] = { nodes:[{kind,x,z,respawn}], regrowAcc, sprouts }`). Live
+`ResourceNode` meshes are rebuilt **from that record** on entry, so re-entering a
+zone reuses the **exact same set** instead of scattering a fresh batch on top —
+the live count is stable across travel and reload. The non-collectable **"phantom"
+nodes** are root-caused and gone: `ResourceNode` had **no `dispose()`**, so
+`teardownZone`'s `r.dispose()` threw and the resource meshes (created *after*
+`buildWorld`'s teardown snapshot) **leaked** across travel as visible-but-dead
+nodes; `ResourceNode.dispose()` now frees its root **and** removes its
+interactable. Population is a **pure function of (zone, world seed, elapsed time)**
+— the initial scatter and each regrow draw from a per-zone `mulberry32` sub-stream
+(`seededStream`/`zoneKey`) that never disturbs the shared `rng()`. **New nodes
+appear only after in-game time passes** (`CONFIG.resourceRegrowSec`, default 45 s)
+via a `dt`-driven regrow clock that **pauses with the game**. A **per-kind,
+per-zone cap** (`CONFIG.resourceCaps` + `resourceCapDefault`) is enforced at plan
+**and** every regrow path, alongside the global `maxResourceNodes`. Harvest writes
+its cooldown back to the record so depletion survives travel.
+
+**(B) Road-edge teleporters replace the floating ground-circle orbs.** The
+`portOrb` gateways are removed. Each portal is now a **road-edge trigger**: walking
+down a road to its **end-of-map segment** fires `ZoneManager.travel`. The trigger
+is a band across the road's full width at the fence (radial projection ≥ `exitR`
+**and** lateral distance ≤ `half`), so it **can't be skirted** — the fence stops
+you before you could go around. **Hub** exits snap to the nearest free crossroads
+ray-end so they ride the existing **bridge-aware** roads (Task 10) rather than
+cutting new roads across the river; **wild** zones lay a fresh radial road
+(river crossings still bridged). Themed gateways (trail-head arch / plank jetty /
+cave mouth + a signpost) sit at each road end. The **fade-veil transition**,
+arrival placement (`placePlayerAtArrival` now lands **on the incoming road**,
+below the exit) and the `zones.js` portal graph are intact — only the trigger
+geometry + visuals changed. The **minimap / world map** draw road-edge exits (a
+road stub running to the rim) in place of orb squares.
+
+**Persistence & migration.** Per-zone resource state serializes/restores;
+`SAVE_VERSION` **12 → 13** (`serializeZoneRes`/`deserializeZoneRes`); a pre-v13
+save has no `zoneRes` field and **defaults to `{}`**, re-planning each zone
+deterministically from the restored seed (older saves keep loading). All new
+meshes dispose on teardown. New `test/environment22.test.js` (16 cases; Vitest
+247 → 263) covers the stability invariant over repeated travel, the per-type cap
+at plan/regrow, regrowth timing + determinism, harvestable-after-travel (no
+phantom nodes), the road-edge trigger (fires the right zone, both directions,
+can't be skirted), the save/load round-trip + pre-v13 migration, and per-object
+dispose on teardown. No new user-facing strings.
+
 ## [2026-06-25] — Task 20 — Map subsystem fixes (fit-to-screen full map, un-mirror the minimap, arrow-shaped target pointer, fully readable labels)
 
 The map subsystem had four defects that made it hard to use. All four are fixed to

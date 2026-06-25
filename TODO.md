@@ -1546,7 +1546,22 @@ A task is **done** only when **all** of these are true:
   reducer pattern; gate the migration on `SAVE_VERSION` so it runs exactly once.
 
 ### Task 22 — Environment rewrite: stable resource generation + natural road‑edge teleporters
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-25 · Made resource generation **deterministic + persistent** per zone
+  (`state.zoneRes` keyed by id; live `ResourceNode`s rebuilt from the record, so re‑entry reuses the
+  exact set — no pile‑up) and **time‑gated** (a `dt`‑driven, pause‑correct regrow clock sprouts one
+  node per `CONFIG.resourceRegrowSec`, never on entry), with **per‑kind, per‑zone caps**
+  (`CONFIG.resourceCaps`) enforced at plan + every regrow path. Population is a **pure function of
+  (zone, seed, elapsed time)** via a per‑zone mulberry32 sub‑stream that never disturbs the shared
+  `rng()`. Root‑caused the **phantom nodes**: `ResourceNode` had no `dispose()`, so its meshes (built
+  after `buildWorld`'s snapshot) leaked across travel — added `dispose()` (frees root + removes the
+  interactable). Replaced the floating **portal orbs** with **road‑edge teleporters**: each portal
+  lays a road to the map edge (hub exits snap to the existing bridge‑aware crossroads; wild zones get
+  a fresh radial road) ending in a themed gateway, and walking onto the end‑of‑road band fires
+  `ZoneManager.travel` (can't be skirted — the fence blocks going around); fade‑veil +
+  `placePlayerAtArrival` (now lands on the incoming road) + the `zones.js` graph are intact; the
+  minimap/world map draw road‑edge exits. `SAVE_VERSION` **12 → 13** (per‑zone resource state
+  serializes; pre‑v13 saves default to `{}` and re‑plan from the seed). New `test/environment22.test.js`
+  (16 cases; Vitest 247 → 263). No new user‑facing strings.
 - **Depends on:** the world/zone systems (`buildWorld`, `setupZoneContent`,
   `ZoneManager`, `ResourceNode`, `populateAdventure`/`populateWildResources`,
   `CONFIG.maxResourceNodes`, the portal layout + hub `roadLanes`). None else.

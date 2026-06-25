@@ -4,8 +4,8 @@ A third-person browser **action-RPG adventure**. Run as **Lily** across an islan
 several **explorable lands** — the Meadowgate **vale**, the **Whisperwood**, the **Saltmarsh
 shore**, the **Frostpeak trail** and two hidden **boss lairs** (the Crystal **Caverns** and the
 Bramblewood **Thicket**). Each land has its **own monsters** that **roam** their patch and
-**respawn** over time; **travel** between lands by walking through a **path**, a **bridge** or a
-**cave mouth**, and the world **streams in and out** so it never freezes. Take **quests**,
+**respawn** over time; **travel** between lands by **walking a road to the map edge** (to its
+gateway), and the world **streams in and out** so it never freezes. Take **quests**,
 **gather and craft**, raise a **castle** from five hidden **relics** — build it and the
 **Ancient Dragon** awakens, so **slay it to win**.
 
@@ -50,7 +50,7 @@ and gear without ever blocking the main line. Slay the dragon to **win**.
 | World map / search / guide | `Tab` | tap the minimap (top-right) |
 | Toggle the minimap | `N` | tap the minimap to open the full map |
 | Talk / collect / gather / shop / build (`E`) | `E` | E button (one-thumb arc, bottom-right) |
-| Travel to another land | walk into a path / bridge / cave portal | same |
+| Travel to another land | walk a road off the map edge (to its gateway) | same |
 | Music on/off | `M` | mute in pause → Audio settings |
 | Pause / menu | `Esc` | ☰ button (top-right) |
 | Language (EN / RU) | start screen · pause settings | same |
@@ -97,7 +97,10 @@ runs in English without a browser.
   **Side Quests**.
 - **Gathering & crafting:** the world is dotted with **resource nodes** — chop **trees** for
   wood, mine **rock** and **crystal**, gather **herbs**, cut **fibers** and collect **water** at
-  the shore (walk up + **E**; nodes respawn after a cooldown). Open the **crafting bench**
+  the shore (walk up + **E**; a harvested node respawns after a cooldown). Each land's nodes are
+  a **stable, persistent set** — leaving and returning shows the **same** nodes, not a fresh pile,
+  and **new growth appears slowly over time** (capped per type so a land never floods). Open the
+  **crafting bench**
   (`C` / 🛠️) to turn materials into **potions** and **gear**, both into your bag. Materials are
   **stackable bag items** now (no on-HUD pouch) — see them in the inventory's **Materials** tab.
 - **The castle:** on **Castle Hill** stands the build site (walk up + **E**). Spend a matching
@@ -157,10 +160,12 @@ runs in English without a browser.
 - **Lands & travel:** the world is split into **separate, themed lands** — the home
   **Meadowgate Vale** (the hub), the **Whisperwood Deep**, the **Saltmarsh Strand**, the
   **Frostpeak Trail**, and two boss lairs (the **Crystal Caverns** and the **Bramblewood
-  Thicket**). Each land glows with a **portal** at its edge — a **path**, a **bridge** or a
-  **cave mouth** — and **walking into one** streams you to the connected land. Travel is
-  hidden behind a quick **fade** (with the destination's name) so the world loads without
-  freezing, on desktop or mobile. Your current land is shown on the HUD **📍 location chip**.
+  Thicket**). Each land has **roads running to its edge**, ending in a gateway — a **trail-head
+  arch**, a **plank jetty** or a **cave mouth** — and **walking a road off the map** carries you
+  to the next land (no magic circles to step into; the trigger spans the road so you can't slip
+  past it). Travel is hidden behind a quick **fade** (with the destination's name) so the world
+  loads without freezing, on desktop or mobile, and you **arrive on the road back** the way you
+  came. Your current land is shown on the HUD **📍 location chip**.
 - **Roaming monsters & respawns:** every land has its **own monster types** that **spawn at
   fixed points** and **wander** their patch until you get close, then give chase. Fell them
   and the land **respawns** fresh ones after a short delay, up to a per-land cap — so there
@@ -527,7 +532,16 @@ tap-to-pick fallback, **drinking** a quick-slot consuming the bag stack + auto-c
 `Shop.sell` of **potions + materials** at their `ITEM_DB` value (+ the buyer adding
 stackables), the **alchemist** stock (potions + basic ingredients) vs. the
 merchant's gear-only stock, the **v12 round-trip** of the bag + quick-slots, and a
-UI smoke. On top of that, a
+UI smoke. The **environment** suite (`test/environment22.test.js`) locks in Task 22:
+the **deterministic, capped** per-zone plan + its reproducibility, the **stability
+invariant** (re-entering a zone N times keeps the count + node set constant within
+per-type caps), **time-gated regrowth** (nothing before the cadence, one node after,
+deterministic), **harvestable-after-travel** (a depleted node persists its cooldown
+and every enabled node stays registered — the phantom-node fix), the **road-edge
+trigger** (walking the road's end fires `ZoneManager.travel` to the right zone, both
+directions, and can't be skirted off the road), the **v13** per-zone-resource
+round-trip + **pre-v13 migration**, and **per-object dispose** on teardown. On top of
+that, a
 **functional** suite (`test/functional.test.js`) boots the assembled game in
 isolation and drives whole flows (start → zone travel → save/reload round-trip),
 and **Playwright** suites load the built bundle in real headless Chromium: the
@@ -823,8 +837,9 @@ Source: GitHub Actions**.
 ## Roadmap
 
 - [x] **RPG world of streamed zones** — the map is split into a hub + wild lands + boss lairs
-      (`ZONES` / `buildWorld(zone)` / `ZoneManager`), connected by **path / bridge / cave
-      portals** that load in/out behind a fade so it never freezes on desktop or mobile
+      (`ZONES` / `buildWorld(zone)` / `ZoneManager`), connected by **roads that run to the map
+      edge** — walk a road off-map (no ground-circle orbs) to stream in/out behind a fade, so it
+      never freezes on desktop or mobile (Task 22)
 - [x] **Location-based monsters** that **roam** their patch and **respawn** over time
       (`SpawnDirector`) — replacing the timed-wave model
 - [x] **Lair bosses** placed in distant lands (Crystal Caverns, Bramblewood Thicket) that
@@ -852,7 +867,7 @@ Source: GitHub Actions**.
 - [x] **Story mode**: collect coins + five relics, raise the castle, then beat the **dragon** to win
 - [x] **Structured main story**: five ordered **chapters** of **missions** (hunt / gather / reach / talk / defeat-boss / build / dragon) with a **guided objective tracker**, an **intro + ending**, and a separate pool of optional **side quests** (some repeatable) — `STORY` / `MISSIONS` / `SIDE_QUESTS` / `Story`
 - [x] **Quest-giving NPCs** with dialogue, story chains, and coin / gear / relic rewards
-- [x] **Crafting + gathering**: chop trees, mine rock/crystal, gather herbs/fibers, collect water → craft potions & gear
+- [x] **Crafting + gathering**: chop trees, mine rock/crystal, gather herbs/fibers, collect water → craft potions & gear, over a **stable, deterministic, time-gated** resource ecology — a land keeps the **same** nodes across travel, regrows new ones slowly, and caps each type per land (Task 22)
 - [x] **Monster abilities** (chaser / runner / brute / jumper / shooter / bomber) that vary by land
 - [x] **Dragon** final boss (hover / dive / fire-breath) + a Victory screen
 - [x] **Day/night cycle** + **weather** (clear / cloudy / fog / rain / storm) driving sky, sun, fog and rain
