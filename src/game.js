@@ -8825,6 +8825,8 @@ import {
       const canSave = gameStarted && !!serializeGame();
       for (const slot of SaveSlots.list()) {
         const row = document.createElement("div"); row.className = "saves-row";
+        // Stable, locale-independent test hooks for the E2E (data-slot / data-act).
+        if (row.setAttribute) { row.setAttribute("data-slot", String(slot.index)); row.setAttribute("data-used", slot.used ? "1" : "0"); }
         const info = document.createElement("div"); info.className = "saves-info";
 
         if (this._renaming === slot.index && slot.used) {
@@ -8833,6 +8835,7 @@ import {
           input.className = "saves-rename-input"; input.type = "text";
           input.maxLength = SLOT_NAME_MAX; input.value = slot.name;
           input.setAttribute("aria-label", t("saves.renameLabel"));
+          if (input.setAttribute) input.setAttribute("data-act", "rename-input");
           const commit = () => { SaveSlots.rename(slot.index, input.value); this._renaming = -1; this.renderLocal(); };
           input.addEventListener("keydown", (e) => {
             // Stop the global Escape/hotkey handler from also acting (Escape here
@@ -8843,8 +8846,8 @@ import {
           info.appendChild(input);
           row.appendChild(info);
           const acts = document.createElement("div"); acts.className = "saves-actions";
-          acts.appendChild(this._btn(t("saves.renameSave"), "primary", commit));
-          acts.appendChild(this._btn(t("pause.confirmNo"), "secondary", () => { this._renaming = -1; this.renderLocal(); }));
+          acts.appendChild(this._btn(t("saves.renameSave"), "primary", commit, false, "rename-commit"));
+          acts.appendChild(this._btn(t("pause.confirmNo"), "secondary", () => { this._renaming = -1; this.renderLocal(); }, false, "rename-cancel"));
           row.appendChild(acts);
           host.appendChild(row);
           try { input.focus(); } catch (e) {}
@@ -8852,6 +8855,7 @@ import {
         }
 
         const name = document.createElement("div"); name.className = "saves-name";
+        if (name.setAttribute) name.setAttribute("data-act", "name");
         name.textContent = slot.used ? slot.name : defaultSlotName(slot.index);
         info.appendChild(name);
         const meta = document.createElement("div"); meta.className = "saves-meta";
@@ -8861,12 +8865,12 @@ import {
 
         const acts = document.createElement("div"); acts.className = "saves-actions";
         if (slot.used) {
-          acts.appendChild(this._btn(t("saves.load"), "primary", () => SaveSlots.load(slot.index)));
-          acts.appendChild(this._btn(t("saves.overwrite"), "secondary", () => this._overwrite(slot.index, slot.name), !canSave));
-          acts.appendChild(this._btn(t("saves.rename"), "secondary", () => { this._renaming = slot.index; this.renderLocal(); }));
-          acts.appendChild(this._btn(t("saves.delete"), "danger", () => this._delete(slot.index, slot.name)));
+          acts.appendChild(this._btn(t("saves.load"), "primary", () => SaveSlots.load(slot.index), false, "load"));
+          acts.appendChild(this._btn(t("saves.overwrite"), "secondary", () => this._overwrite(slot.index, slot.name), !canSave, "overwrite"));
+          acts.appendChild(this._btn(t("saves.rename"), "secondary", () => { this._renaming = slot.index; this.renderLocal(); }, false, "rename"));
+          acts.appendChild(this._btn(t("saves.delete"), "danger", () => this._delete(slot.index, slot.name), false, "delete"));
         } else {
-          acts.appendChild(this._btn(t("saves.newSave"), "primary", () => this._newInto(slot.index), !canSave));
+          acts.appendChild(this._btn(t("saves.newSave"), "primary", () => this._newInto(slot.index), !canSave, "new"));
         }
         row.appendChild(acts);
         host.appendChild(row);
@@ -8928,10 +8932,11 @@ import {
     },
 
     // ---- internals ----
-    _btn(label, kind, fn, disabled) {
+    _btn(label, kind, fn, disabled, act) {
       const b = document.createElement("button");
       b.className = "saves-btn" + (kind === "primary" ? " primary" : kind === "danger" ? " danger" : " secondary");
       b.textContent = label;
+      if (act && b.setAttribute) b.setAttribute("data-act", act);   // stable E2E hook
       if (disabled) b.disabled = true;
       else b.addEventListener("click", fn);
       return b;
