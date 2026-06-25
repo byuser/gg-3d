@@ -1597,13 +1597,81 @@ no‑build‑step / no‑external‑dependency rules.
 
 ---
 
-## 6. Run prompt
+## 6. Run prompts
 
-Paste this to start a run. Replace `<N>` with the task number, or write `next`.
+There are two ways to start work — both end in a release-ready **merge to
+`master`**:
+
+- **Orchestrated batch (§ 6.1) — recommended for several tasks.** A
+  **master/orchestrator agent** turns a short request like *"make 3 next tasks"*
+  or *"make tasks 16, 18 and 20"* into a **strictly sequential** run: it dispatches
+  **one isolated subagent per task** (each with its **own fresh context window**),
+  **waits** for each to finish **and merge to `master`**, then starts the next.
+  See `CLAUDE.md` → *Multi-agent orchestration*, the `.claude/agents/task-runner.md`
+  agent, and the `/make-tasks` command.
+- **Single task (§ 6.2).** The per-task prompt that one subagent — or you,
+  directly — runs to take exactly one task end-to-end.
+
+### 6.1 Orchestrated batch — "make N next tasks" / "make tasks A, B, C"
+
+Paste this **once** to put the master agent in orchestrator mode; afterwards just
+tell it *"make 3 next tasks"*, *"make tasks 16, 18 and 20"*, or *"next"*. (Or run
+the `/make-tasks` command with the same shorthand as its argument.)
+
+```text
+Act as the ORCHESTRATOR (master agent) for "Good Game 3D" — a Babylon.js browser
+action-RPG in this repo, shipped to GitHub Pages. You COORDINATE; you do NOT write
+game code yourself. You turn my short request into a strictly sequential,
+ONE-TASK-PER-SUBAGENT run.
+
+HOW TO READ MY REQUEST:
+- "make N next tasks"      → the next N tasks whose status is [ ] (not started),
+  taken top-to-bottom from TODO.md § 5 "Recommended order".
+- "make tasks A, B and C"  → exactly those task numbers, ordered to respect § 5
+  and each task's "Depends on"; skip any already [x] done and tell me which.
+- "next" / "the next task" → just the first [ ] task.
+First read CLAUDE.md and TODO.md (§ 2 Definition of Done, § 5 order, the tasks).
+Resolve the concrete ordered task list, PRINT it for me, and check dependencies:
+if a task's "Depends on" isn't satisfied by a shipped or earlier-in-the-batch
+task, reorder if you safely can, otherwise STOP and tell me.
+
+RUN THE BATCH — for each task, IN ORDER, ONE AT A TIME:
+1. Spawn ONE subagent (the `task-runner` agent) to do EXACTLY that task. It runs
+   in its OWN fresh, isolated context window — it CANNOT see this conversation —
+   so its prompt must tell it to read CLAUDE.md + TODO.md in full and do Task <N>
+   only, end-to-end, to the § 2 Definition of Done, on its own branch
+   `claude/task-<N>-<slug>` cut from the latest master. Pass the task number;
+   pass nothing that belongs to another task.
+2. WAIT for that subagent to FULLY finish. "Finished" = it implemented the task
+   with new tests, kept the WHOLE pipeline green (lint + typecheck + test + build
+   + e2e), ticked the task's checkbox in TODO.md, added a CHANGELOG.md entry,
+   COMMITTED, then MERGED its branch into master (fast-forward — if master moved,
+   rebase the branch onto master first) and PUSHED master, and confirmed the CI +
+   Pages deploy for that commit are green. The MERGE-TO-MASTER after each task is
+   MANDATORY — every completed task lands on master before the next one starts.
+3. Only AFTER it returns success, sync to the merged master (so the next subagent
+   branches from it — later tasks build on earlier ones), then start the next.
+4. If a subagent FAILS, can't get the pipeline green, or hits a blocking
+   dependency: STOP the batch immediately, report exactly which task and why, and
+   do NOT start later tasks (they may depend on it). Never merge a red pipeline.
+
+Keep YOUR (orchestrator) context lean: don't read large source files yourself —
+rely on each subagent's returned summary. Run subagents STRICTLY sequentially
+(never two at once); each task's merge must land before the next begins. When the
+batch ends, give me a roll-up: each task's shipped status, its test/build/deploy
+result, and anything skipped or blocked.
+```
+
+### 6.2 Single-task run prompt
+
+Paste this to do ONE task (or let the § 6.1 orchestrator spawn the `task-runner`
+agent with it). Replace `<N>` with the task number, or write `next`.
 
 ```text
 Act as a senior gameplay engineer on "Good Game 3D" — a Babylon.js browser
-action-RPG in this repo, shipped to GitHub Pages.
+action-RPG in this repo, shipped to GitHub Pages. (You may be spawned by the
+§ 6.1 orchestrator as the `task-runner` agent, running in your own fresh,
+isolated context — so do not assume any prior conversation; read the repo.)
 
 FIRST, read CLAUDE.md and TODO.md in full — including the task you're about to do
 AND its "Depends on" and any "Note on Golden Rules". Some tasks (e.g. Task 9's
@@ -1629,10 +1697,10 @@ Rules" overrides a specific one:
   unavoidable hitches behind the existing zone-transition fade veil).
 - Keep ALL existing tests green AND add new tests for what you build. Run the
   repo's CURRENT verification pipeline — whatever exists NOW: today that's
-  `node -c js/game.js` + `node test/harness.js`; once a task has added npm scripts
-  / a build / Vitest / Playwright (Task 9), run those too and match exactly what
-  CI runs. Feature-detect every browser-only API (Babylon / DOM / Web Audio /
-  localStorage / PBR / particles / external SDKs) so the headless tests still run.
+  `npm run lint && npm run typecheck && npm test && npm run build &&
+  npm run test:e2e` (match exactly what CI runs). Feature-detect every browser-only
+  API (Babylon / DOM / Web Audio / localStorage / PBR / particles / external SDKs)
+  so the headless tests still run.
 - All randomness via the seeded rng(); any new persistent state must serialize +
   restore in serializeGame/applySave (bump SAVE_VERSION on a schema change and
   keep older saves loading) and round-trip in a test.
@@ -1640,20 +1708,22 @@ Rules" overrides a specific one:
   or save/load.
 
 Workflow:
-1. Plan briefly, then implement on the branch NAMED IN MY RUN INSTRUCTIONS (create
-   it if missing); commit in logical chunks using this repo's commit-trailer
+1. Plan briefly, then implement on your run branch — `claude/task-<N>-<slug>` (the
+   orchestrator names it; if running solo and I didn't name one, create it from the
+   latest master). Commit in logical chunks using this repo's commit-trailer
    convention (Co-Authored-By + Claude-Session).
 2. Verify locally with the repo's current verify commands (see CLAUDE.md "Verify"
    / package.json scripts / the CI workflow) until all green, plus a tiny
    feature-specific smoke check that exercises the new code path.
-3. Update index.html/css and README.md as needed; bump the `?v=` cache-busters
-   while they still exist (a content-hashed build, once added, replaces them).
-4. Merge to `master` (fast-forward) and push with retry/backoff. Then confirm BOTH
-   the CI run AND the Pages deploy run for your commit finished
-   conclusion=success — fix anything until both are green. Do not open a pull
-   request unless I ask.
+3. Update index.html/css and README.md as needed (content hashing handles
+   cache-busting — there is no `?v=` to bump).
+4. MERGE TO `master` after the task is done and green: rebase your branch onto the
+   latest master if master moved, then fast-forward `master` and push with
+   retry/backoff. Confirm BOTH the CI run AND the Pages deploy for your commit
+   finished conclusion=success — fix anything until both are green. Do not open a
+   pull request unless I ask.
 5. Tick the task's checkbox in TODO.md (add the date + a one-line note) and add a
-   release entry to CHANGELOG.md; commit + push.
+   release entry to CHANGELOG.md; commit + push (these land on master in step 4).
 6. Report: what shipped, the test/build results, and the CI + deploy status.
 
 If a decision is genuinely mine and cheap to confirm, pick the sensible default

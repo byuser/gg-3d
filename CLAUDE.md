@@ -126,3 +126,38 @@ is encouraged.
 > Release-ready means a player can load the Pages URL on desktop **and** mobile
 > and use the feature with no errors, no console exceptions, no freezes, and
 > saved progress survives reload. "Works only headless" is **not** done.
+
+## Multi-agent orchestration (running several backlog tasks)
+
+This repo's backlog is built for **one task per agent run**. To run **several**
+tasks well, use the **orchestrator pattern** — it keeps each task's work in its
+**own isolated context window** (no cross-talk, no context bloat) and lands each
+one on `master` before the next begins.
+
+**When I say "make N next tasks", "make tasks A, B and C", or "next", act as the
+ORCHESTRATOR** (do not write game code yourself):
+
+1. **Resolve** the concrete, ordered task list from my shorthand using
+   `TODO.md` § 5 *Recommended order* and each task's *Depends on*
+   (`"make 3 next tasks"` = the next three `[ ]` tasks; `"make tasks 16, 18 and
+   20"` = exactly those, dependency-ordered, skipping any `[x]` done). Print the
+   resolved list and flag unmet dependencies before starting.
+2. For each task, **in order, one at a time**, spawn **one** subagent — the
+   **`task-runner`** agent (`.claude/agents/task-runner.md`) — via the Agent tool,
+   telling it to read `CLAUDE.md` + `TODO.md` and do **exactly that task** to the
+   § 2 Definition of Done on its own branch `claude/task-<N>-<slug>` cut from the
+   latest `master`. Each subagent has a **fresh, isolated context** and cannot see
+   the orchestrator chat, so put everything it needs in the prompt.
+3. **Wait** for that subagent to fully finish — pipeline green, tests added,
+   checkbox ticked, `CHANGELOG.md` updated, **branch merged to `master` and
+   pushed**, CI + Pages deploy green. **Merging to `master` after every task is
+   mandatory.** Only then sync to the merged `master` and start the next task.
+4. **Stop on failure**: if any task can't be completed/verified or hits a blocking
+   dependency, halt the batch, report which task and why, and don't start later
+   tasks (they may depend on it). Never merge a red pipeline.
+
+Run subagents **strictly sequentially** (never two at once) so dependent tasks
+build on each other's merged work. The full pasteable prompts live in `TODO.md`
+§ 6 (§ 6.1 orchestrator, § 6.2 single task); the `/make-tasks` command wraps § 6.1.
+For a **deterministic** batch (the loop lives in code, not model judgement), a
+Workflow script that `await`s one `task-runner` agent per task is also acceptable.
