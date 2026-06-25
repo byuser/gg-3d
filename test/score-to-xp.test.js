@@ -185,13 +185,13 @@ describe("Task 19 — save migration + round-trip", () => {
     expect(T.player.progress.xp).toBeGreaterThanOrEqual(0);
   });
 
-  it("the v11 schema round-trips relicsFound + the XP progression", () => {
+  it("the current schema round-trips relicsFound + the XP progression (score-free)", () => {
     const p = resetProgress();
     T.Skills.gainXp(p, T.totalXpToReach(4));
     T.state.relicsFound = 5;
     const save = T.serializeGame();
     expect(save.v).toBe(T.SAVE_VERSION);
-    expect(save.v).toBe(11);
+    expect(save.v).toBeGreaterThanOrEqual(11); // ≥ v11 (Task 21 bumped to v12)
     expect(save.score).toBeUndefined();
     expect(save.relicsFound).toBe(5);
     T.state.relicsFound = 0;

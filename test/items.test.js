@@ -234,20 +234,20 @@ describe("Task 12 — visible worn gear", () => {
 });
 
 describe("Task 12 — tabbed inventory (filter / sort / consume)", () => {
-  it("switches tabs and consumes a potion from the potions tab", () => {
+  it("switches tabs and consumes a potion from the potions tab (unified bag)", () => {
     const p = T.player;
     T.potionAdd(p, "minor_potion");
-    const before = p.potions.reduce((n, s) => n + (s ? s.count : 0), 0);
-    p.health = 1; // so the heal actually applies (and the potion is spent)
+    const before = T.bagCount(p, "minor_potion");
+    p.health = 1; p.maxHealth = 100; // so the heal actually applies (and the potion is spent)
     T.Inventory.openInv();
     expect(() => {
       T.Inventory.setTab("materials");
       T.Inventory.setTab("gear");
       T.Inventory.setTab("potions");
     }).not.toThrow();
-    T.Inventory.drink(p.potions.findIndex((s) => s && s.id === "minor_potion"));
-    const after = p.potions.reduce((n, s) => n + (s ? s.count : 0), 0);
-    expect(after).toBe(before - 1);
+    // Drink one straight from the bag stack (the potions tab's "Drink one").
+    T.Inventory.drinkBag("minor_potion");
+    expect(T.bagCount(p, "minor_potion")).toBe(before - 1);
     T.Inventory.close();
   });
 

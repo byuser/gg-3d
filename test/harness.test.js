@@ -227,7 +227,10 @@ pl.health = 33;
 // Progression under the RPG model: gathered materials, a cleared lair, and the
 // lifetime kill counter (individual roaming monsters are NOT saved — they
 // regenerate from each zone's spawn table on load).
-pl.materials.wood = 5; st.bossesCleared = { caverns: true }; st.totalKills = 17;
+// Materials now live in the UNIFIED bag (Task 21) as stackable items. Start the
+// bag with just the 2 gear pieces, then add a wood stack → 3 bag entries.
+pl.inventory = [T.makeItem("magic_wand"), T.makeItem("iron_dagger")];
+T.bagAdd(pl, "wood", 5); st.bossesCleared = { caverns: true }; st.totalKills = 17;
 
 const save = T.serializeGame();
 ok(save && save.v === T.SAVE_VERSION, "serializeGame produced a versioned save");
@@ -236,16 +239,16 @@ ok(save.zone === st.zoneId, "current zone captured");
 ok(save.bossesCleared && save.bossesCleared.caverns === true, "cleared lair captured");
 ok(save.score === undefined, "legacy score field is gone from the save (Task 19)");
 ok(save.relicsFound === 6 && save.money === 99, "relics-found + money captured");
-ok(save.player.inventory.length === 2, "bag captured");
+ok(save.player.inventory.length === 3, "unified bag captured (2 gear + 1 material stack)");
 ok(save.player.equipment.hand1.id === "magic_wand" && save.player.equipment.breastplate.id === "iron_plate", "equipment captured");
-ok(save.player.materials.wood === 5, "gathered materials captured");
+ok(save.player.inventory.some((e) => e.id === "wood" && e.count === 5), "gathered materials captured as a bag stack");
 ok(save.totalKills === 17, "lifetime kills captured");
 ok(!T.validateSave({ v: 999 }), "validation rejects a foreign/old file");
 
 // Trash the live state, then restore from the save.
 st.relicsFound = 0; st.coins = 0;
 for (const slot of T.EQUIP_SLOTS) pl.equipment[slot] = null;
-pl.inventory = []; pl.materials.wood = 0; st.bossesCleared = {}; st.totalKills = 0;
+pl.inventory = []; st.bossesCleared = {}; st.totalKills = 0;
 pl.health = 1;
 
 T.applySave(save);
@@ -253,10 +256,10 @@ ok(st.relicsFound === 6 && st.coins === 99, "relics-found + money restored");
 ok(pl.equipment.hand1 && pl.equipment.hand1.id === "magic_wand", "equipped weapon restored");
 ok(pl.equipment.breastplate && pl.equipment.breastplate.id === "iron_plate", "equipped armour restored");
 ok(pl.equipment.ring1 && pl.equipment.ring1.id === "ring_power", "equipped accessory restored");
-ok(pl.inventory.length === 2, "bag restored to the same count");
+ok(pl.inventory.length === 3, "unified bag restored to the same count (2 gear + 1 stack)");
 ok(pl.maxHealth > 100, "stats recomputed from the restored gear");
 ok(pl.weapon && pl.weapon.ranged, "active weapon rebuilt from equipped wand");
-ok(pl.materials.wood === 5, "gathered materials restored");
+ok(T.bagCount(pl, "wood") === 5, "gathered materials restored to the bag");
 ok(st.bossesCleared.caverns === true, "cleared lair restored");
 ok(st.totalKills === 17, "lifetime kills restored");
 ok(st.zoneId === save.zone, "zone restored");
@@ -303,28 +306,33 @@ try {
 } catch (e) { sfxThrew = true; }
 ok(!sfxThrew, "sfx system no-ops cleanly for every cue without Web Audio");
 
-console.log("\n[13] potion belt — buy, stack, use (heal + timed buff)");
+console.log("\n[13] potions — unified bag, quick-slot assignment, use (heal + buff)");
 const pp = T.player;
-pp.potions = [null, null, null];
+pp.inventory = []; pp.potionSlots = [null, null, null];
 pp.buffs = [];
 ok(T.POTION_STOCK.length >= 3 && T.POTION_STOCK.every((id) => T.getDef(id).type === "potion"), `${T.POTION_STOCK.length} potions stocked`);
-ok(T.potionAdd(pp, "minor_potion") && T.potionAdd(pp, "minor_potion"), "potions stack into one belt slot");
-ok(pp.potions[0] && pp.potions[0].count === 2, "two minor potions stacked (count 2)");
+ok(T.potionAdd(pp, "minor_potion") && T.potionAdd(pp, "minor_potion"), "potions stack into one bag slot");
+ok(T.bagCount(pp, "minor_potion") === 2 && pp.inventory.filter((i) => i.id === "minor_potion").length === 1, "two minor potions in one stack (count 2)");
 T.potionAdd(pp, "health_potion"); T.potionAdd(pp, "greater_potion");
-ok(pp.potions[1] && pp.potions[2], "different potions take separate slots");
-ok(!T.potionAdd(pp, "elixir_might"), "a 4th kind is rejected — belt holds 3 kinds");
-// Using a health potion heals and decrements the stack.
+ok(T.bagCount(pp, "health_potion") === 1 && T.bagCount(pp, "greater_potion") === 1, "different potions occupy their own bag stacks");
+ok(T.potionAdd(pp, "elixir_might") && T.bagCount(pp, "elixir_might") === 1, "a 4th potion kind is accepted (no 3-kind belt limit anymore)");
+// Assign minor_potion to quick-slot 0 and drink it: heals + consumes the bag stack.
+ok(T.assignPotionSlot(pp, 0, "minor_potion") && pp.potionSlots[0] === "minor_potion", "potion drag-assigned to a quick-slot");
 pp.health = 10; pp.maxHealth = 100;
-const before = pp.potions[0].count;
-ok(T.potionUse(pp, 0) && pp.health === 40 && pp.potions[0].count === before - 1, "health potion heals +30 and decrements");
-// Empty a stack and the slot frees up.
+const before = T.bagCount(pp, "minor_potion");
+ok(T.potionUse(pp, 0) && pp.health === 40 && T.bagCount(pp, "minor_potion") === before - 1, "drinking a quick-slot heals +30 and consumes from the bag");
+// Empty the stack and the quick-slot auto-clears.
 T.potionUse(pp, 0);
-ok(pp.potions[0] === null, "emptied potion stack clears its slot");
+ok(T.bagCount(pp, "minor_potion") === 0 && pp.potionSlots[0] === null, "emptied bag stack auto-clears its quick-slot");
 // A buff elixir applies a timed stat boost folded into recomputeStats.
-pp.potions = [{ id: "elixir_might", count: 1 }, null, null];
+pp.inventory = []; T.bagAdd(pp, "elixir_might", 1);
+pp.potionSlots = ["elixir_might", null, null];
 const dmgBefore = pp.weapon.damage;
 ok(T.potionUse(pp, 0), "elixir consumed");
 ok(pp.buffs.length === 1 && pp.weapon.damage > dmgBefore, "Elixir of Might raised weapon damage via a timed buff");
+// Drinking straight from a bag stack (no quick-slot) works too.
+pp.buffs = []; T.recomputeStats(pp); pp.inventory = []; T.bagAdd(pp, "health_potion", 1); pp.health = 10;
+ok(T.drinkPotionById(pp, "health_potion") && pp.health === 75 && T.bagCount(pp, "health_potion") === 0, "drinking a potion directly from the bag heals + consumes it");
 
 console.log("\n[14] blacksmith enhancement");
 const bp = T.player;
@@ -391,32 +399,35 @@ ok(T.state.coins > aCoinBefore, "artifact pickup paid out coins");
 const aXpAfter = T.totalXpToReach(ap.progress.level) + ap.progress.xp;
 ok(aXpAfter === aXpBefore + T.XP_PER_ARTIFACT, `artifact pickup awards +${T.XP_PER_ARTIFACT} XP (XP replaced score, Task 19)`);
 
-console.log("\n[18] save/load round-trips enhancement levels + potion belt");
+console.log("\n[18] save/load round-trips enhancement levels + unified bag + quick-slots");
 const sp = T.player;
 for (const slot of T.EQUIP_SLOTS) sp.equipment[slot] = null;
 const lvlSword = T.makeItem("iron_sword"); lvlSword.level = 2;
 sp.equipment.hand1 = lvlSword;
 sp.inventory = [Object.assign(T.makeItem("excalibur"), { level: 3 })];
-sp.potions = [{ id: "minor_potion", count: 4 }, { id: "health_potion", count: 2 }, null];
+T.bagAdd(sp, "minor_potion", 4); T.bagAdd(sp, "health_potion", 2);
+sp.potionSlots = ["minor_potion", "health_potion", null];
 sp.buffs = [];
 T.recomputeStats(sp);
 const save2 = T.serializeGame();
 ok(save2.player.equipment.hand1.lvl === 2, "equipped enhancement level serialized");
-ok(save2.player.inventory[0].lvl === 3, "bag enhancement level serialized");
-ok(save2.player.potions[0].count === 4 && save2.player.potions[1].id === "health_potion", "potion belt serialized");
+ok(save2.player.inventory.find((e) => e.id === "excalibur").lvl === 3, "bag enhancement level serialized");
+ok(save2.player.inventory.find((e) => e.id === "minor_potion").count === 4, "bag potion stack serialized");
+ok(save2.player.potionSlots[0] === "minor_potion" && save2.player.potionSlots[1] === "health_potion", "quick-slot assignment serialized");
 // Trash + restore.
 for (const slot of T.EQUIP_SLOTS) sp.equipment[slot] = null;
-sp.inventory = []; sp.potions = [null, null, null];
+sp.inventory = []; sp.potionSlots = [null, null, null];
 T.applySave(save2);
 ok(sp.equipment.hand1 && sp.equipment.hand1.level === 2, "equipped enhancement level restored");
-ok(sp.inventory[0] && sp.inventory[0].level === 3, "bag enhancement level restored");
-ok(sp.potions[0] && sp.potions[0].count === 4 && sp.potions[1] && sp.potions[1].id === "health_potion", "potion belt restored");
+ok(sp.inventory.find((i) => i.id === "excalibur").level === 3, "bag enhancement level restored");
+ok(T.bagCount(sp, "minor_potion") === 4 && T.bagCount(sp, "health_potion") === 2, "bag potion stacks restored");
+ok(sp.potionSlots[0] === "minor_potion" && sp.potionSlots[1] === "health_potion", "quick-slot assignment restored");
 // A legacy v2 save (plain string ids, no potions) still loads.
 const legacy = T.serializeGame();
 legacy.v = 2;
 legacy.player.inventory = ["iron_sword"];
 legacy.player.equipment = { helmet: null, breastplate: null, boots: null, necklace: null, ring1: null, ring2: null, hand1: "magic_wand", hand2: null };
-delete legacy.player.potions;
+delete legacy.player.potionSlots;
 ok(T.validateSave(legacy), "a legacy v2 save still validates");
 T.applySave(legacy);
 ok(sp.equipment.hand1 && sp.equipment.hand1.id === "magic_wand", "legacy string-id equipment restored");
@@ -451,27 +462,25 @@ T.state.bolts.push(shoot(bombM, 50));
 step(3);
 ok(T.player.health < 100, "bomber sweet detonated and hurt the nearby player");
 
-console.log("\n[20] gathering, materials & crafting");
+console.log("\n[20] gathering, materials & crafting (unified bag)");
 const cp = T.player;
-for (const id of T.MATERIAL_IDS) cp.materials[id] = 0;
+cp.inventory = []; cp.potionSlots = [null, null, null];
 T.addMaterial(cp, "herb", 5); T.addMaterial(cp, "water", 3);
-ok(cp.materials.herb === 5 && cp.materials.water === 3, "gathered materials accumulate in the pouch");
-ok(T.hasMaterials(cp, { herb: 2, water: 1 }) && !T.hasMaterials(cp, { crystal: 1 }), "material sufficiency check works");
-cp.potions = [null, null, null];
+ok(T.bagCount(cp, "herb") === 5 && T.bagCount(cp, "water") === 3, "gathered materials accumulate as bag stacks");
+ok(T.hasMaterials(cp, { herb: 2, water: 1 }) && !T.hasMaterials(cp, { crystal: 1 }), "material sufficiency check reads the bag");
 const potRecipe = T.CRAFT_RECIPES.find((r) => r.out === "minor_potion");
-const herb0 = cp.materials.herb;
+const herb0 = T.bagCount(cp, "herb");
 ok(T.craftRecipe(cp, potRecipe), "crafted a minor potion from herb + water");
-ok(cp.materials.herb === herb0 - potRecipe.mats.herb, "crafting consumed the materials");
-ok(cp.potions.some((s) => s && s.id === "minor_potion"), "crafted potion landed on the belt");
-for (const id of T.MATERIAL_IDS) cp.materials[id] = 99;
-cp.inventory = [];
+ok(T.bagCount(cp, "herb") === herb0 - potRecipe.mats.herb, "crafting consumed the materials from the bag");
+ok(T.bagCount(cp, "minor_potion") > 0, "crafted potion landed in the bag");
+cp.inventory = []; for (const id of T.MATERIAL_IDS) T.bagAdd(cp, id, 20);
 const gearRecipe = T.CRAFT_RECIPES.find((r) => T.getDef(r.out).type !== "potion");
 ok(T.craftRecipe(cp, gearRecipe), "crafted a gear item from materials");
-ok(cp.inventory.some((it) => it.id === gearRecipe.out), "crafted gear landed in the bag");
-for (const id of T.MATERIAL_IDS) cp.materials[id] = 0;
+ok(cp.inventory.some((it) => it.id === gearRecipe.out && it.count == null), "crafted gear landed in the bag as an instance");
+cp.inventory = [];
 const treeNode = new T.ResourceNode(scene, world.shadow, T.interaction, new Vec3(20, 0, 20), "tree", cp, T.state);
 treeNode.harvest();
-ok(cp.materials.wood > 0, "harvesting a tree node yielded wood");
+ok(T.bagCount(cp, "wood") > 0, "harvesting a tree node yielded wood into the bag");
 ok(treeNode.respawn > 0 && treeNode.it.enabled === false, "harvested node depletes + enters respawn cooldown");
 
 console.log("\n[21] quests — every objective type: accept, progress, turn in, reward");
@@ -485,7 +494,7 @@ function resetStory() {
   T.state.bossesCleared = {}; T.state.won = false;
   if (T.state.castle) T.state.castle.built = [];
   T.state.castleBuilt = [];
-  for (const id of T.MATERIAL_IDS) T.player.materials[id] = 0;
+  for (const id of T.MATERIAL_IDS) T.bagSpend(T.player, id, 9999);
 }
 resetStory();
 const def = (id) => T.QUEST_BY_ID[id];
@@ -512,11 +521,11 @@ ok(Q.isComplete(def("m_foundation")), "build objective reads the raised castle p
 ok(Q.turnIn("m_foundation"), "build mission turned in");
 // gather (consumes mats, awards a relic)
 ok(Q.accept("m_stone"), "accepted a gather mission");
-T.player.materials.stone = 8; Q.onGather();
-ok(Q.isComplete(def("m_stone")), "gather objective reads the player's materials");
-const stone0 = T.player.materials.stone, relW = T.player.relics.length;
+T.bagSpend(T.player, "stone", 9999); T.bagAdd(T.player, "stone", 8); Q.onGather();
+ok(Q.isComplete(def("m_stone")), "gather objective reads the player's bag materials");
+const stone0 = T.bagCount(T.player, "stone"), relW = T.player.relics.length;
 Q.turnIn("m_stone");
-ok(T.player.materials.stone === stone0 - 8, "gather turn-in consumed the required materials");
+ok(T.bagCount(T.player, "stone") === stone0 - 8, "gather turn-in consumed the required materials from the bag");
 ok(T.player.relics.includes("relic_walls") && T.player.relics.length === relW + 1, "gather mission awarded a relic");
 // defeat_boss (reads cleared lairs)
 ok(Q.accept("m_caverns"), "accepted a defeat-boss mission");
@@ -560,8 +569,7 @@ ok(!bAlive, "the burst expires (self-cleans, never leaks)");
 
 console.log("\n[24] save/load round-trips the adventure state");
 const ap2 = T.player;
-for (const id of T.MATERIAL_IDS) ap2.materials[id] = 0;
-ap2.materials.wood = 7; ap2.materials.crystal = 2;
+ap2.inventory = []; T.bagAdd(ap2, "wood", 7); T.bagAdd(ap2, "crystal", 2);
 ap2.relics = ["relic_walls"];
 T.Quests.active = ["m_water"]; T.Quests.completed = ["m_cull", "m_cornerstone", "m_foundation"];
 T.Quests.acceptKills = { m_water: 3 }; T.Quests.reached = { ruins: true }; T.Quests.talked = {};
@@ -569,15 +577,15 @@ T.state.totalKills = 12;
 T.DayNight.set(0.42); T.Weather.setState("fog");
 if (T.state.castle) T.state.castle.built = ["foundation"];
 const advSave = T.serializeGame();
-ok(advSave.player.materials.wood === 7 && advSave.player.relics[0] === "relic_walls", "materials + relics serialized");
+ok(advSave.player.inventory.find((e) => e.id === "wood").count === 7 && advSave.player.relics[0] === "relic_walls", "bag materials + relics serialized");
 ok(advSave.quests.active[0] === "m_water" && advSave.quests.completed.includes("m_foundation"), "quest state serialized");
 ok(advSave.quests.reached && advSave.quests.reached.ruins === true, "reach/talk objective sets serialized");
 ok(advSave.castle[0] === "foundation" && advSave.weather === "fog", "castle progress + weather serialized");
 ok(advSave.totalKills === 12, "lifetime kill counter serialized");
-for (const id of T.MATERIAL_IDS) ap2.materials[id] = 0;
+ap2.inventory = [];
 ap2.relics = []; T.Quests.active = []; T.Quests.completed = []; T.Quests.reached = {};
 T.applySave(advSave);
-ok(ap2.materials.wood === 7 && ap2.relics.includes("relic_walls"), "materials + relics restored");
+ok(T.bagCount(ap2, "wood") === 7 && ap2.relics.includes("relic_walls"), "bag materials + relics restored");
 ok(T.Quests.active.includes("m_water") && T.Quests.isDone("m_foundation"), "quest state restored");
 ok(T.Quests.reached.ruins === true, "reach objective set restored");
 ok(T.state.castle && T.state.castle.isBuilt("foundation"), "castle build state restored");
@@ -668,7 +676,7 @@ console.log("\n[27] main story campaign — ordering, guidance, side quests, fin
 function satisfy(m) {
   const o = m.obj;
   if (o.type === "hunt") { T.state.totalKills += o.count; T.Quests.onKill(); }
-  else if (o.type === "gather") { T.player.materials[o.target] = (T.player.materials[o.target] || 0) + o.count; T.Quests.onGather(); }
+  else if (o.type === "gather") { T.bagAdd(T.player, o.target, o.count); T.Quests.onGather(); }
   else if (o.type === "reach") T.Quests.onReach(o.target);
   else if (o.type === "talk") T.Quests.onTalk(o.target);
   else if (o.type === "defeat_boss") { T.state.bossesCleared[o.target] = true; T.Quests.onBossCleared(o.target); }
@@ -734,7 +742,7 @@ ok(!Q.isDone("m_cull") && Story.currentMissionId() === curBefore, "the main line
 ok(T.QUEST_BY_ID["sq_pests"].repeatable && !Q.isDone("sq_pests"), "a repeatable bounty isn't permanently completed");
 ok(Story.sideTurnIns["sq_pests"] === 1, "repeatable turn-ins are tallied");
 ok(Story.offerSide("mayor") && Story.offerSide("mayor").id === "sq_pests", "a repeatable bounty can be taken again");
-Q.accept("sq_supplies"); T.player.materials.herb = 8; Q.onGather(); Q.turnIn("sq_supplies");
+Q.accept("sq_supplies"); T.bagSpend(T.player, "herb", 9999); T.bagAdd(T.player, "herb", 8); Q.onGather(); Q.turnIn("sq_supplies");
 ok(Q.isDone("sq_supplies"), "a one-shot side quest is marked done");
 ok(!Story.offerSide("herbalist"), "a one-shot side quest isn't offered again");
 

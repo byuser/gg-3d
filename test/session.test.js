@@ -178,7 +178,8 @@ describe("Session snapshot — auto-persist + resume round-trip", () => {
   it("flush writes the live run to first-party storage", () => {
     lsStub.clear();
     T.state.coins = 321;
-    T.player.materials.wood = 9;
+    T.player.inventory = [];
+    T.bagAdd(T.player, "wood", 9); // materials are unified bag items now (Task 21)
     expect(S.flush()).toBe(true);
     const raw = lsStub.getItem(T.SESSION_KEY);
     expect(typeof raw).toBe("string");
@@ -190,7 +191,8 @@ describe("Session snapshot — auto-persist + resume round-trip", () => {
 
   it("readSnapshot returns a valid save that restores the run (parity with file/cloud)", () => {
     T.state.coins = 777;
-    T.player.materials.stone = 4;
+    T.player.inventory = [];
+    T.bagAdd(T.player, "stone", 4);
     S.flush();
     const snap = S.readSnapshot();
     expect(snap).toBeTruthy();
@@ -203,11 +205,11 @@ describe("Session snapshot — auto-persist + resume round-trip", () => {
 
     // Drift the live state away, then restore from the auto-persisted snapshot.
     T.state.coins = 0;
-    T.player.materials.stone = 0;
+    T.player.inventory = [];
     T.zoneManager._swap(T.state.zoneId, "shore", T.ZONE_BY_ID.shore);
     T.applySave(snap);
     expect(T.state.coins).toBe(777);
-    expect(T.player.materials.stone).toBe(4);
+    expect(T.bagCount(T.player, "stone")).toBe(4);
     step(3);
     expect(isFinite(T.player.position.x)).toBe(true);
   });

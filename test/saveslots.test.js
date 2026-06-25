@@ -183,16 +183,17 @@ describe("Task 18 — SaveSlots controller (persisted; round-trips per slot)", (
 
   it("each slot round-trips through applySave (full payload preserved)", () => {
     T.state.coins = 4242;
-    T.player.materials.wood = 17;
+    T.player.inventory = [];
+    T.bagAdd(T.player, "wood", 17); // materials live in the unified bag now (Task 21)
     SS.saveTo(1, "Checkpoint");
     // Drift live state, then load slot 1's payload back in.
     T.state.coins = 0;
-    T.player.materials.wood = 0;
+    T.player.inventory = [];
     const payload = SS.payloadOf(1);
     expect(T.validateSave(payload)).toBe(true);
     T.applySave(payload);
     expect(T.state.coins).toBe(4242);
-    expect(T.player.materials.wood).toBe(17);
+    expect(T.bagCount(T.player, "wood")).toBe(17);
   });
 
   it("rename + delete mutate the persisted store", () => {

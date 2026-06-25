@@ -42,7 +42,8 @@ describe("functional flows (isolated boot of the assembled game)", () => {
     // 19 — XP/level is the run's progression now, so we round-trip that.)
     T.state.relicsFound = 4;
     T.state.coins = 56;
-    T.player.materials.wood = 7;
+    T.player.inventory = [];
+    T.bagAdd(T.player, "wood", 7); // materials are unified bag items now (Task 21)
     T.Skills.gainXp(T.player, T.totalXpToReach(3)); // reach level 3
     const lvl = T.player.progress.level;
     const save = T.serializeGame();
@@ -55,7 +56,7 @@ describe("functional flows (isolated boot of the assembled game)", () => {
     expect(T.state.zoneId).toBe("shore");
     T.state.relicsFound = 0;
     T.state.coins = 0;
-    T.player.materials.wood = 0;
+    T.player.inventory = [];
 
     // Reload: the run must come back exactly as saved.
     T.applySave(save);
@@ -64,7 +65,7 @@ describe("functional flows (isolated boot of the assembled game)", () => {
     expect(T.player.progress.level).toBe(lvl);
     expect(T.state.relicsFound).toBe(4);
     expect(T.state.coins).toBe(56);
-    expect(T.player.materials.wood).toBe(7);
+    expect(T.bagCount(T.player, "wood")).toBe(7);
 
     // The world keeps running without throwing after a load.
     step(5);

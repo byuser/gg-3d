@@ -115,6 +115,24 @@ export default defineConfig({
       testMatch: /saves\.spec\.js/,
       use: s24Landscape,
     },
+    // Unified inventory (Task 21): the potions tab quick-slot drag-assignment +
+    // the removed HUD materials strip, run at desktop AND the S24 Ultra portrait +
+    // landscape profiles so the larger grid + drag targets work on the phone too.
+    {
+      name: "inventory-desktop",
+      testMatch: /inventory\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "inventory-s24-portrait",
+      testMatch: /inventory\.spec\.js/,
+      use: s24Portrait,
+    },
+    {
+      name: "inventory-s24-landscape",
+      testMatch: /inventory\.spec\.js/,
+      use: s24Landscape,
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",

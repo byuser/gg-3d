@@ -231,15 +231,17 @@ describe("Task 14 — skill fusion (pure + deterministic)", () => {
     const p = resetProgress();
     T.Skills.learn(p, "chain_spark", true);
     T.state.coins = 5000;
-    p.materials.crystal = 50;
+    // Crystals are bag items now (Task 21); the fusion spends from the bag.
+    p.inventory = [];
+    T.bagAdd(p, "crystal", 50);
     const coins0 = T.state.coins,
-      crys0 = p.materials.crystal;
+      crys0 = T.bagCount(p, "crystal");
     const made = T.Skills.fuse(T.state, p, ["firebolt", "chain_spark"]);
     expect(made).toBeTruthy();
     expect(p.progress.owned).toContain(made.id);
     expect(p.progress.fused[made.id]).toBeTruthy();
     expect(T.state.coins).toBeLessThan(coins0);
-    expect(p.materials.crystal).toBeLessThan(crys0);
+    expect(T.bagCount(p, "crystal")).toBeLessThan(crys0);
     // The fused skill is real + slottable + castable.
     expect(T.Skills.assignSlot(p, 2, made.id)).toBe(true);
     p.progress.focus = 999;
@@ -250,7 +252,8 @@ describe("Task 14 — skill fusion (pure + deterministic)", () => {
     const p = resetProgress();
     T.Skills.learn(p, "chain_spark", true);
     T.state.coins = 0;
-    p.materials.crystal = 0;
+    p.inventory = [];
+    T.bagSpend(p, "crystal", 9999);
     expect(T.Skills.fuse(T.state, p, ["firebolt", "chain_spark"])).toBe(null);
   });
 });
@@ -285,7 +288,8 @@ describe("Task 14 — save / load round-trip + migration", () => {
     T.Skills.gainXp(p, T.totalXpToReach(3));
     T.Skills.learn(p, "chain_spark", true);
     T.state.coins = 5000;
-    p.materials.crystal = 50;
+    p.inventory = [];
+    T.bagAdd(p, "crystal", 50);
     const fused = T.Skills.fuse(T.state, p, ["firebolt", "chain_spark"]);
     T.Skills.assignSlot(p, 1, fused.id);
     p.progress.focus = 33;

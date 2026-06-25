@@ -117,10 +117,10 @@ describe("Task 10 — resource nodes are capped + reliably harvestable", () => {
     const node = new T.ResourceNode(scene, T.world.shadow, T.interaction,
       new Vec3(p.position.x + 1, 0, p.position.z), "tree", p, T.state);
     T.state.resources.push(node);
-    const before = p.materials.wood;
+    const before = T.bagCount(p, "wood");
     key("KeyE"); step(1);                    // press interact, run one frame
     expect(T.interaction.current === node.it || node.respawn > 0).toBe(true);
-    expect(p.materials.wood).toBeGreaterThan(before);
+    expect(T.bagCount(p, "wood")).toBeGreaterThan(before);
     expect(node.it.enabled).toBe(false);     // depleted → enters respawn cooldown
     expect(node.respawn).toBeGreaterThan(0);
   });
@@ -131,9 +131,9 @@ describe("Task 10 — resource nodes are capped + reliably harvestable", () => {
     const node = new T.ResourceNode(scene, T.world.shadow, T.interaction,
       new Vec3(p.position.x + 1, 0, p.position.z), "rock", p, T.state);
     T.state.resources.push(node);
-    const before = p.materials.stone;
+    const before = T.bagCount(p, "stone");
     key("KeyE"); step(1);
-    expect(p.materials.stone).toBeGreaterThan(before);
+    expect(T.bagCount(p, "stone")).toBeGreaterThan(before);
     toHub();
   });
 
