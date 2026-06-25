@@ -1357,7 +1357,25 @@ A task is **done** only when **all** of these are true:
   feeling meaningful by granting a chunk of XP.
 
 ### Task 20 — Map subsystem fixes (fit‑to‑screen full map, un‑mirror the minimap, arrow‑shaped target pointer, fully readable labels)
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-25 · Fixed all four map defects. The full‑map overlay
+  (`#worldmap`) now fits ONE screen (no page scroll): the panel is a `dvh`/`clamp()`‑sized
+  flex column whose header/tabs/map/info/actions are fixed and only `#mapResults` scrolls
+  internally (portrait stacks the map above a clamped‑height canvas; short landscape keeps
+  it beside the list) — verified on desktop + S24 Ultra portrait/landscape. The minimap
+  heading is **un‑mirrored at the source**: a pure, tested `mapVecToScreen`/`mapHeadingScreen`
+  mirrors the north‑up projection's X axis so turning right in‑world turns the marker right on
+  **both** the minimap and the in‑zone map (validated against the camera‑relative facing
+  convention, not double‑negated); `mmPlayer` + both `proj()`s share it. A reusable canvas
+  **arrow** primitive (`drawMapArrow`, shaft + head) replaces the bare triangle on the minimap
+  rim marker (when the waypoint/next‑portal is off‑map) and the on‑screen compass arrow is now
+  an inline **SVG arrow** — both unambiguously point at the target / next portal. Place names
+  are no longer clipped by the circle: `drawZoneScene` collects portal labels during the clipped
+  pass and draws them **after/outside** the clip via a pure `layoutMapLabels` (clamped to screen
+  bounds, de‑overlapped) with a haloed plate (`mapLabelText`); world‑overview zone names too.
+  No save‑schema change (`SAVE_VERSION` 12 — the waypoint already serialized from Task 13). New
+  pure tests (heading sign, bearing→arrow, label layout) + a recording‑2D‑context suite driving
+  the real drawing + a Playwright `map.spec.js` (desktop + S24 portrait/landscape) for the
+  fit‑to‑screen/scroll bar; Vitest 234 → 247.
 - **Depends on:** the map layer (Task 13: `WorldMap`/`WorldMapUI`, `drawZoneScene`,
   `mmPlayer`, `resolveWaypoint`, the compass). Pairs with **Task 16** (HUD chrome —
   the map button is removed there and the map opens from the minimap tap).

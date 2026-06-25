@@ -654,21 +654,29 @@ is fully testable headless:
   `nextZoneStep(from, to)` is the first hop — the **portal to walk into next** —
   so a cross-land waypoint always points at the right gateway.
 - **Geometry.** `bearingRad` / `dist2D` / `compass8` and the camera-relative
-  `relativeHeading` drive the on-screen **compass arrow** + distance; all pure.
+  `relativeHeading` drive the on-screen **compass arrow** + distance; the **north-up
+  minimap projection** mirrors its X axis through the pure `mapVecToScreen` /
+  `mapHeadingScreen` so a **right turn in the world turns the marker right** on the
+  map (un-mirrored at the source — Task 20); all pure.
 - **Targets + search.** `MAP_TARGETS` derives every **land / landmark / NPC** from
   `ZONES` / `LOCATIONS` / `NPC_DATA` (no duplicated names — the UI resolves names
   through i18n); `searchTargets` matches on diacritic-folded display names.
 - **Minimap (`WorldMap`).** A north-up **corner canvas** showing the current land's
   fence, the player + facing, portals (coloured by kind), NPCs (status-coloured),
-  resources, monsters, vendors, the castle and the waypoint marker — redrawn on a
-  throttle, **feature-detected** (no `2d` context ⇒ silent no-op). Toggle with `N`.
+  resources, monsters, vendors, the castle and the waypoint — an on-map **ring**, or
+  a clear **arrow** (`drawMapArrow`, shaft + head) at the rim when the target / next
+  portal is off-map — redrawn on a throttle, **feature-detected** (no `2d` context ⇒
+  silent no-op). Tap it to open the full map; toggle with `N`.
 - **Full map (`WorldMapUI`).** A pannable/zoomable overlay with a **current-land**
   view and a **world overview** of the portal graph (`worldLayout`, discovered vs
   **fog-of-war**), a name **search** with results, and a **"Guide me there"** that
-  sets the waypoint. Opens with `Tab` / the 🗺️ button.
+  sets the waypoint. It **fits one screen** (no page scroll) on desktop + the S24
+  Ultra — only the results list scrolls — and place names are drawn **outside the
+  circular clip** via the pure `layoutMapLabels` (clamped on-screen, de-overlapped,
+  haloed) so they're never cut off (Task 20). Opens by **tapping the minimap**.
 - **Waypoint.** `resolveWaypoint` returns live guidance (in-zone bearing, or the
-  next portal across lands) and **auto-clears on arrival**; the compass shows the
-  next portal to take when the target is in another land.
+  next portal across lands) and **auto-clears on arrival**; the compass (an inline
+  **SVG arrow**) shows the next portal to take when the target is in another land.
 - **Persistence.** `SAVE_VERSION` **9** stores `discovered` (the lands you've
   visited) + the active `waypoint` (`{ kind, id }`); older saves (no map block)
   default to "only the saved land known", no waypoint.
@@ -962,4 +970,12 @@ Source: GitHub Actions**.
       unified bag + quick-slots **round-trip through save/load** (**v12**), and a pure `migrateLegacyBag`
       folds pre-v12 `materials`+`potions` belt saves in — `test/inventory21.test.js` + a Playwright
       inventory suite.
+- [x] **Map subsystem fixes** — the **full map fits one screen** (no page scroll; only the NPC/results
+      list scrolls) on desktop + the **S24 Ultra** in both orientations; the minimap heading is
+      **un-mirrored at the source** (turning right turns the marker right, via the pure
+      `mapVecToScreen`/`mapHeadingScreen`); a reusable **arrow** primitive (`drawMapArrow`) marks the
+      minimap rim + an inline **SVG compass arrow** unambiguously point at the target / next portal;
+      and **place names are no longer clipped** by the map circle — drawn after the clip via a pure,
+      clamped, de-overlapped `layoutMapLabels` with a haloed plate. No save-schema change — pure
+      helpers in `src/data/worldmap.js`, covered by `test/worldmap.test.js` + a Playwright map suite.
 - [ ] Puzzles (levers, plates, gated doors)

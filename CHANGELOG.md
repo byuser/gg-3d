@@ -35,6 +35,53 @@ delta it shipped with, since later tasks reference those.
   `session-s24-landscape` Playwright E2E (resume-via-Continue → open pause → open
   Cloud Saves), which previously timed out on `master`.
 
+## [2026-06-25] — Task 20 — Map subsystem fixes (fit-to-screen full map, un-mirror the minimap, arrow-shaped target pointer, fully readable labels)
+
+The map subsystem had four defects that made it hard to use. All four are fixed to
+the readability bar of a well-made open-world map, on desktop **and** the Galaxy
+S24 Ultra (portrait + landscape).
+
+### Fixed
+
+- **The full map fits one screen — no page scroll; only the NPC/results list
+  scrolls.** The `#worldmap` overlay panel is now a `dvh`/`clamp()`-sized flex
+  **column**: the title, tabs, map, selection info and action buttons are fixed
+  rows and the results list takes the remaining space and scrolls **internally**
+  (`#mapResults`). On narrow portrait the map stacks above the list with a
+  clamped-height canvas; on a short landscape the map stays beside the list and the
+  chrome trims down — both keep the whole overlay inside the viewport.
+- **The minimap heading is un-mirrored — turning right turns the indicator right.**
+  The north-up world→screen projection now **mirrors the X axis** through a pure,
+  tested helper (`mapVecToScreen` / `mapHeadingScreen`), so the marker's rotation
+  sense matches the world while north (−Z) stays up. Fixed at the source and
+  validated against the camera-relative facing convention (not faked with a
+  double-negate); the player arrow (`mmPlayer`) and both the minimap and in-zone map
+  projections share the one helper, so every plotted dot stays consistent.
+- **An arrow now points at the target instead of an ambiguous triangle.** A reusable
+  canvas arrow primitive (`drawMapArrow` — shaft + arrowhead) marks the minimap rim
+  when the waypoint / next portal is off-map, and the on-screen compass arrow is now
+  an inline **SVG arrow** (shaft + head). Both unambiguously point at the chosen
+  target (and the next portal for cross-zone routes).
+- **Place names are fully readable — no longer clipped by the map circle.**
+  `drawZoneScene` collects portal labels during the clipped geometry pass and draws
+  them **afterwards, outside the clip**, through a pure `layoutMapLabels()` that
+  clamps each label inside the screen bounds and stacks overlapping ones apart, on a
+  haloed background plate (`mapLabelText`). The world-overview zone names get the
+  same haloed, de-overlapped treatment.
+
+No save-schema change (`SAVE_VERSION` stays **12** — the waypoint already serialized
+from Task 13). All canvas drawing stays feature-detected (headless-safe).
+
+**Tests.** New pure tests lock the un-mirror sign convention (a right-turn in world
+space, derived from the real camera-relative input, yields a clockwise turn on the
+map), the bearing→arrow angle (the compass angle equals `resolveWaypoint()`'s
+bearing to the in-zone target and to the next portal), and the label layout
+(positions stay within screen bounds and de-overlap); a recording-2D-context suite
+drives the **real** minimap/map drawing (mirror projection, post-clip label pass,
+off-map rim arrow, world-overview labels) headlessly. A Playwright `map.spec.js`
+(desktop + S24 Ultra portrait/landscape) proves the full map fits one screen while
+the results list scrolls. **Vitest 234 → 247.**
+
 ## [2026-06-25] — Task 21 — Unified inventory for potions & ingredients (30 slots, drag-and-drop potion slotting, sellable items, dedicated alchemist NPC)
 
 Potions and crafting ingredients lived in ad-hoc side stores (a `player.potions`
