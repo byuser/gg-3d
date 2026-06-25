@@ -1,7 +1,13 @@
 ---
 description: Orchestrate a sequential, one-subagent-per-task batch over the TODO.md backlog (each task merges to master before the next starts)
-argument-hint: e.g. "3 next tasks" | "tasks 16, 18 and 20" | "next"
+argument-hint: e.g. "next 3 tasks" | "tasks 16, 18 and 20" | "next"
 ---
+
+<!-- Trigger phrasings (any verb): make / solve / do / run / complete / finish /
+implement + "next N tasks" | "the next task" | "tasks A, B and C". The same
+shorthand also works as a plain message thanks to CLAUDE.md → Multi-agent
+orchestration; this command is the explicit wrapper. -->
+
 
 Act as the **ORCHESTRATOR** (master agent) for **Good Game 3D** — a Babylon.js
 browser action-RPG in this repo, shipped to GitHub Pages. You **coordinate**; you

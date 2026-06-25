@@ -1599,24 +1599,33 @@ no‑build‑step / no‑external‑dependency rules.
 
 ## 6. Run prompts
 
-There are two ways to start work — both end in a release-ready **merge to
+There are three ways to start work — all end in a release-ready **merge to
 `master`**:
 
 - **Orchestrated batch (§ 6.1) — recommended for several tasks.** A
-  **master/orchestrator agent** turns a short request like *"make 3 next tasks"*
-  or *"make tasks 16, 18 and 20"* into a **strictly sequential** run: it dispatches
+  **master/orchestrator agent** turns a short request like *"do next 3 tasks"* or
+  *"solve tasks 16, 18 and 20"* into a **strictly sequential** run: it dispatches
   **one isolated subagent per task** (each with its **own fresh context window**),
   **waits** for each to finish **and merge to `master`**, then starts the next.
-  See `CLAUDE.md` → *Multi-agent orchestration*, the `.claude/agents/task-runner.md`
-  agent, and the `/make-tasks` command.
 - **Single task (§ 6.2).** The per-task prompt that one subagent — or you,
   directly — runs to take exactly one task end-to-end.
+- **Deterministic workflow (§ 6.3).** The same one-subagent-per-task batch, but the
+  loop lives in **code** (`.claude/workflows/run-backlog.js`) for a hands-off,
+  reproducible run.
 
-### 6.1 Orchestrated batch — "make N next tasks" / "make tasks A, B, C"
+> **You don't have to paste anything.** `CLAUDE.md` (auto-loaded every run) carries
+> the § 6.1 protocol, so simply typing **"make / solve / do / run / finish next N
+> tasks"** or **"… tasks A, B and C"** makes the main agent act as the orchestrator
+> exactly as if the whole § 6.1 prompt were pasted. The text blocks below are the
+> explicit, copyable source of truth (and what `CLAUDE.md` and the `/make-tasks`
+> command point at).
 
-Paste this **once** to put the master agent in orchestrator mode; afterwards just
-tell it *"make 3 next tasks"*, *"make tasks 16, 18 and 20"*, or *"next"*. (Or run
-the `/make-tasks` command with the same shorthand as its argument.)
+### 6.1 Orchestrated batch — "make/solve/do next N tasks" / "… tasks A, B, C"
+
+Just tell the agent *"do next 3 tasks"*, *"solve tasks 16, 18 and 20"*, or
+*"next"* — it follows the prompt below automatically (via `CLAUDE.md`). You can
+also run the `/make-tasks` command with the shorthand as its argument, or paste
+this block verbatim to be explicit:
 
 ```text
 Act as the ORCHESTRATOR (master agent) for "Good Game 3D" — a Babylon.js browser
@@ -1729,6 +1738,26 @@ Workflow:
 If a decision is genuinely mine and cheap to confirm, pick the sensible default
 and note it; if it's expensive or irreversible, ask me first.
 ```
+
+### 6.3 Deterministic workflow (the loop lives in code)
+
+For a hands-off, reproducible batch where sequencing is guaranteed by **code**
+rather than model judgement, run [`.claude/workflows/run-backlog.js`](./.claude/workflows/run-backlog.js)
+with the Workflow tool, passing the same shorthand as `args`:
+
+```text
+Workflow({ scriptPath: ".claude/workflows/run-backlog.js", args: "next 3 tasks" })
+Workflow({ scriptPath: ".claude/workflows/run-backlog.js", args: "tasks 16, 18 and 20" })
+Workflow({ scriptPath: ".claude/workflows/run-backlog.js", args: [16, 18, 20] })
+```
+
+The script first runs a **planner** agent that reads `CLAUDE.md` + `TODO.md` and
+resolves the shorthand into a concrete, dependency-ordered task list (skipping any
+`[x]` done; stopping if a dependency is unmet). It then `await`s **one
+`task-runner` subagent per task in series** — each in its own fresh context window,
+each implementing its task and **merging to `master`** before the next begins — and
+**halts the batch** the moment a task fails to finish & merge, reporting where it
+stopped. Same outcome as § 6.1, with the loop pinned in code.
 
 ---
 

@@ -134,8 +134,13 @@ tasks well, use the **orchestrator pattern** — it keeps each task's work in it
 **own isolated context window** (no cross-talk, no context bloat) and lands each
 one on `master` before the next begins.
 
-**When I say "make N next tasks", "make tasks A, B and C", or "next", act as the
-ORCHESTRATOR** (do not write game code yourself):
+**Trigger — treat these as a request to run the backlog batch.** Whenever I say
+**make / solve / do / run / complete / finish / implement** + **"next N tasks"**,
+**"the next task"** / **"next"**, or **"tasks A, B and C"** (any phrasing, e.g.
+*"do next 3 tasks"*, *"solve tasks 2, 3 and 5"*, *"finish the next two"*), **act as
+the ORCHESTRATOR and follow the TODO.md § 6.1 orchestrator prompt verbatim — as if
+I had pasted the whole prompt.** You don't need me to paste it; the steps below ARE
+that prompt in short form. (Do not write game code yourself.)
 
 1. **Resolve** the concrete, ordered task list from my shorthand using
    `TODO.md` § 5 *Recommended order* and each task's *Depends on*
@@ -159,5 +164,18 @@ ORCHESTRATOR** (do not write game code yourself):
 Run subagents **strictly sequentially** (never two at once) so dependent tasks
 build on each other's merged work. The full pasteable prompts live in `TODO.md`
 § 6 (§ 6.1 orchestrator, § 6.2 single task); the `/make-tasks` command wraps § 6.1.
-For a **deterministic** batch (the loop lives in code, not model judgement), a
-Workflow script that `await`s one `task-runner` agent per task is also acceptable.
+
+**Two equivalent ways to run a batch — pick one:**
+
+- **Model-driven (default):** you, the main agent, loop turn-by-turn — spawn one
+  `task-runner` (Agent tool), wait for it to merge to `master`, then the next.
+  Best when a step may need my judgement mid-batch.
+- **Deterministic workflow:** run the script
+  [`.claude/workflows/run-backlog.js`](./.claude/workflows/run-backlog.js) via the
+  Workflow tool, passing my shorthand as `args` (e.g.
+  `Workflow({ scriptPath: ".claude/workflows/run-backlog.js", args: "next 3 tasks" })`).
+  The loop lives in code: a planner agent resolves the ordered list, then the script
+  `await`s one `task-runner` per task in series (each merges to `master` before the
+  next starts) and **stops the batch on the first task that fails to finish & merge**.
+  Prefer this for a hands-off, reproducible run of several independent tasks. Only
+  reach for it when I've opted into a workflow (see the Workflow tool's rules).
