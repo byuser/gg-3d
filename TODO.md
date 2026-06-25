@@ -948,6 +948,603 @@ A task is **done** only when **all** of these are true:
 
 ---
 
+## 4c. The backlog (Tasks 16–22) — mobile UX, persistence & systems polish
+
+> Tasks 16–22 are a **player‑facing quality pass** driven by real device testing
+> (a **Samsung Galaxy S24 Ultra** is the reference phone). They take the shipped
+> RPG and bring its **mobile UX, persistence, map, economy and world generation**
+> up to the bar of well‑reviewed mobile/desktop action‑RPGs: nothing off‑screen,
+> nothing overlapping, one‑thumb combat, progress that survives a reload, a map
+> you can read at a glance, an inventory that holds everything, and a world that
+> generates believably. They are written to the same end‑to‑end, release‑ready,
+> tested bar as Tasks 2–15 (one run completes exactly one task). Recommended
+> ordering is in [§ 5](#5-recommended-order).
+>
+> **Reference device (use for every UI/responsive test in these tasks).** Samsung
+> Galaxy S24 Ultra — **1440 × 3120 px** physical panel (QHD+, 19.5∶9, ~505 ppi),
+> **`devicePixelRatio ≈ 3.5`**, CSS viewport ≈ **412 × 915 portrait /
+> 915 × 412 landscape**. Add this as a reusable Playwright device profile
+> (`viewport` + `deviceScaleFactor: 3.5` + `isMobile: true` + `hasTouch: true`)
+> and assert layouts against it; also keep a desktop profile so both are covered.
+
+### Task 16 — Responsive, mobile‑first HUD & menu overhaul (auto‑fit at any resolution; one‑thumb combat; drag‑and‑drop skill slots)
+- **Status:** `[ ]`
+- **Depends on:** none directly, but it **touches** the minimap/map button (Task 13),
+  the skill quick‑bar + `SkillsUI` (Task 14), the audio mixer (Task 6) and the
+  cloud‑saves controls (Task 15). Pairs naturally with **Task 20** (map) — both
+  rework HUD chrome — and **Task 18** (save management UI lives in the same menus).
+  Best done **before** Task 20 so the map button removal and minimap‑tap entry
+  point are settled first.
+- **Goal.** On a real phone (Galaxy S24 Ultra) the **start screen and pause menu
+  overflow** — controls below the fold (e.g. the **Sync with Google Drive**
+  panel) are simply **unreachable** — and the in‑game HUD is **cluttered and
+  overlapping** (weather/clock sit *under* the inventory/skills widgets; there are
+  duplicate inventory buttons; the skill/fire/interact controls aren't reachable
+  with one thumb). Rebuild the menu + HUD layout to the standard of well‑reviewed
+  mobile action‑RPGs: **every control reachable at every resolution**, no
+  overlaps, no duplicates, and a **one‑thumb** combat cluster in landscape.
+- **Scope (build this):**
+  - **Auto‑fitting, scrollable menus with progressive disclosure.** Make the
+    **start screen** (`#overlay`) and **pause menu** (`#pauseMenu`) lay out
+    responsively so they **never clip** at any viewport: a flex/grid column with a
+    **max‑height of the safe viewport** (`100dvh` minus `env(safe-area-inset-*)`)
+    and **internal scrolling** when content exceeds it. Adopt the pattern big games
+    use on phones — a short **primary‑action** list always visible (Start / Resume
+    / Load / Save / Exit) with **secondary settings collapsed into labelled
+    sub‑panels** ("Audio", "Graphics", "Language", "Cloud saves", "Manage saves")
+    opened on demand, rather than one long overflowing stack. The
+    Google‑Drive/cloud panel (`.cloud-settings` / `#cloudSignBtn` & co.) **must be
+    fully reachable** on the S24 Ultra in both orientations.
+  - **Fullscreen ⇒ landscape on mobile.** Extend the fullscreen handler
+    (`game.js` `Fullscreen.toggle()` / `#fsBtn`, ~`game.js:8762`) so that on a
+    touch device entering fullscreen also requests **landscape** via the **Screen
+    Orientation API** (`screen.orientation.lock("landscape")`), and releases the
+    lock on exit. **Feature‑detect** it (the lock API + fullscreen are required and
+    unsupported on iOS Safari) and **degrade gracefully** — never throw when the
+    lock is unavailable or rejected (it returns a promise that can reject); desktop
+    behaviour is unchanged.
+  - **Declutter the HUD — remove/relocate redundant widgets:**
+    - **Remove the "monsters in this land" counter** (`#monsters` /
+      `updateMonsterCounter()`): drop the widget and its update call (keep the
+      underlying count only if something else needs it; otherwise remove cleanly,
+      no dead code).
+    - **Move the sound mute** off the HUD into **settings**: remove the on‑HUD
+      music button (`#musicBtn`) and rely on the existing **mute control in the
+      audio sub‑panel** (`#muteToggle` / `#muteToggleP`) on the start screen +
+      pause settings.
+    - **Remove the map button** (`#mapBtn`): the **minimap is already tappable**
+      to open the full map (`WorldMap`/`WorldMapUI`), so the button duplicates
+      that gesture — delete it and make the minimap tap target obvious.
+    - **Remove the big round bag button** (`#bagBtn`, the touch‑only round button
+      by the action/cast buttons): it **duplicates** the square inventory button
+      in the top icon row (`#invBtn`). Keep one inventory entry point.
+  - **Fix widget layering (no overlaps).** The **weather** (`#weather`) and
+    **clock** (`#clock`) widgets currently render *under* the inventory/skills
+    widgets and stack on top of one another. Give the HUD a deliberate **z‑index
+    layering + non‑overlapping anchored regions** (top‑status row, corner minimap,
+    bottom action cluster) using a small set of CSS layers and `pointer-events`
+    discipline so no two widgets occupy the same pixels at any supported
+    resolution. Audit every absolutely‑positioned HUD element.
+  - **One‑thumb combat cluster (landscape).** Re‑lay the **3 skill quick‑slots**
+    (`#skillBar` / `updateSkillBar()`), the **interact "E"** button (`#actionBtn`)
+    and the **fire/cast** button (`#castBtn`) into an **ergonomic semicircle/arc**
+    in the bottom‑right (right‑thumb) zone so all of them sit within a comfortable
+    thumb sweep in landscape — the radial/arc action layout that well‑reviewed
+    mobile action games use. Keep tap targets ≥ the platform minimum (≈48 px),
+    respect `env(safe-area-inset-*)`, and keep the left‑thumb joystick clear.
+    Provide a sensible portrait fallback.
+  - **Drag‑and‑drop skill‑slot assignment (replace the 3‑button mechanic).**
+    Today each skill in the Skills panel exposes **per‑slot assign buttons**;
+    replace this with **direct manipulation**: **drag a skill from the roster onto
+    a quick‑slot** to assign it, **drag a slotted skill onto another slot** to
+    move/swap, and **drag a slot's skill onto empty space** to clear it (mirror the
+    behaviour the user described). Implement with **Pointer Events**
+    (`pointerdown`/`move`/`up` + `setPointerCapture`) so it works with **touch and
+    mouse** from one code path; keep the existing **pure** slot logic
+    (`Skills.assignSlot` / `Skills.clearSlot`) as the model and only change the
+    **gesture** layer. Provide an **accessible non‑drag fallback** (tap‑to‑pick →
+    tap‑slot) for keyboard/screen‑reader/headless and feature‑detect Pointer
+    Events. (Optionally apply the same drag model to the potion belt — but that is
+    **Task 21**'s job; keep this task's drag surface to skills.)
+  - **i18n + persistence.** Any new strings (sub‑panel headings, tooltips) go
+    through `t()` in **both `en` and `ru`** (Golden Rule 9). No save‑schema change
+    is expected (layout/UX only); if a UI preference is introduced, persist it to
+    `localStorage` like the existing audio/graphics/locale prefs.
+- **Acceptance criteria:**
+  - On the **Galaxy S24 Ultra profile** (portrait **and** landscape) **every**
+    start‑screen and pause‑menu control is reachable — the **Google Drive / cloud
+    panel is visible and operable** without anything being clipped off‑screen — and
+    menus scroll internally when content exceeds the viewport. Verified at the S24
+    Ultra resolution **and** at least one small (≈360 px) and one desktop width.
+  - Tapping **fullscreen on a touch device** enters fullscreen **and** locks
+    **landscape**; exiting releases it; on browsers without the lock API nothing
+    throws and the game still works. Desktop is unchanged.
+  - The **monster counter, on‑HUD mute button, map button and round bag button are
+    gone**; mute lives in settings; the **minimap tap** opens the full map; a
+    single inventory button remains.
+  - **No HUD widgets overlap** at any tested resolution — weather/clock,
+    inventory/skills, minimap, health/focus bars and the action cluster each own
+    distinct screen regions; verified by bounding‑box assertions.
+  - In **landscape** the 3 skill slots + E + fire form a **one‑thumb arc**; all
+    are tappable within a thumb sweep and clear of the joystick + safe‑area insets.
+  - Skills are assigned/moved/cleared by **drag‑and‑drop** (touch + mouse); the
+    old per‑skill assign buttons are gone; an accessible tap fallback exists; the
+    underlying slot state still round‑trips through save/load.
+  - Full pipeline green; headless‑safe (Pointer Events / orientation / fullscreen
+    all feature‑detected).
+- **Tests to add:** a **Playwright responsive suite** that loads the built site at
+  the **S24 Ultra device profile** (portrait + landscape) and a desktop profile and
+  asserts: every start/pause control is in‑viewport (or reachable by scrolling) —
+  explicitly the cloud panel; no two key HUD widgets' bounding boxes intersect;
+  the removed widgets are absent; the skill/E/fire cluster sits in the bottom‑right
+  arc in landscape. Vitest: orientation‑lock + fullscreen helpers are
+  feature‑detected and no‑op safely headless; the **pure drag‑to‑slot reducer**
+  (pick → drop → assign/move/clear) is unit‑tested independent of the DOM; a UI
+  smoke that drives a drag and asserts `Skills.assignSlot`/`clearSlot` fire.
+- **Files:** `index.html` (menu/HUD markup, remove `#monsters`/`#musicBtn`/
+  `#mapBtn`/`#bagBtn`, sub‑panel containers), `css/style.css` (responsive
+  menu/`dvh`/scroll, HUD z‑layers + anchored regions, the landscape action arc,
+  S24‑safe insets), `src/game.js` (`Fullscreen` orientation lock, HUD wiring +
+  removed update calls, `SkillsUI`/`updateSkillBar` drag gesture layer), the new
+  device profile in `playwright.config.js`, `test/e2e/*.spec.js` + a Vitest unit
+  file, `src/core/i18n.js` (any new strings, EN+RU), `README.md`.
+- **Out of scope:** a full UI‑framework rewrite (React/etc. — keep the current
+  vanilla DOM), redesigning the overlays' *contents* (inventory/shop internals),
+  and the potion‑belt drag‑and‑drop (that ships in **Task 21**).
+- **Hints:** drive layout from CSS (`dvh`, `clamp()`, `env(safe-area-inset-*)`,
+  flex/grid) so it scales without per‑device JS; keep one **pointer‑based** drag
+  utility reused by skills now and potions later; test the gesture's **reducer**
+  as a pure function so the DOM layer stays thin.
+
+### Task 17 — Durable session persistence (progress + Google sign‑in survive reload and desktop⇄mobile mode switches)
+- **Status:** `[ ]`
+- **Depends on:** the existing `serializeGame`/`applySave` + `localStorage` prefs
+  (Tasks 9/15). Coordinate with **Task 18** (save management) and **Task 15**
+  (cloud auth) — they share the persistence layer. Do this **before/with** Task 18.
+- **Goal.** Reloading the page, or switching between **desktop and mobile** layout
+  (e.g. responsive breakpoint / DevTools device mode / a re‑orientation that
+  re‑boots the view), currently **loses the in‑progress run** and **drops the
+  Google Drive sign‑in** (auth is per‑session only — see Task 15's note that
+  tokens are not persisted). Add **durable, first‑party session persistence** so a
+  returning player resumes **exactly where they left off** without re‑downloading a
+  file or signing in again, the way shipped web games keep you logged in and
+  mid‑run across reloads.
+- **Scope (build this):**
+  - **Auto‑persisted local session (resume‑on‑reload).** Continuously persist the
+    live run (the exact `serializeGame()` JSON) to a **first‑party store** —
+    debounced on key beats (zone travel, level‑up, quest turn‑in, purchase) and on
+    `visibilitychange`/`pagehide` — and **auto‑restore it on boot** through the same
+    path as a file/cloud load, so a reload drops the player straight back into the
+    run (offer a "Continue" affordance on the start screen rather than silently
+    forcing it). Reuse the existing `gg3d_pending_load` boot hand‑off seam.
+  - **Cookie support (as requested) — with the right tool for each datum.** Add
+    **cookie**‑based persistence so state survives reload and **desktop⇄mobile mode
+    switches**. Use cookies for the **small, long‑lived identifiers** that should
+    travel with the session (a session id, the chosen locale/quality, the "cloud
+    autosave on" flag, and a lightweight **auth hint** so we can **silently
+    re‑acquire** a Google token — see below); keep the **bulky run snapshot** in
+    `localStorage`/IndexedDB (cookies are size‑limited and sent on every request).
+    Set cookies **first‑party** with `SameSite=Lax`, `Secure` (the site is HTTPS on
+    Pages), and a sensible `Max‑Age`; **feature‑detect** `document.cookie` and fall
+    back to `localStorage` when cookies are unavailable (private mode, headless).
+    No third‑party/tracking cookies — first‑party persistence only.
+  - **Persist the Google sign‑in across reload.** Today GIS re‑authenticates every
+    session. Persist enough to **restore the signed‑in state without a fresh
+    consent prompt**: remember the signed‑in account hint and use GIS **silent
+    token refresh** (`prompt: ""` / `login_hint`) on boot to re‑acquire an access
+    token when the player had opted in — falling back to the explicit sign‑in
+    button if silent refresh fails. **Never persist secrets in the repo**; store
+    only non‑sensitive hints client‑side and keep the feature **opt‑in** and
+    **degrading gracefully** (signed‑out/offline/headless still work). Honour
+    **sign‑out** by clearing the hint so it does **not** silently re‑auth.
+  - **Survive desktop⇄mobile switches.** Ensure the persisted session is **layout
+    agnostic** — switching responsive mode / re‑orienting / a quality‑change reload
+    restores the same run and the same sign‑in. The HUD/menu rebuild from Task 16
+    must read from the restored state, not reset it.
+  - **Privacy & control.** Document what is stored and where (README + a short
+    in‑settings note); provide a **"clear saved session / sign out"** control so the
+    player can wipe local persistence. Respect existing `SAVE_VERSION` migration so
+    an auto‑restored session from an older schema still loads.
+- **Acceptance criteria:**
+  - Reloading the page **resumes the in‑progress run** (same zone, stats,
+    inventory, quests, time/weather) via the auto‑persisted session — no file
+    re‑load needed; a "Continue" entry point is offered.
+  - After opting into Google Drive, a **reload keeps you effectively signed in**
+    (silent token refresh) without a new consent dialog; **sign‑out** clears it and
+    no silent re‑auth happens afterward.
+  - Switching **desktop⇄mobile** layout (or re‑orienting / changing graphics
+    quality) preserves both the **run** and the **sign‑in**.
+  - Cookies are **first‑party**, `SameSite=Lax`/`Secure`, feature‑detected, with a
+    `localStorage` fallback; **nothing throws** when cookies are blocked or
+    headless; signed‑out/offline still play.
+  - A player can **clear** the saved session/sign‑in from settings.
+- **Tests to add:** a **pure cookie helper** (get/set/expire, `SameSite`/`Secure`
+  attributes, feature‑detect + `localStorage` fallback) unit‑tested; an
+  **auto‑persist scheduler** (debounce + flush on hide/pagehide) tested as a pure
+  function; a **save↔restore round‑trip** through the cookie/local session path
+  (parity with file/cloud payloads); the **silent‑auth** decision (had‑opted‑in +
+  hint ⇒ attempt silent refresh; signed‑out ⇒ don't) tested against an **injected
+  GIS stub**; an E2E that loads the built site, starts a run, reloads, and asserts
+  the run resumed.
+- **Files:** `src/game.js` (a small `Session`/persistence module wrapping
+  `serializeGame`/`applySave`, the cookie helper, the boot auto‑restore +
+  "Continue", `CloudSave` silent‑auth + hint storage, a clear‑session control),
+  `index.html`/`css` ("Continue" + clear‑session UI), `src/core/i18n.js` (EN+RU),
+  `test/*` (cookie/scheduler/round‑trip/silent‑auth + E2E), `README.md` (privacy
+  note). No `SAVE_VERSION` change expected (it reuses the existing schema).
+- **Out of scope:** a server‑side session backend or account system; cross‑device
+  sync beyond what Drive already offers (Task 15); third‑party analytics cookies.
+- **Hints:** cookies for **small identifiers**, `localStorage`/IndexedDB for the
+  **snapshot**; keep the cookie helper pure + feature‑detected so headless tests
+  pass; reuse the Task 15 reconcile (`cloudNewer`) so an auto‑restored local
+  session never clobbers a newer cloud save.
+
+### Task 18 — Cloud‑saves browser fix + multiple manual save slots with full management (rename / delete / load)
+- **Status:** `[ ]`
+- **Depends on:** the save layer (Tasks 9/15) and **Task 17** (durable session) —
+  build this **after/with** Task 17 so slots and the auto‑session share one store.
+  Coordinate `SAVE_VERSION` with any task that changes the schema.
+- **Goal.** On the **start screen**, clicking **cloud saves does nothing** (the
+  entry point is dead/unwired), and the game has **no real manual save slots** —
+  local saving is only a file download and the cloud has a **single overwrite
+  slot**. Add a proper **save‑management system** like shipped RPGs: several
+  **named manual slots** (local **and** cloud) with **load / rename / delete**,
+  surfaced from a single, working **Saves** screen reachable from the start screen
+  and pause menu.
+- **Scope (build this):**
+  - **Fix the dead start‑screen cloud‑saves action.** Make the start‑screen cloud
+    entry point actually open the **cloud‑saves browser** (`CloudUI.openList()` /
+    `#cloudSaves` overlay): wire/repair the handler (`#cloudListBtn` and/or a
+    "Cloud saves" item in the new Saves screen), and when **cloud is not
+    configured/ signed‑out**, show a clear state + a sign‑in CTA instead of a
+    no‑op. The list must render, and **Restore** must load through the existing
+    boot reload path.
+  - **Multiple named manual slots (local).** Replace the single file‑download model
+    with **N manual save slots** persisted locally (e.g. **6+** slots in
+    `localStorage`/IndexedDB), each storing the full `serializeGame()` payload plus
+    metadata (**name**, timestamp, zone, level, playtime). Keep **file
+    export/import** as an extra option, but the primary UX is in‑game slots like
+    big RPGs.
+  - **Save management UI (load / rename / delete).** A single **Saves** overlay
+    (reachable from start screen **and** pause) listing all slots — **local** and
+    **cloud** in one place, clearly labelled — each row offering **Load**,
+    **Rename** (inline edit, i18n‑safe, length‑capped) and **Delete** (with a
+    confirm, reusing `Pause.askConfirm`). "**New save**" writes to the next free
+    slot or overwrites a chosen one (with confirm). Mirror the management actions
+    for **cloud** saves where the Drive API allows (rename via metadata, delete via
+    the Drive client), reusing `CloudSave.listSaves()`/`restore()`/prune.
+  - **Persistence & schema.** Store slot metadata + payloads under versioned keys;
+    **bump `SAVE_VERSION`** only if the per‑slot envelope changes the schema, and
+    keep **older saves / single‑slot data migrating** in gracefully (don't strand
+    an existing player's save). Everything **feature‑detected** and headless‑safe.
+  - **i18n.** All new strings (slot labels, rename/delete prompts, empty states)
+    through `t()` in **EN + RU**.
+- **Acceptance criteria:**
+  - Clicking **cloud saves on the start screen opens the cloud browser** (or a
+    clear sign‑in/not‑configured state) — it is **no longer a dead click** — and
+    Restore loads the run.
+  - The player can keep **multiple named local save slots**, and **load / rename /
+    delete** any of them; a confirm guards delete/overwrite. Cloud slots are
+    listed and manageable in the same screen to the extent the Drive API allows.
+  - All slots **round‑trip through save/load**; existing single‑slot/file saves
+    **migrate** without loss; older `SAVE_VERSION`s still load.
+  - Reachable from **start screen + pause**; works on desktop + mobile; headless‑
+    safe; full pipeline green.
+- **Tests to add:** the **slot store** (create/list/rename/delete/overwrite, next‑
+  free‑slot selection, metadata) as a pure, tested module; a **migration** test
+  from the prior single‑slot/file format; a **round‑trip** per slot; an injected‑
+  client test that the **cloud browser opens + Restore** path runs; an E2E that
+  opens the Saves screen from the start menu, saves, renames, reloads and loads the
+  slot.
+- **Files:** `src/game.js` (a `SaveSlots`/`SavesUI` module over `serializeGame`/
+  `applySave`, repair the start‑screen cloud handler + `CloudUI` wiring,
+  `SAVE_VERSION`/migration), `index.html`/`css` (the Saves overlay; rename/delete
+  controls), `src/core/i18n.js` (EN+RU), `test/*` (slots/migration/round‑trip + E2E),
+  `README.md`.
+- **Out of scope:** a server‑side save backend; auto‑screenshots/thumbnails per
+  slot (note as a follow‑up); unlimited cloud slots beyond Task 15's rolling
+  policy.
+- **Hints:** keep slot logic **pure** (the UI just renders it); reuse
+  `Pause.askConfirm` for destructive actions and the Task 15 reconcile so a cloud
+  restore never clobbers newer local work.
+
+### Task 19 — Replace the score system with the experience (XP) system
+- **Status:** `[ ]`
+- **Depends on:** the **XP/leveling** layer (Task 14, `src/data/skills.js`:
+  `xpToNext`/`gainXp`/`player.progress`). None else.
+- **Goal.** The game still carries a **legacy arcade "score"** (the on‑screen
+  **stars/score widget**, `+score` on kills/artifacts/bosses) **in parallel** with
+  the real **RPG progression (XP/levels)** from Task 14. Modern RPGs reward action
+  with **experience**, not an arcade score. **Remove the score system entirely**
+  and route those reward moments into **XP** instead, so there is **one** coherent
+  progression currency.
+- **Scope (build this):**
+  - **Remove the score HUD + state.** Delete the on‑screen **score/stars widget**
+    (`#score` chip / `addScore`) and the score field from run state and
+    `serializeGame`/`applySave`; remove score from the **pause stats**, **game‑over**
+    and **victory** summaries and the `pause.stats`/`over.tagline`/`win.*` i18n
+    strings (replace with level/XP‑based phrasing). No dead `score` references left.
+  - **Convert score events to XP.** Every place that awarded score — monster kills
+    (`CONFIG.scorePerMonster`), artifact pickups (`CONFIG.scorePerArtifact`,
+    `toast.artifact`), boss (`CONFIG.bossScore`) and dragon (`CONFIG.dragonScore`)
+    — now awards **XP** via `Skills.gainXp()` (kills already grant `Skills.xpFor`;
+    fold the **artifact/relic** rewards into XP too). **Rebalance** the XP curve /
+    award amounts so progression stays well‑paced once these sources feed it (don't
+    just double‑count — retune `XP_PER_*` / `xpFor` and the artifact award so level
+    pacing feels right). Remove the now‑unused `score*` config knobs.
+  - **End‑screen + tracker glow‑up.** The game‑over / victory / pause summaries
+    show **level reached, total XP and key tallies** (monsters felled, relics) —
+    the satisfying run‑recap shipped RPGs show — instead of a score number. The HUD
+    keeps the **level badge + XP bar** (already present) as the single progression
+    readout.
+  - **Migration.** Older saves carrying a `score` field must still load (ignore/drop
+    it gracefully); **bump `SAVE_VERSION`** for the schema change and default
+    missing XP/level sanely.
+  - **i18n.** Update all affected strings in **EN + RU**.
+- **Acceptance criteria:**
+  - There is **no score anywhere** — no HUD widget, no run‑state field, no
+    save field, no end‑screen number, no `score*` config — and nothing references
+    it (grep‑clean).
+  - The reward moments that gave score now give **XP**; level pacing is retuned and
+    documented (before/after award values); a player progresses purely through XP.
+  - End/pause/victory screens recap **level + XP + tallies**; the HUD's level/XP
+    bar is the single progression readout.
+  - Old saves (with `score`) still load; the new schema round‑trips; full pipeline
+    green; headless‑safe.
+- **Tests to add:** assert each former score event now calls `gainXp` with the
+  retuned amount; the level curve still produces sane pacing under the new sources
+  (a pure test over a simulated run); **save/load migration** from a `score`‑bearing
+  save; a UI smoke that the end/pause screens render XP/level (no score); a grep‑
+  style test that fails on any lingering `score` identifier in the user‑facing path.
+- **Files:** `src/game.js` (`addScore` removal, kill/artifact/boss/dragon reward
+  paths → `gainXp`, pause/over/win summaries, `serializeGame`/`applySave`,
+  `SAVE_VERSION`), `src/core/config.js` (remove `score*` knobs; retune XP if knobs
+  move here), `src/data/skills.js` (curve/award retune), `index.html`/`css` (drop
+  `#score`), `src/core/i18n.js` (EN+RU), `test/*`, `README.md` (roadmap line
+  "Collect artifacts for score" → XP).
+- **Out of scope:** redesigning the leveling curve wholesale (retune, don't
+  rebuild); adding a separate high‑score/leaderboard (explicitly being removed).
+- **Hints:** XP already flows through one function (`Skills.gainXp`) — funnel the
+  former score events there and delete the parallel path; keep the artifact reward
+  feeling meaningful by granting a chunk of XP.
+
+### Task 20 — Map subsystem fixes (fit‑to‑screen full map, un‑mirror the minimap, arrow‑shaped target pointer, fully readable labels)
+- **Status:** `[ ]`
+- **Depends on:** the map layer (Task 13: `WorldMap`/`WorldMapUI`, `drawZoneScene`,
+  `mmPlayer`, `resolveWaypoint`, the compass). Pairs with **Task 16** (HUD chrome —
+  the map button is removed there and the map opens from the minimap tap).
+- **Goal.** The map subsystem has four concrete defects that make it hard to use:
+  the **full map doesn't fit on one screen** (it scrolls), the **minimap rotation
+  is mirrored** (turning right in‑world turns you left on the map), the
+  **target‑direction indicator is an ambiguous triangle** (you can't tell where it
+  points), and **place names are clipped by the circular map border**. Fix all
+  four to the readability bar of well‑reviewed open‑world maps.
+- **Scope (build this):**
+  - **Full map fits one screen (no scroll); NPC list stays scrollable.** Re‑lay the
+    full‑map overlay (`#worldmap` / `WorldMapUI`) so the **whole screen fits within
+    the viewport** at any supported resolution (the map canvas + controls sized via
+    `dvh`/`clamp()` to the safe area, S24 Ultra in both orientations) — **no page
+    scroll**. Only the **NPC/results list** scrolls **internally** (`#mapResults` /
+    `renderResults()`), as in shipped maps where the world fills the screen and a
+    side list scrolls.
+  - **Un‑mirror the minimap heading.** The minimap heading is reflected — turning
+    **right** in the world rotates the marker **left** on the map. Fix the sign
+    convention in the player‑facing/rotation math (`mmPlayer()` ~`game.js:5392`
+    and/or the `proj()` axis mapping) so **map rotation matches world rotation** —
+    turning right turns the indicator right — consistently on **both** the minimap
+    and the in‑zone full‑map view. Verify against the camera/`player.facing`
+    convention (north‑up) so it's correct, not just flipped to compensate.
+  - **Arrow‑shaped target pointer (replace the triangle).** The
+    direction‑to‑target indicator is a bare **triangle** whose pointing end is
+    ambiguous. Replace it with a clear **arrow** (shaft + arrowhead, distinct from
+    the player marker) for the active **waypoint** direction — on the minimap edge
+    marker and the on‑screen **compass** (`#compassArrow` / `_compass()` /
+    `resolveWaypoint()`). The arrow must **unambiguously point at the target**
+    (and the next portal for cross‑zone routes), the way quest‑compass arrows do in
+    big RPGs.
+  - **Fully readable place names (no circle clipping).** On the big map, place
+    labels are **cut off by the circular clip** (`drawZoneScene` calls `ctx.clip()`
+    to a circle ~`game.js:5439`, then draws labels inside it). Make labels **fully
+    visible and legible** — e.g. draw labels **after/outside** the geometry clip (so
+    text isn't clipped), keep them inside the screen bounds, add a subtle
+    halo/background plate for contrast, and nudge/stack to avoid overlap. Names must
+    be readable at the S24 Ultra DPI.
+  - **i18n + persistence.** Names already resolve via `tZoneName`/`t()` (keep EN+RU
+    correct). No save‑schema change expected (waypoint already serializes from
+    Task 13).
+- **Acceptance criteria:**
+  - The **full map fits entirely on one screen** (no scroll) on the S24 Ultra
+    (portrait + landscape) and desktop; **only the NPC/results list scrolls**.
+  - Turning **right** in the world turns the indicator **right** on the minimap and
+    in‑zone map (mirroring fixed), validated against the facing convention.
+  - The target‑direction indicator is a clear **arrow** that visibly points at the
+    selected target / next portal; it's distinct from the player marker.
+  - **Place names render fully and legibly** — **not clipped** by the map circle —
+    with enough contrast to read at phone DPI, no overlaps in the common cases.
+  - Desktop + mobile; headless‑safe (2D‑canvas feature‑detected); pipeline green.
+- **Tests to add:** a **pure heading test** asserting a right‑turn in world space
+  yields a right‑turn on the map (sign convention) — locks the un‑mirror; a
+  **bearing→arrow** test that the arrow angle matches `resolveWaypoint()`'s bearing
+  to the target/next portal; a label‑layout test that computed label positions stay
+  within screen bounds (not clipped to the geometry circle); an E2E at the S24 Ultra
+  profile asserting the full map has **no scroll** while `#mapResults` does.
+- **Files:** `src/game.js` (`mmPlayer`/`proj` heading sign, `drawZoneScene` label
+  pass + clip handling, the waypoint **arrow** marker + `_compass`,
+  `WorldMapUI` layout/sizing), `index.html`/`css` (`#worldmap` fit‑to‑viewport,
+  scrollable results, compass arrow asset/shape), `test/*` (heading/bearing/label +
+  E2E), `README.md`.
+- **Out of scope:** real cartographic terrain or a 3D map (keep the stylized 2D
+  map); reworking route‑finding (Task 13's `findRoute` is fine).
+- **Hints:** fix the **sign at the source** (don't double‑negate to fake it); draw
+  **labels last**, outside any geometry clip, with a halo; build the arrow as a
+  reusable canvas/CSS primitive shared by the minimap edge marker and the compass.
+
+### Task 21 — Unified inventory for potions & ingredients (30 slots, drag‑and‑drop potion slotting, sellable items, dedicated alchemist NPC)
+- **Status:** `[ ]`
+- **Depends on:** the item/inventory system (Task 12: `Inventory`/`invAdd`/`invCap`/
+  the tabbed bag), the potion belt + materials (`POTION_SLOTS`, `player.potions`,
+  `player.materials`), the Shop (Task 12/`POTION_STOCK`), and the drag utility from
+  **Task 16**. Coordinate `SAVE_VERSION` with Tasks 18/19.
+- **Goal.** Potions and crafting **ingredients live in ad‑hoc side stores**
+  (`player.potions` belt + a `player.materials` dictionary) separate from the main
+  **24‑slot equipment inventory**, with **HUD ingredient widgets**, **no
+  drag‑and‑drop**, and **no way to sell** them — and the wizard sells everything.
+  Rework the economy so **everything shares one bag** like shipped RPGs: ingredients
+  and potions occupy **inventory slots**, the bag grows to **30**, potions are
+  **drag‑slotted** into the 3 quick‑slots in any order, items are **sellable**, and
+  a **dedicated alchemist NPC** sells potions + basic ingredients.
+- **Scope (build this):**
+  - **Move ingredients & potions into the general inventory.** Migrate
+    **materials** (`player.materials` → stackable inventory items) and **potions**
+    (out of the separate `player.potions` belt as the *storage* model) into the
+    **unified bag** (`player.inventory`), so rocks, herbs, water, crystals **and**
+    potions occupy **inventory slots** alongside gear — with **stacking** for
+    consumables/materials (reuse/extend the Task 12 stack model). Crafting/recipes
+    (`hasMaterials`/`spendMaterials`) now read/write the bag.
+  - **Grow the bag to 30 slots.** Raise `invCap` from 24 → **30** and ensure the
+    tabbed inventory UI (Gear/Materials/Potions filter) lays out the larger grid
+    cleanly on mobile + desktop.
+  - **Remove the HUD ingredient widgets.** Delete the on‑screen materials chips
+    (`#materialsBar` / `updateMaterialsHud()`); ingredient counts are seen **only in
+    the inventory** from now on (declutters the HUD, complementing Task 16).
+  - **Drag‑and‑drop potion slotting (any potion, any order, 3 slots).** The 3
+    combat potion **quick‑slots** become an **assignment** over bag potions (like
+    the Task 16 skill slots): **drag any potion from the bag onto any of the 3
+    slots**, reorder/swap by dragging between slots, clear by dragging off — so the
+    player chooses which potions are quick‑drinkable and in what order. Reuse the
+    **pointer‑based drag utility** from Task 16; keep a pure assignment model +
+    accessible tap fallback. Drinking a quick‑slot consumes from the bag stack.
+  - **Make potions & ingredients sellable.** Extend `Shop.sell()` so **potions and
+    materials** can be sold back for coins (sane buy/sell pricing from `ITEM_DB`
+    cost), like any other item.
+  - **Dedicated alchemist NPC.** Add a **new alchemist/apothecary NPC** (in the hub
+    or a wild zone, via `NPC_DATA`/`LOCATIONS`) whose shop sells **potions and basic
+    ingredients** (`POTION_STOCK` + starter materials). **Remove those from the
+    wizard's range** so vendors are specialized (the wizard/merchant keeps gear; the
+    alchemist owns consumables + reagents). Localize the NPC + stock (EN+RU).
+  - **Persistence.** Serialize the unified bag (potions + materials as items) + the
+    drag‑assigned quick‑slots; **bump `SAVE_VERSION`**; **migrate** old saves
+    (fold legacy `player.materials` + `player.potions` belt into bag items +
+    quick‑slot refs) so existing players keep their stuff.
+- **Acceptance criteria:**
+  - Materials **and** potions live in the **30‑slot** bag (stacked), occupying
+    inventory slots; crafting reads/writes the bag; the **HUD ingredient widgets are
+    gone**.
+  - Any potion can be **dragged into any of the 3 quick‑slots in any order**,
+    reordered, swapped and cleared; drinking consumes from the bag; an accessible
+    tap fallback exists.
+  - Potions and ingredients are **sellable** at sane prices; a **dedicated
+    alchemist NPC** sells potions + basic ingredients and the wizard **no longer**
+    does.
+  - The unified bag + quick‑slot assignment **round‑trips through save/load**, and
+    **old saves migrate** (legacy belt/materials fold in) without loss; pipeline
+    green; headless‑safe; works on mobile + desktop.
+- **Tests to add:** the **migration** (legacy `materials` map + `potions` belt →
+  bag items + quick‑slots) is a pure, tested function; bag **stacking** of
+  materials/potions; the **drag‑to‑potion‑slot** reducer (assign/move/swap/clear,
+  any order) unit‑tested; `Shop.sell` accepts potions/materials at expected prices;
+  the alchemist's stock contains potions+basic ingredients and the wizard's no
+  longer does; **save/load round‑trip** of the new schema + migration; a UI smoke
+  driving a potion drag + a sell.
+- **Files:** `src/game.js` (`Inventory`/`invAdd`/`invCap`→30, fold
+  `materials`/`potions` into the bag, crafting `hasMaterials`/`spendMaterials`,
+  `updatePotionBar` drag slotting, `Shop.sell`/`buyPotion`, remove
+  `updateMaterialsHud`, the alchemist NPC wiring, `serializeGame`/`applySave`,
+  `SAVE_VERSION`), `src/data/items.js`/`content.js` (potions/materials as
+  inventory items, sell prices, alchemist stock split from the wizard),
+  `src/data/content.js`/`NPC_DATA` (alchemist NPC + location), `index.html`/`css`
+  (30‑slot grid, drop `#materialsBar`, potion drag targets),
+  `src/core/i18n.js` (alchemist + any strings, EN+RU), `test/*`, `README.md`.
+- **Out of scope:** a full crafting‑tree overhaul or new potion recipes beyond
+  re‑homing the existing ones; weight/encumbrance (note as a follow‑up); the skill
+  drag‑slotting (that's Task 16 — share the utility, don't redo it).
+- **Hints:** model materials/potions as **stackable item instances** so one bag
+  code path serves everything; reuse Task 16's pointer‑drag utility and the pure
+  reducer pattern; gate the migration on `SAVE_VERSION` so it runs exactly once.
+
+### Task 22 — Environment rewrite: stable resource generation + natural road‑edge teleporters
+- **Status:** `[ ]`
+- **Depends on:** the world/zone systems (`buildWorld`, `setupZoneContent`,
+  `ZoneManager`, `ResourceNode`, `populateAdventure`/`populateWildResources`,
+  `CONFIG.maxResourceNodes`, the portal layout + hub `roadLanes`). None else.
+- **Goal.** Two environment problems break immersion. **(a) Resource generation is
+  unstable:** changing location and returning **re‑scatters a fresh batch of
+  resources** that **pile up and aren't collectable**, instead of a stable,
+  time‑based ecology. **(b) Inter‑zone travel uses floating portal orbs** on circles
+  on the ground, which feels gamey. Rewrite both: make resource population
+  **deterministic and time‑gated** with a strict **per‑type, per‑zone cap**, and
+  move travel onto the **roads that run to the map edge** so walking off the end of a
+  road **naturally teleports** you to the next land.
+- **Scope (build this):**
+  - **Stable, time‑based resource generation (no pile‑ups, no phantom nodes).**
+    Rework population so a zone's resource set is **deterministic and persistent
+    across re‑entry**: re‑entering a zone must **not** spawn a new batch on top of
+    the old one. Persist/restore per‑zone resource state (positions + depletion +
+    respawn timers) so the **count is stable** when you leave and come back, and
+    fix the **non‑collectable "phantom" nodes** (root‑cause the registration/teardown
+    interaction so every visible node is harvestable). **New resources appear only
+    after in‑game time passes** (a believable regrowth cadence), not on every
+    entry. **Double‑check and enforce a max count *per resource type, per zone*** at
+    every spawn/respawn/regrow path (extend `CONFIG.maxResourceNodes` with per‑kind
+    caps) so no type ever exceeds its limit — verified deterministically over
+    seeded layouts and repeated travel.
+  - **Road‑edge teleporters (replace the ground‑circle orbs).** Move the inter‑zone
+    transition from the floating **portal orbs** (`"portOrb"+to`, the 3.6 m ground
+    triggers) onto the **roads that lead to the edge of the map** (the hub
+    `roadLanes` / road meshes that currently "lead nowhere"). Extend those roads to
+    the world boundary and make **walking onto the road's end‑of‑map segment trigger
+    travel** — so movement between lands reads as **walking down a road to the next
+    place**, not stepping into a magic circle. Keep the **fade‑veil transition**,
+    arrival placement (`placePlayerAtArrival` onto the *incoming* road), and the
+    zone graph (`zones.js` portals) intact — only the **trigger geometry + visual**
+    change (a road heading off‑map per portal destination; remove/repurpose the orb
+    meshes). Make the trigger reliable (you can't skirt around it) and bidirectional.
+  - **Disposal & determinism.** All new/relocated meshes (extended roads, edge
+    markers) **dispose on teardown**; all randomness via seeded `rng()`; the regrow
+    clock is time‑based and **pauses with the game**. Update the **minimap/map**
+    portal rendering (Task 13/20) to show road‑edge exits instead of orbs.
+  - **Persistence.** Per‑zone resource state (so counts stay stable across travel
+    and reload) serializes/restores; **bump `SAVE_VERSION`** if the schema grows;
+    migrate older saves sanely.
+- **Acceptance criteria:**
+  - Leaving and returning to a zone **does not** add resources — the live count is
+    **stable** across travel and reload; **every visible node is harvestable** (the
+    phantom‑node bug is gone); new nodes appear **only after in‑game time**.
+  - Each resource **type** is **capped per zone** and never exceeds it across
+    spawn/respawn/regrow/travel/reload — proven by a deterministic seeded test.
+  - Inter‑zone travel happens by **walking a road to the map edge** (no ground‑circle
+    orbs); the fade transition + correct arrival placement still work, both
+    directions; the trigger can't be bypassed.
+  - All new meshes dispose on teardown (no leaks across travel); regrow is
+    time‑based + pause‑correct; headless‑safe; pipeline green; per‑zone resource
+    state round‑trips through save/load (old saves migrate).
+  - The minimap/world map reflect **road‑edge exits**, not orbs.
+- **Tests to add:** a **stability invariant** — re‑entering a zone N times keeps the
+  resource count constant and within per‑type caps (deterministic seed); a
+  **per‑type cap** test at spawn/respawn/regrow; a **regrowth‑timing** test (no new
+  node before the cadence elapses; one appears after); a **harvestable‑after‑travel**
+  regression test (no phantom nodes); a **road‑edge trigger** test (walking onto the
+  edge segment fires `ZoneManager.travel` to the right zone, both directions; can't
+  be skirted); **save/load round‑trip** of per‑zone resource state + migration;
+  teardown disposes the new road/edge meshes (no leak).
+- **Files:** `src/game.js` (`populateAdventure`/`populateWildResources` →
+  deterministic + time‑gated + per‑type caps, `ResourceNode` regrow/registration,
+  per‑zone resource persistence in `serializeGame`/`applySave`, `ZoneManager`
+  portal trigger → road‑edge geometry, `buildWorld` road extension + orb removal,
+  minimap/map portal rendering, `SAVE_VERSION`), `src/core/config.js`
+  (`maxResourceNodes` + per‑kind caps + regrow cadence), `src/data/zones.js`
+  (portal/road edge metadata if needed), `test/*`, `README.md`.
+- **Out of scope:** redesigning the resource economy or crafting (this is
+  generation + travel mechanics, not balance); procedural terrain generation
+  beyond placing the road exits; new resource types.
+- **Hints:** make population a **pure function of (zone, seed, elapsed time)** so
+  re‑entry is reproducible and testable; persist per‑zone node state keyed by zone
+  id; reuse the existing fade‑veil + `placePlayerAtArrival` so only the trigger
+  geometry changes; snap road exits to the existing `roadLanes` so they line up
+  with the bridge‑aware road work from Task 10.
+
+---
+
 ## 5. Recommended order
 
 Tasks are mostly independent, but this order minimizes rework.
@@ -973,6 +1570,25 @@ Tasks are mostly independent, but this order minimizes rework.
 6. **Task 14 — Skill & leveling system** *(builds on the Task 12 stat/loadout work)*
 7. **Task 13 — Minimap & world map** *(complements the Task 2 story tracker)*
 8. **Task 15 — Google Drive cloud saves** *(last: after the save schema settles)*
+
+**Tasks 16–22 (mobile UX, persistence & systems polish) — recommended order:**
+
+1. **Task 16 — Responsive HUD/menu overhaul** *(foundational UX: auto‑fit menus,
+   one‑thumb combat, the shared pointer‑drag utility reused by Task 21)*
+2. **Task 17 — Durable session persistence** *(cookies + auto‑resume + silent
+   Google re‑auth; underpins Task 18)*
+3. **Task 18 — Save slots + cloud‑browser fix + management** *(builds on Task 17's
+   store; fixes the dead start‑screen cloud click)*
+4. **Task 19 — Score → experience system** *(independent; small, clean removal)*
+5. **Task 21 — Unified inventory (potions/ingredients, 30 slots, drag‑slotting,
+   alchemist)** *(reuses the Task 16 drag utility; coordinate `SAVE_VERSION`)*
+6. **Task 20 — Map subsystem fixes** *(pairs with Task 16's map‑button removal)*
+7. **Task 22 — Environment rewrite (stable resources + road‑edge teleporters)**
+   *(updates the minimap/map exits, so do it after Task 20)*
+
+> All of Tasks 16–22 must pass their **UI/responsive tests on the Galaxy S24 Ultra
+> device profile** (1440 × 3120, DPR ≈ 3.5, portrait + landscape) added in Task 16,
+> alongside the existing desktop coverage.
 
 If you skip ahead, still obey Golden Rule 9 (route new strings through i18n once
 it exists) and the shared Definition of Done. For Tasks 9 & 15, read each task's
