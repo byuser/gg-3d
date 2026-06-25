@@ -1203,7 +1203,20 @@ A task is **done** only when **all** of these are true:
   session never clobbers a newer cloud save.
 
 ### Task 18 — Cloud‑saves browser fix + multiple manual save slots with full management (rename / delete / load)
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-25 · Shipped a pure **`SaveSlots`** store (6 named local slots in
+  `localStorage`, each the full `serializeGame()` payload + metadata; immutable create/list/rename/
+  delete/overwrite + next‑free selection) rendered by a thin **`SavesUI`** — one **Manage Saves**
+  screen reachable from the start screen **and** pause with **Load / Rename (inline) / Delete /
+  Overwrite / New save**, a **cloud** section (sign‑in CTA when signed‑out, else the cloud slots with
+  Restore + **delete**, reusing `CloudSave.listSaves`/`restore`/new `deleteSave`), and file
+  export/import. **Fixed the dead start‑screen cloud action**: the cloud browser now opens even
+  signed‑out with a clear state + sign‑in button (no more no‑op). Destructive actions reuse a
+  generalized, screen‑centred **`Pause.askConfirm(action,text,onYes)`**; loads go through the same
+  boot reload path as file/cloud (reconciled via `cloudNewer`). The prior single‑slot (Task‑17 auto‑
+  session) snapshot **migrates** into a named slot. Added **playtime** to the save → `SAVE_VERSION`
+  **9 → 10** (legacy saves load with `playSec = 0`). New EN+RU strings (key‑parity green). New
+  `test/saveslots.test.js` (25 cases; Vitest 164 → 189) + a Playwright `saves.spec.js` (open → save →
+  rename → reload → load) at desktop + the S24 Ultra portrait + landscape profiles.
 - **Depends on:** the save layer (Tasks 9/15) and **Task 17** (durable session) —
   build this **after/with** Task 17 so slots and the auto‑session share one store.
   Coordinate `SAVE_VERSION` with any task that changes the schema.

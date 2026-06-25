@@ -236,15 +236,20 @@ runs in English without a browser.
 - **Camera:** the view follows Lily at a fixed distance; zoom only with the mouse
   wheel (or a two-finger pinch on mobile).
 - **Pause menu:** press **Esc** or the **☰** button to pause the game at any time. The
-  menu lets you **Resume**, **Save Progress**, **Restart**, or **Exit to Menu** — the
+  menu lets you **Resume**, open **Manage Saves**, **Restart**, or **Exit to Menu** — the
   last two ask for confirmation so a stray tap can't wipe your run.
-- **Save & load:** **Save Progress** downloads a small `.json` save file to your device
-  capturing *everything* needed to resume — the procedural environment (via its world seed),
+- **Save slots & management:** the **Manage Saves** screen (reachable from the **start screen**
+  *and* the **pause menu**) gives you **six named save slots** on this device, like a shipped RPG.
+  Each slot stores *everything* needed to resume — the procedural environment (via its world seed),
   the **land you're in**, your score, money, **gear & inventory**, health, **materials & relics**,
   **story progress** (current chapter, completed missions, reach/talk objectives, side-quest
-  tallies), the **castle build state**, cleared **lair bosses**, and the **time/weather**. Back on
-  the **start screen**, **Load Progress** reads a save file from your device and drops you right
-  back where you left off — even on a different device or browser.
+  tallies), the **castle build state**, cleared **lair bosses**, the **time/weather**, and your
+  **playtime** — plus a label (name, when it was saved, your level/zone). You can **Load**,
+  **Rename** (inline), **Delete** (with a confirm) or **Overwrite** any slot, and **New save**
+  writes to the next free one. The same screen lists your **cloud** saves (below) and keeps
+  **Export/Import to a file** as an extra option, so a save still travels to another device or
+  browser. (Your previous single in-progress run migrates into a slot automatically — nothing is
+  lost.)
 - **Auto-resume (durable session):** your in-progress run is **continuously auto-saved to this
   device** (debounced on key beats — travel, level-up, quest turn-in, purchase — and on tab-hide),
   so **reloading the page** — or switching desktop⇄mobile layout, re-orienting, or changing graphics
@@ -260,10 +265,12 @@ runs in English without a browser.
   Google sign-in.
 - **Cloud saves (optional):** if the game has been configured with a Google OAuth client id (see
   [Cloud saves](#cloud-saves-optional-google-drive) below), you can **Sign in with Google** from the
-  start screen or pause settings and back your progress up to your **own private Google Drive** — a
-  manual **Save to Drive**, an **autosave every 5 minutes** that keeps a **rolling one-hour history**,
-  and a **browse-and-restore** list. It's fully opt-in: signed out (or if it isn't configured) the
-  local `.json` save above is all you need, and nothing changes.
+  start screen, pause settings, or the **Manage Saves** screen and back your progress up to your
+  **own private Google Drive** — a manual **Save to Drive**, an **autosave every 5 minutes** that
+  keeps a **rolling one-hour history**, and a **browse-and-restore** list (you can also **delete** a
+  cloud save). Opening **Cloud saves…** while signed out now shows a clear state with a **sign-in
+  button** (it's no longer a dead click). It's fully opt-in: signed out (or if it isn't configured)
+  the local slots above are all you need, and nothing changes.
 
 ## Cloud saves (optional, Google Drive)
 
@@ -482,16 +489,27 @@ out-of-range guards), the **feature detection** of Pointer Events + the Screen
 Orientation lock staying inert/no-op headless, the SkillsUI **tap-to-pick**
 fallback driving `Skills.assignSlot` / `clearSlot`, and the slotted quick-bar
 state still **round-tripping** through save/load.
+The **save-slots** suite (`test/saveslots.test.js`) locks in Task 18: the pure
+**slot store** (sanitize / metadata / normalize / list / next-free / put / rename
+/ delete, all immutable + total), `fmtPlaytime`, the **playtime metadata**
+serialized in the bumped save schema (v10; legacy saves load with `playSec = 0`),
+a **per-slot round-trip** through `applySave`, the **migration** of the prior
+single-slot (auto-session) snapshot into a named slot, the **cloud-slot delete**
+via the injected Drive client, the headless-safe **SavesUI** open/render path, and
+the cloud browser opening with a **sign-in CTA** when signed out (no dead click).
 On top of that, a
 **functional** suite (`test/functional.test.js`) boots the assembled game in
 isolation and drives whole flows (start → zone travel → save/reload round-trip),
 and **Playwright** suites load the built bundle in real headless Chromium: the
 boot smoke (`test/e2e/boot.spec.js`) asserts the canvas boots with **no console
-errors** and the core overlays open, and the **responsive** suite
+errors** and the core overlays open, the **responsive** suite
 (`test/e2e/responsive.spec.js`) runs at desktop **and** the **Galaxy S24 Ultra**
 device profile (portrait + landscape) to assert every menu control is reachable
 (incl. the cloud panel), the removed widgets are gone, no two key HUD widgets
-overlap, and the one-thumb action arc sits bottom-right in landscape:
+overlap, and the one-thumb action arc sits bottom-right in landscape, and the
+**saves** suite (`test/e2e/saves.spec.js`, same profiles) opens the Saves screen
+from the start menu + pause, saves into a named slot, **renames** it, **reloads**,
+and **loads** the slot back into play:
 
 ```bash
 npm ci          # once
@@ -650,10 +668,18 @@ is fully testable headless:
 - **`setupZoneContent`** — lays the per-zone content on a freshly built world: the hub gets
   the merchant, blacksmith, NPCs, resource nodes, castle and artifacts; the wild lands get
   themed resource nodes.
-- **Save/load (`serializeGame` / `applySave`)** — snapshots the run to JSON and rebuilds it:
-  re-seed, restore the player (pose + **inventory & equipment**, materials, relics), score,
-  money, quests, castle, cleared lairs and time/weather, then **stream to the saved zone**
-  (its monsters regenerate from the spawn table). Stats are recomputed from the restored gear.
+- **Save/load (`serializeGame` / `applySave`)** — snapshots the run to JSON (schema **v10**;
+  Task 18 added **playtime**) and rebuilds it: re-seed, restore the player (pose + **inventory &
+  equipment**, materials, relics), score, money, quests, castle, cleared lairs and time/weather,
+  then **stream to the saved zone** (its monsters regenerate from the spawn table). Stats are
+  recomputed from the restored gear. Older saves still load (missing fields default).
+- **`SaveSlots` / `SavesUI`** — **multiple named manual save slots** (Task 18). `SaveSlots` is a
+  **pure** store over `localStorage` (six slots, each holding the full `serializeGame()` payload +
+  metadata; create / list / rename / delete / overwrite / next-free, with the prior single-slot run
+  migrated in once). `SavesUI` is the thin **Manage Saves** screen (start + pause) that renders it,
+  reusing `Pause.askConfirm` for destructive actions and `cloudNewer` so a load never clobbers newer
+  work. Loads go through the **same boot reload path** as a file/cloud load. Covered by
+  `test/saveslots.test.js`.
 - **`CloudSave` / `CloudUI`** — **opt-in** Google Drive cloud saves (Task 15) wrapping the same
   `serializeGame` / `applySave` JSON: a manual **Save to Drive** slot, a 5-minute **autosave** with a
   rolling one-hour history, and a browse-and-restore overlay, all written to the player's private Drive
@@ -662,8 +688,9 @@ is fully testable headless:
   every browser API is feature-detected so signed-out / offline / unconfigured / headless is cleanly
   disabled and never throws. The autosave-on preference persists in `localStorage`; no save-schema
   change. See [Cloud saves](#cloud-saves-optional-google-drive).
-- **`Pause`** — the in-game pause menu (Resume / Save / Restart / Exit) that freezes the
-  simulation, with a confirmation guard on the destructive actions.
+- **`Pause`** — the in-game pause menu (Resume / Manage Saves / Restart / Exit) that freezes the
+  simulation, with a reusable, screen-centred confirmation guard (`askConfirm` takes an optional
+  callback, so the save-slot delete/overwrite confirms reuse it) on the destructive actions.
 - **`STORY` / `MISSIONS` / `SIDE_QUESTS` / `Story`** — the **structured main campaign**: a
   declarative table of five ordered **chapters** of **missions** (plus an optional **side-quest**
   pool), and the `Story` controller that gates the main line in order, computes the single
@@ -869,4 +896,15 @@ Source: GitHub Actions**.
       **drag-and-drop** skill slotting (Pointer Events, touch + mouse) on a pure reducer with an
       accessible tap-to-pick fallback. Fullscreen on touch also locks **landscape**. Covered by
       `test/hud.test.js` + a Playwright responsive suite at the S24 Ultra device profile.
+- [x] **Durable session persistence** — your in-progress run auto-saves to this device and a reload (or
+      a desktop⇄mobile / orientation / quality switch) resumes it via a **Continue** button; the Google
+      sign-in is remembered and silently refreshed. A first-party cookie holds only small identifiers
+      (`Session`, `src/game.js`); covered by `test/session.test.js`.
+- [x] **Multiple named save slots + full management** — a single **Manage Saves** screen (start screen
+      *and* pause) with **six named local slots**: **Load / Rename / Delete / Overwrite / New save**,
+      each showing level · zone · playtime · timestamp. Cloud saves are listed + manageable (restore /
+      delete) in the same screen, and the start-screen **Cloud saves…** action is no longer a dead click
+      (it opens with a clear state + sign-in CTA). File export/import stays as an extra. The prior
+      single-slot run **migrates** in; older saves still load. Pure slot store (`SaveSlots`) + a thin
+      `SavesUI` in `src/game.js`, covered by `test/saveslots.test.js` + a Playwright saves suite.
 - [ ] Puzzles (levers, plates, gated doors)

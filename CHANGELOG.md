@@ -35,6 +35,67 @@ delta it shipped with, since later tasks reference those.
   `session-s24-landscape` Playwright E2E (resume-via-Continue → open pause → open
   Cloud Saves), which previously timed out on `master`.
 
+## [2026-06-25] — Task 18 — Cloud-saves browser fix + multiple named save slots with full management
+
+The single file-download save model is replaced by a proper **save-management system** like a shipped RPG:
+**six named local save slots** with **Load / Rename / Delete / Overwrite / New save**, surfaced from one
+**Manage Saves** screen reachable from the **start screen and the pause menu** — and the **dead start-screen
+cloud-saves action is fixed** (it now opens with a clear state + sign-in CTA instead of doing nothing).
+`SAVE_VERSION` **9 → 10** (added per-run **playtime** to the save; older saves still load with `playSec = 0`).
+Vitest **164 → 189** (new `test/saveslots.test.js`, 25 cases) plus a new Playwright `saves.spec.js`
+(open → save → rename → reload → load) run at desktop **and** the S24 Ultra portrait + landscape profiles.
+
+### Added
+
+- **Pure `SaveSlots` store.** Multiple named manual slots persisted to `localStorage` under a versioned
+  envelope (`gg3d_slots`, `SLOTS_VERSION` 1; `SLOT_COUNT` = 6). Each slot holds the **full
+  `serializeGame()` payload** plus lightweight **metadata** (name, timestamp, zone, level, playtime) so the
+  list renders without parsing every payload. The slot logic is **pure + immutable + total**:
+  `sanitizeSlotName` (length-capped to 40, trimmed), `slotMetaFromPayload`, `normalizeSlotStore` (drops
+  invalid records), `listSlots`, `nextFreeSlot`, `putSlotRecord` / `renameSlotRecord` / `deleteSlotRecord`,
+  with a thin `SaveSlots` controller (`read`/`write`/`saveTo`/`saveNew`/`rename`/`remove`/`payloadOf`/`load`).
+- **`SavesUI` — one Manage Saves screen (start + pause).** Lists the local slots (Load / Rename **inline,
+  i18n-safe, length-capped** / Delete / Overwrite / New save), a **cloud** section, and **file
+  export/import**. Loads route through the **same boot reload path** as a file/cloud load (re-seed → rebuild
+  → `applySave`), reconciled with `cloudNewer` so a load never clobbers newer in-progress work. Reachable
+  via a new **Manage Saves** button on both menus; opens above any overlay; Escape backs out cleanly.
+- **Cloud slot management.** The cloud section (and the existing `#cloudSaves` browser) now list cloud saves
+  with **Restore** and **Delete** (new `CloudSave.deleteSave(id)` over the injectable Drive client), reusing
+  `CloudSave.listSaves()` / `restore()` and the Task-15 rolling-history policy.
+- **Per-run playtime.** Active playtime accumulates (frame-rate-independent, only while truly playing) and
+  serializes as `playSec`, shown in each slot's metadata via the new pure `fmtPlaytime`.
+
+### Changed
+
+- **The dead start-screen cloud action is fixed.** "Cloud saves…" is no longer disabled-when-signed-out; it
+  opens the cloud browser even signed out, showing a **clear state + a sign-in CTA** (or a not-configured /
+  unavailable note) instead of a no-op. The new Manage Saves screen mirrors this.
+- **`Pause.askConfirm(action, text, onYes)` is generalized + screen-centred.** It now accepts an optional
+  callback (so the save-slot delete/overwrite confirms reuse the same guard) and the confirmation dialog
+  moved out of the pause panel into a **top-level modal** so it floats above any overlay — including the
+  Saves screen opened from the start menu (where the sim isn't paused). Restart/Exit behaviour + live
+  re-localization are unchanged.
+- **Pause menu:** the file-download **Save Progress** button is replaced by **Manage Saves** (file
+  export/import now lives inside the Saves screen alongside the slots).
+
+### Migration
+
+- **`SAVE_VERSION` 9 → 10** for the added `playSec` field; `validateSave` still accepts v2…v10, so **older
+  saves load** (defaulting `playSec` to 0). The **prior single-slot** local run (the Task-17 auto-session
+  snapshot) is **migrated once** into a named slot on first read of the slot store, so an existing player's
+  in-progress run is never stranded. The per-slot envelope is versioned independently (`SLOTS_VERSION`).
+
+### Tests
+
+- New `test/saveslots.test.js` (25 cases): the pure store (sanitize / metadata / normalize / list /
+  next-free / put / rename / delete), `fmtPlaytime`, the v10 playtime round-trip + legacy default, a
+  per-slot round-trip through `applySave`, the single-slot **migration**, the **cloud-slot delete** via an
+  injected client, the headless-safe `SavesUI` render path, and the cloud browser opening with a sign-in
+  CTA when signed out. New Playwright `test/e2e/saves.spec.js` (desktop + S24 Ultra portrait + landscape):
+  the Saves screen opens from the start menu (cloud section + sign-in CTA present, six slots rendered) and a
+  run saves → renames → reloads → loads a named slot. The three save-version assertions in the existing
+  suites now read `T.SAVE_VERSION` instead of a hardcoded `9`.
+
 ## [2026-06-25] — Task 17 — Durable session persistence
 
 Reloading the page — or switching desktop⇄mobile layout / re-orienting / changing graphics quality (all of which
