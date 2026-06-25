@@ -88,6 +88,72 @@ import { LOCATIONS, LOCATION_BY_ID, NPC_DATA, NPC_BY_ID } from "./content.js";
     return COMPASS_KEYS[Math.round(a * 8) % 8];
   }
 
+  // ---- Minimap heading (north-up, un-mirrored) ------------------------------
+  // The corner minimap and the in-zone full-map are NORTH-UP top-down views. To
+  // read like a real overhead map — turning RIGHT in the world turns the marker
+  // RIGHT (clockwise) on the map — the world→screen projection MIRRORS the X axis
+  // (screen x = -worldX) while keeping +Z pointing down, so north (−Z) stays UP.
+  // (Without the mirror the rotation sense inverts: a right turn spins the marker
+  // left. Fixing it here, at the source, keeps the player arrow and every plotted
+  // dot consistent — they all go through the same projection.)
+  //
+  // `mapHeadingScreen(facing)` returns the unit SCREEN-SPACE direction (x right,
+  // y down) the player arrow points for a given world `facing` (atan2(x,z), 0=+Z),
+  // and `mapVecToScreen(dx,dz)` maps any world XZ delta into that same space — both
+  // pure so the minimap drawing and the heading test share one source of truth.
+  function mapVecToScreen(dx, dz) { return { x: -dx, y: dz }; }
+  function mapHeadingScreen(facing) {
+    return mapVecToScreen(Math.sin(facing || 0), Math.cos(facing || 0));
+  }
+
+  // ---- Map-label layout (no circular clipping) ------------------------------
+  // Place text labels for the in-zone map so names stay FULLY readable: keep each
+  // label inside the screen bounds (never clipped to the geometry circle the map
+  // draws), and nudge overlapping labels apart vertically so the common cases
+  // don't collide. Pure + headless: it only computes positions; the caller draws.
+  //
+  // `items`: [{ x, y, text, priority? }] anchor points (canvas px, the marker the
+  // label belongs to). Returns the same list with resolved { x, y } label centres
+  // clamped to [pad, W-pad] × [pad, H-pad], higher-priority labels winning their
+  // spot first. `lineH` is the vertical span reserved per label for overlap tests.
+  function layoutMapLabels(items, W, H, opts) {
+    const o = opts || {};
+    const pad = o.pad == null ? 14 : o.pad;
+    const lineH = o.lineH == null ? 13 : o.lineH;
+    const halfW = (o.estWidth == null ? 60 : o.estWidth) / 2;
+    const dy = o.anchorDy == null ? -8 : o.anchorDy; // default: label above the marker
+    const minX = pad + halfW, maxX = Math.max(minX, W - pad - halfW);
+    const minY = pad, maxY = Math.max(minY, H - pad);
+    const clampX = (v) => Math.max(minX, Math.min(maxX, v));
+    const clampY = (v) => Math.max(minY, Math.min(maxY, v));
+    // Resolve in priority order (stable for equal priority) so important labels
+    // (e.g. the waypoint / portals) claim their natural slot first.
+    const ordered = (items || [])
+      .map((it, i) => ({ it, i }))
+      .sort((a, b) => ((b.it.priority || 0) - (a.it.priority || 0)) || (a.i - b.i));
+    const placed = [];
+    const out = new Array((items || []).length);
+    for (const { it, i } of ordered) {
+      let lx = clampX(it.x);
+      let ly = clampY(it.y + dy);
+      // Push down (then up) until this label clears already-placed ones.
+      let guard = 0;
+      const collides = (yy) =>
+        placed.some((p) => Math.abs(p.x - lx) < halfW * 2 && Math.abs(p.y - yy) < lineH);
+      while (collides(ly) && guard < 40) {
+        const down = clampY(ly + lineH);
+        if (!collides(down) && down !== ly) { ly = down; break; }
+        const up = clampY(it.y + dy - lineH * (guard + 1));
+        if (!collides(up)) { ly = up; break; }
+        ly = down;
+        guard++;
+      }
+      placed.push({ x: lx, y: ly });
+      out[i] = { x: lx, y: ly, text: it.text, priority: it.priority || 0 };
+    }
+    return out;
+  }
+
   // ---- Map targets (searchable) ---------------------------------------------
   // Every zone, every hub landmark and every story NPC, as data only (no display
   // names — the UI resolves those through i18n so this index stays translation-
@@ -187,6 +253,7 @@ import { LOCATIONS, LOCATION_BY_ID, NPC_DATA, NPC_BY_ID } from "./content.js";
 export {
   ZONE_ADJ, zoneEdges, findRoute, nextZoneStep,
   bearingRad, dist2D, wrapAngle, relativeHeading, compass8, COMPASS_KEYS,
+  mapVecToScreen, mapHeadingScreen, layoutMapLabels,
   mapTargets, MAP_TARGETS, targetZoneOf, targetPoint, validWaypoint,
   normalizeText, matchesQuery, searchTargets, worldLayout,
 };

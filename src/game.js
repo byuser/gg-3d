@@ -44,6 +44,7 @@ import { ZONES, ZONE_BY_ID, HUB_ZONE } from "./data/zones.js";
 import {
   ZONE_ADJ, zoneEdges, findRoute, nextZoneStep,
   bearingRad, dist2D, relativeHeading, compass8,
+  mapVecToScreen, mapHeadingScreen, layoutMapLabels,
   MAP_TARGETS, targetZoneOf, targetPoint, validWaypoint,
   searchTargets, worldLayout,
 } from "./data/worldmap.js";
@@ -5971,7 +5972,7 @@ import {
     if (fill) { ctx.fillStyle = fill; ctx.fill(); }
     if (stroke) { ctx.lineWidth = 1; ctx.strokeStyle = stroke; ctx.stroke(); }
   }
-  // A bobbing target ring (the waypoint marker).
+  // A bobbing target ring (the waypoint marker, used when the target is on-map).
   function mmRing(ctx, x, y, r) {
     ctx.save();
     ctx.strokeStyle = "#ffd34e"; ctx.lineWidth = 2;
@@ -5979,9 +5980,40 @@ import {
     ctx.beginPath(); ctx.arc(x, y, 1.5, 0, Math.PI * 2); ctx.fillStyle = "#ffd34e"; ctx.fill();
     ctx.restore();
   }
+  // A reusable canvas ARROW (shaft + arrowhead) pointing along screen-space
+  // direction `(dirX, dirY)` (need not be unit). Shared by the minimap edge marker
+  // (and any canvas pointer) so the target direction is unambiguous, unlike a bare
+  // triangle. `len` is the shaft length; the head scales with it.
+  function drawMapArrow(ctx, x, y, dirX, dirY, len, col) {
+    const m = Math.hypot(dirX, dirY) || 1;
+    const ux = dirX / m, uy = dirY / m;        // forward (toward the target)
+    const px = -uy, py = ux;                    // perpendicular
+    const tipX = x + ux * len, tipY = y + uy * len;          // arrowhead tip
+    const baseX = x - ux * len * 0.5, baseY = y - uy * len * 0.5; // shaft tail
+    const neckX = x + ux * (len * 0.35), neckY = y + uy * (len * 0.35); // head base
+    const hw = Math.max(3, len * 0.42);         // arrowhead half-width
+    ctx.save();
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    // Shaft.
+    ctx.beginPath();
+    ctx.moveTo(baseX, baseY); ctx.lineTo(neckX, neckY);
+    ctx.lineWidth = Math.max(2, len * 0.28); ctx.strokeStyle = col || "#ffd34e"; ctx.stroke();
+    // Arrowhead (filled triangle at the tip).
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(neckX + px * hw, neckY + py * hw);
+    ctx.lineTo(neckX - px * hw, neckY - py * hw);
+    ctx.closePath();
+    ctx.fillStyle = col || "#ffd34e"; ctx.fill();
+    ctx.lineWidth = 1; ctx.strokeStyle = "#3a2a00"; ctx.stroke();
+    ctx.restore();
+  }
   function mmPlayer(ctx, x, y, facing) {
-    const fx = Math.sin(facing), fy = Math.cos(facing); // screen dir (y = +Z down)
-    const px = -fy, py = fx;
+    // North-up, un-mirrored: the arrow points along the screen-space heading so a
+    // RIGHT turn in the world rotates the marker RIGHT (see mapHeadingScreen).
+    const h = mapHeadingScreen(facing);
+    const fx = h.x, fy = h.y;                    // forward (screen dir, y down)
+    const px = -fy, py = fx;                     // perpendicular
     ctx.beginPath();
     ctx.moveTo(x + fx * 6.5, y + fy * 6.5);
     ctx.lineTo(x - fx * 3.2 + px * 4, y - fy * 3.2 + py * 4);
@@ -6014,9 +6046,55 @@ import {
     return { inZone: false, targetZone: tz, nextZone, portal, dx, dz, dist: Math.hypot(dx, dz), arrived: false };
   }
 
+  // Draw a label with a rounded background plate + soft halo so it stays legible
+  // over any map colour (used for the big-map place names, drawn OUTSIDE the clip).
+  function mapLabelText(ctx, text, x, y, opts) {
+    if (!ctx.fillText) return;
+    const o = opts || {};
+    const fs = o.fontSize || 11;
+    ctx.save();
+    ctx.font = (o.bold ? "700 " : "") + fs + "px system-ui, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const padX = 4, padY = 2.5;
+    let w = 40; try { w = ctx.measureText(text).width; } catch (e) {}
+    const bw = w + padX * 2, bh = fs + padY * 2;
+    const bx = x - bw / 2, by = y - bh / 2, r = Math.min(5, bh / 2);
+    // Rounded background plate.
+    if (ctx.beginPath) {
+      ctx.beginPath();
+      if (ctx.roundRect) { ctx.roundRect(bx, by, bw, bh, r); }
+      else {
+        ctx.moveTo(bx + r, by);
+        ctx.arcTo(bx + bw, by, bx + bw, by + bh, r);
+        ctx.arcTo(bx + bw, by + bh, bx, by + bh, r);
+        ctx.arcTo(bx, by + bh, bx, by, r);
+        ctx.arcTo(bx, by, bx + bw, by, r);
+      }
+      ctx.closePath();
+      ctx.fillStyle = o.plate || "rgba(10,13,24,0.66)"; ctx.fill();
+    }
+    // Halo (dark stroke under the text) then the bright fill.
+    if (ctx.strokeText) {
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,0.85)";
+      ctx.lineJoin = "round"; ctx.strokeText(text, x, y);
+    }
+    ctx.fillStyle = o.color || "#fff"; ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
+  // Clamp a screen point to the rim of the map circle (centre `c`, radius `fr`),
+  // pulled in by `inset` — where an off-map edge marker sits, pointing outward.
+  function edgePoint(c, fr, sx, sy, inset) {
+    const dx = sx - c.x, dy = sy - c.y, m = Math.hypot(dx, dy) || 1;
+    const rr = Math.max(0, fr - (inset || 0));
+    return { x: c.x + (dx / m) * rr, y: c.y + (dy / m) * rr, ux: dx / m, uy: dy / m };
+  }
+
   // Draw the current zone (north-up): fence, resources, monsters, vendors, the
   // castle, portals, NPCs (status-coloured), the waypoint marker and the player
   // arrow. `proj(wx,wz)->{x,y}` maps world to canvas; shared by minimap + map.
+  // Place names (when `labels`) are collected during the clipped geometry pass and
+  // drawn AFTERWARDS, outside the clip, so text is never cut off by the circle.
   function drawZoneScene(ctx, o) {
     const { W, H, world, state, player, waypoint, proj, scale, labels } = o;
     ctx.clearRect(0, 0, W, H);
@@ -6024,6 +6102,7 @@ import {
     ctx.fillStyle = shadeHex(theme.ground || "#5fae4f", 0.35);
     ctx.fillRect(0, 0, W, H);
     const c = proj(0, 0), fr = (world.radius || 80) * scale;
+    const labelReqs = []; // { x, y, text, priority } collected, laid out after the clip
     ctx.save();
     ctx.beginPath(); ctx.arc(c.x, c.y, fr, 0, Math.PI * 2); ctx.closePath();
     ctx.clip();
@@ -6052,7 +6131,7 @@ import {
     // Boss / dragon.
     const liveBoss = state.dragon || state.boss;
     if (liveBoss && liveBoss.alive && liveBoss.position) glyph(liveBoss.position.x, liveBoss.position.z, "#ff3bd0");
-    // Portals (coloured by kind).
+    // Portals (coloured by kind). The name is queued for the post-clip label pass.
     for (const portal of world.portals || []) {
       const s = proj(portal.x, portal.z);
       ctx.save();
@@ -6060,10 +6139,7 @@ import {
       ctx.strokeStyle = "#1a1a1a"; ctx.lineWidth = 1;
       ctx.fillRect(s.x - 3.5, s.y - 3.5, 7, 7); ctx.strokeRect(s.x - 3.5, s.y - 3.5, 7, 7);
       ctx.restore();
-      if (labels && ctx.fillText) {
-        ctx.fillStyle = "#fff"; ctx.font = "10px system-ui, sans-serif"; ctx.textAlign = "center";
-        ctx.fillText((portal.icon || "") + " " + tZoneName(ZONE_BY_ID[portal.to]), s.x, s.y - 6);
-      }
+      if (labels) labelReqs.push({ x: s.x, y: s.y, text: (portal.icon || "") + " " + tZoneName(ZONE_BY_ID[portal.to]), priority: 2 });
     }
     // Story NPCs (status-coloured marker).
     for (const n of state.npcs) {
@@ -6072,11 +6148,21 @@ import {
       let col = "#ffd34e"; try { col = NPC_STATUS_COL[n.status()] || col; } catch (e) {}
       mmDot(ctx, s.x, s.y, labels ? 3.4 : 2.6, col, "#1a1a1a");
     }
-    // Waypoint marker (in-zone point, or the portal to take next).
+    // Waypoint marker. When the target/portal is on the map, ring it; when it is
+    // OFF the map (beyond the fence circle), draw an ARROW at the rim pointing the
+    // way (so the guide is never lost behind the clip).
     if (waypoint) {
       const g = resolveWaypoint(waypoint, state, player);
-      if (g && g.point) { const s = proj(g.point.x, g.point.z); mmRing(ctx, s.x, s.y, 6); }
-      else if (g && g.portal) { const s = proj(g.portal.x, g.portal.z); mmRing(ctx, s.x, s.y, 6); }
+      const tgt = g && (g.point || g.portal);
+      if (tgt) {
+        const s = proj(tgt.x, tgt.z);
+        const onMap = Math.hypot(s.x - c.x, s.y - c.y) <= fr - 4;
+        if (onMap) { mmRing(ctx, s.x, s.y, 6); }
+        else {
+          const ep = edgePoint(c, fr, s.x, s.y, labels ? 12 : 8);
+          drawMapArrow(ctx, ep.x, ep.y, ep.ux, ep.uy, labels ? 12 : 8, "#ffd34e");
+        }
+      }
     }
     // The player.
     const ps = proj(player.position.x, player.position.z);
@@ -6087,6 +6173,12 @@ import {
     ctx.beginPath(); ctx.arc(c.x, c.y, fr, 0, Math.PI * 2);
     ctx.strokeStyle = "rgba(255,255,255,0.4)"; ctx.lineWidth = 2; ctx.stroke();
     ctx.restore();
+    // Place-name labels — laid out + drawn OUTSIDE the clip so they read fully
+    // (clamped to the screen, stacked to avoid overlap, on a haloed plate).
+    if (labels && labelReqs.length && ctx.fillText) {
+      const placed = layoutMapLabels(labelReqs, W, H, { pad: 12, lineH: 15, estWidth: 96, anchorDy: -9 });
+      for (const p of placed) mapLabelText(ctx, p.text, p.x, p.y, { fontSize: 11 });
+    }
   }
 
   // Draw the world overview: the zone graph (nodes + portal links), discovered
@@ -6102,6 +6194,7 @@ import {
       const pa = proj(lay[a]), pb = proj(lay[b]);
       ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
     }
+    const wnLabels = [];
     for (const z of ZONES) {
       if (!lay[z.id]) continue;
       const p = proj(lay[z.id]);
@@ -6109,15 +6202,22 @@ import {
       const here = state.zoneId === z.id;
       mmDot(ctx, p.x, p.y, here ? 13 : 10, discovered ? shadeHex(z.theme.ground, 0.85) : "#2a2f40", here ? "#ffe27a" : "#11131c");
       if (ctx.fillText) {
-        ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+        ctx.save();
+        ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
         ctx.fillStyle = discovered ? "#fff" : "#7a8090";
         ctx.fillText(discovered ? z.icon : "❓", p.x, p.y + 4);
-        if (discovered) { ctx.fillStyle = "#cdd3e0"; ctx.fillText(tZoneName(z), p.x, p.y + 26); }
+        ctx.restore();
+        if (discovered) wnLabels.push({ x: p.x, y: p.y + 24, text: tZoneName(z), priority: here ? 3 : 1 });
       }
     }
     if (waypoint) {
       const tz = targetZoneOf(waypoint.kind, waypoint.id);
       if (tz && lay[tz]) { const p = proj(lay[tz]); mmRing(ctx, p.x, p.y, 17); }
+    }
+    // Zone names last, clamped + de-overlapped + haloed, so they read fully.
+    if (wnLabels.length && ctx.fillText) {
+      const placed = layoutMapLabels(wnLabels, W, H, { pad: 10, lineH: 15, estWidth: 90, anchorDy: 0 });
+      for (const p of placed) mapLabelText(ctx, p.text, p.x, p.y, { fontSize: 11, color: "#eef2ff" });
     }
   }
 
@@ -6199,7 +6299,9 @@ import {
       if (!world) return;
       const cv = dom.minimapCanvas, W = cv.width || 150, H = cv.height || 150;
       const base = (Math.min(W, H) * 0.46) / (world.radius || 80);
-      const proj = (wx, wz) => ({ x: W / 2 + wx * base, y: H / 2 + wz * base });
+      // North-up, un-mirrored: mirror X (−worldX) so a right turn reads as a right
+      // turn (mapVecToScreen); +Z stays down so north (−Z) is up.
+      const proj = (wx, wz) => ({ x: W / 2 - wx * base, y: H / 2 + wz * base });
       drawZoneScene(ctx, { W, H, world, state, player, waypoint: state.waypoint, proj, scale: base, labels: false });
     },
   };
@@ -6370,7 +6472,8 @@ import {
         }
       } else if (world) {
         const base = (Math.min(W, H) * 0.45) / (world.radius || 80) * this.view.scale;
-        const proj = (wx, wz) => ({ x: W / 2 + wx * base + this.view.ox, y: H / 2 + wz * base + this.view.oy });
+        // North-up, un-mirrored (matches the corner minimap): mirror X.
+        const proj = (wx, wz) => ({ x: W / 2 - wx * base + this.view.ox, y: H / 2 + wz * base + this.view.oy });
         drawZoneScene(ctx, { W, H, world, state, player, waypoint: state.waypoint, proj, scale: base, labels: true });
         // Highlight an in-zone selected target.
         if (this.sel && targetZoneOf(this.sel.kind, this.sel.id) === state.zoneId) {
@@ -10578,11 +10681,12 @@ import {
       // ---- RPG world / zones ----
       ZONES, ZONE_BY_ID, HUB_ZONE, SpawnDirector, ZoneManager, buildWorld,
       setupZoneContent, teardownZone,
-      // ---- Minimap / world map / guided waypoint (Task 13) ----
+      // ---- Minimap / world map / guided waypoint (Task 13, fixes Task 20) ----
       WorldMap, WorldMapUI, resolveWaypoint,
       ZONE_ADJ, zoneEdges, findRoute, nextZoneStep, bearingRad, dist2D,
       relativeHeading, compass8, MAP_TARGETS, targetZoneOf, targetPoint,
       validWaypoint, searchTargets, worldLayout,
+      mapVecToScreen, mapHeadingScreen, layoutMapLabels,
       // ---- Animation (Task 5) ----
       Swing, SWING_DUR, ambientSpecFor, buildAmbientFX, AMBIENT_SPECS,
       // ---- Lighting / shadows / quality tier (Task 4) ----

@@ -130,9 +130,18 @@
     <div id="waveBanner" class="wave-banner"></div>
 
     <!-- Guided-waypoint compass: an arrow + label pointing toward the chosen
-         destination (or the next portal to take when it's in another land). -->
+         destination (or the next portal to take when it's in another land). The
+         arrow is an inline SVG (shaft + arrowhead) so the pointing end is
+         unambiguous; it points UP at rotation 0 (dead ahead) and is rotated
+         clockwise toward the target (Task 20). -->
     <div id="compass" class="compass hidden">
-      <span id="compassArrow" class="compass-arrow">▲</span>
+      <span id="compassArrow" class="compass-arrow" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" focusable="false">
+          <path d="M12 2 L19 12 L14 12 L14 22 L10 22 L10 12 L5 12 Z"
+                fill="currentColor" stroke="rgba(0,0,0,0.55)" stroke-width="1"
+                stroke-linejoin="round" />
+        </svg>
+      </span>
       <span id="compassLabel" class="compass-label"></span>
     </div>
 
