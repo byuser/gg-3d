@@ -522,6 +522,8 @@ html, body {
 }
 .cloud-settings .lang-label { margin: 0; }
 .cloud-status { margin: 0; font-size: 12px; opacity: 0.66; line-height: 1.35; text-align: center; }
+/* Durable-session privacy note (Task 17): a touch dimmer + a hair of top space. */
+.session-note { margin-top: 6px; opacity: 0.58; }
 .cloud-btn-row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 .cloud-btn { min-width: 120px; }
 .lang-btn:disabled, .cloud-btn:disabled {

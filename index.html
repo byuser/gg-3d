@@ -36,6 +36,7 @@
         <b>gather &amp; craft</b>, raise a <b>castle</b> from five relics, then slay the <b>dragon</b> to win!</p>
       <!-- Primary actions: always visible at the top of the menu. -->
       <div class="menu-actions">
+        <button id="continueBtn" class="start-btn hidden" data-i18n="start.continueBtn" disabled>Continue</button>
         <button id="startBtn" class="start-btn" data-i18n="start.startBtn">Start Adventure</button>
         <button id="loadBtn" class="start-btn secondary-btn" data-i18n="start.loadBtn">Load Progress</button>
       </div>
@@ -86,6 +87,8 @@
             <button id="cloudSignBtn" class="lang-btn cloud-btn" data-i18n="cloud.signIn">Sign in with Google</button>
             <button id="cloudListBtn" class="lang-btn cloud-btn" data-i18n="cloud.list">Cloud saves…</button>
           </div>
+          <p class="cloud-status session-note" data-i18n="session.note">Your run auto-saves to this device and resumes on reload. Sign-in is remembered so you stay logged in.</p>
+          <button id="clearSessionBtn" class="lang-btn cloud-btn" data-i18n="session.clear">Clear saved session &amp; sign out</button>
         </div>
       </details>
     </div>
@@ -251,6 +254,8 @@
             <button id="cloudSaveBtnP" class="lang-btn cloud-btn" data-i18n="cloud.save">Save to Drive</button>
             <button id="cloudListBtnP" class="lang-btn cloud-btn" data-i18n="cloud.list">Cloud saves…</button>
           </div>
+          <p class="cloud-status session-note" data-i18n="session.note">Your run auto-saves to this device and resumes on reload. Sign-in is remembered so you stay logged in.</p>
+          <button id="clearSessionBtnP" class="lang-btn cloud-btn" data-i18n="session.clear">Clear saved session &amp; sign out</button>
         </div>
       </details>
 

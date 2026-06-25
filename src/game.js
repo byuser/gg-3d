@@ -491,6 +491,7 @@ import {
     canvas: document.getElementById("renderCanvas"),
     overlay: document.getElementById("overlay"),
     startBtn: document.getElementById("startBtn"),
+    continueBtn: document.getElementById("continueBtn"),
     loadHint: document.getElementById("loadHint"),
     hud: document.getElementById("hud"),
     score: document.getElementById("score"),
@@ -547,6 +548,10 @@ import {
     // Start-screen "Load progress".
     loadBtn: document.getElementById("loadBtn"),
     loadFile: document.getElementById("loadFile"),
+    // Durable-session controls (Task 17): clear the saved session + sign-out,
+    // on the start screen and pause settings.
+    clearSessionBtn: document.getElementById("clearSessionBtn"),
+    clearSessionBtnP: document.getElementById("clearSessionBtnP"),
     // In-game pause menu + its confirmation dialog.
     pauseBtn: document.getElementById("pauseBtn"),
     pauseMenu: document.getElementById("pauseMenu"),
@@ -4502,6 +4507,7 @@ import {
       updateCoins(this.state);
       Sfx.play("buy");
       toast(t("toast.bought", { icon: def.icon, name: tItemName(def) }));
+      Session.mark(); // persist on purchase (Task 17)
       this.render();
     },
     // Potions go onto the 3-slot belt, not the bag.
@@ -4513,6 +4519,7 @@ import {
       updatePotionBar(this.player);
       Sfx.play("buy");
       toast(t("toast.bought", { icon: def.icon, name: tItemName(def) }));
+      Session.mark(); // persist on purchase (Task 17)
       this.render();
     },
     sell(inst) {
@@ -4524,6 +4531,7 @@ import {
       updateCoins(this.state);
       Sfx.play("coin");
       toast(t("toast.sold", { name: enhanceName(tItemName(def), instLevel(inst)), worth }));
+      Session.mark(); // persist on sale (Task 17)
       this.render();
     },
 
@@ -5360,6 +5368,7 @@ import {
       updateQuestTracker(this);
       if (Inventory.open) Inventory.render();
       Story.afterTurnIn(q);
+      Session.mark(); // persist on quest turn-in (Task 17)
       return true;
     },
 
@@ -6431,6 +6440,7 @@ import {
       Quests.onReach(toId);
       updateLocationHud(target);
       updateHealthBar(player.health);
+      Session.mark(); // persist the run on zone travel (Task 17; no-op during restore)
     }
   }
 
@@ -6575,6 +6585,9 @@ import {
       // even while a menu is open (so a 5-min autosave isn't blocked by a pause).
       // No-ops entirely unless signed in with autosave on (Task 15).
       CloudSave.tick(Date.now());
+      // Durable local session (Task 17): a cheap, debounced flush of the live run
+      // to first-party storage so a reload / desktop⇄mobile switch resumes it.
+      Session.tick(Date.now());
       if (!gameStarted) return;                       // hold sim until "Start"
       if (paused) return;                             // pause menu freezes the sim
       if (state.over) { cosmetics(state, dt); return; }
@@ -6971,7 +6984,7 @@ import {
         Sfx.play("levelup");
         toast(t("toast.levelUp", { level: pr.level, hp: hpGain, focus: focusGain }));
       }
-      if (leveled) { recomputeStats(player); updateSkillBar(player); }
+      if (leveled) { recomputeStats(player); updateSkillBar(player); Session.mark(); } // persist on level-up (Task 17)
       updateXpHud(player);
       updateFocusHud(player);
       if (SkillsUI.open) SkillsUI.render();
@@ -7531,6 +7544,11 @@ import {
   function sessionDel(k) {
     try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(k); } catch (e) {}
   }
+  // localGet/localSet come from i18n; localStorage removal isn't exported there,
+  // so add the matching delete here (headless-safe — fails soft like the rest).
+  function localDel(k) {
+    try { if (typeof localStorage !== "undefined") localStorage.removeItem(k); } catch (e) {}
+  }
 
   function serializeGame() {
     const state = stateRef, player = playerRef, waves = waveSystem;
@@ -7640,6 +7658,16 @@ import {
     const state = stateRef, player = playerRef;
     const interaction = interactionRef;
     if (!state || !player) throw new Error("game not ready");
+    // Suppress the Task-17 auto-persist while we lay the run in (the in-progress
+    // half-restored state must never overwrite the snapshot we're restoring from).
+    Session._restoring = true;
+    try {
+    return _applySaveBody(d, state, player, interaction);
+    } finally {
+      Session._restoring = false;
+    }
+  }
+  function _applySaveBody(d, state, player, interaction) {
 
     // Score / money economy.
     state.score = d.score | 0;
@@ -7776,6 +7804,238 @@ import {
   }
 
   // =========================================================================
+  // Durable session persistence (Task 17). The live run and the player's
+  // sign-in survive a reload — and any desktop⇄mobile mode switch / re-orient /
+  // graphics-quality reload — without re-loading a file or signing in again, the
+  // way shipped web games keep you logged in and mid-run across reloads.
+  //
+  //   • The bulky run snapshot (the exact serializeGame() JSON) lives in
+  //     localStorage (size-limited cookies would never hold it). It is rewritten
+  //     debounced on key beats (zone travel, level-up, quest turn-in, purchase)
+  //     and flushed synchronously on visibilitychange/pagehide, then auto-restored
+  //     on boot through the SAME PENDING_LOAD seam the file/cloud load uses — so
+  //     re-seeding + SAVE_VERSION migration are identical. A "Continue" entry
+  //     point is offered rather than silently forcing the resume.
+  //   • A small first-party COOKIE carries the long-lived identifiers that should
+  //     travel with the session: a session id, the chosen locale/quality, the
+  //     "cloud autosave on" flag, and a non-sensitive auth hint so we can SILENTLY
+  //     re-acquire a Google token. Cookies are SameSite=Lax; Secure (HTTPS Pages)
+  //     with a sensible Max-Age, feature-detected, and fall back to localStorage
+  //     when document.cookie is unavailable (private mode / headless). No
+  //     third-party/tracking cookies — first-party persistence only. NO secrets
+  //     are ever stored — only the non-sensitive hint client-side.
+  //
+  // Everything degrades gracefully: blocked cookies, no localStorage, signed-out,
+  // offline or headless all keep the game playable and never throw.
+  // =========================================================================
+  const SESSION_KEY = "gg3d_session";      // localStorage: the auto-persisted run snapshot
+  const COOKIE_NAME = "gg3d_sess";         // first-party cookie: small session identifiers
+  const COOKIE_MAX_AGE = 60 * 60 * 24 * 180; // 180 days (seconds)
+  const SESSION_DEBOUNCE_MS = 1500;        // coalesce rapid key beats into one write
+
+  // ---- Pure cookie helper -------------------------------------------------
+  // Build a `Set-Cookie`-style assignment string for `document.cookie`. Pure +
+  // attribute-complete so the SameSite/Secure/Max-Age policy is unit-testable
+  // without a browser. `Secure` is dropped on a plain-http origin (e.g. file://
+  // or localhost dev) so the cookie still sets there; production Pages is HTTPS.
+  function buildCookieString(name, value, opts) {
+    opts = opts || {};
+    const enc = (v) => { try { return encodeURIComponent(v); } catch (e) { return String(v); } };
+    let s = enc(name) + "=" + (value == null ? "" : enc(value));
+    s += "; Path=/";
+    s += "; SameSite=" + (opts.sameSite || "Lax");
+    const maxAge = opts.maxAge != null ? opts.maxAge : COOKIE_MAX_AGE;
+    if (opts.expire) s += "; Max-Age=0";
+    else if (maxAge != null) s += "; Max-Age=" + (maxAge | 0);
+    if (opts.secure) s += "; Secure";
+    return s;
+  }
+  // Parse a raw `document.cookie` string into a name→value map (pure, decoded).
+  function parseCookies(raw) {
+    const out = {};
+    if (typeof raw !== "string" || !raw) return out;
+    for (const part of raw.split(";")) {
+      const i = part.indexOf("=");
+      if (i < 0) continue;
+      const k = part.slice(0, i).trim();
+      if (!k) continue;
+      let v = part.slice(i + 1).trim();
+      try { v = decodeURIComponent(v); } catch (e) {}
+      out[k] = v;
+    }
+    return out;
+  }
+  // True when this origin is served over HTTPS (so the cookie should be Secure).
+  function cookiesSecureHere() {
+    try { return typeof location !== "undefined" && location.protocol === "https:"; }
+    catch (e) { return false; }
+  }
+  // Are first-party cookies usable? Feature-detected (headless / locked-down
+  // privacy modes expose no document.cookie).
+  function cookiesAvailable() {
+    try { return typeof document !== "undefined" && typeof document.cookie === "string"; }
+    catch (e) { return false; }
+  }
+  // Read/write/expire a cookie value, falling back to localStorage when cookies
+  // are unavailable, so the small identifiers survive even in private/headless
+  // contexts. Never throws.
+  function cookieGet(name) {
+    if (cookiesAvailable()) {
+      const v = parseCookies(document.cookie)[name];
+      if (v != null) return v;
+    }
+    return localGet("ck_" + name);
+  }
+  function cookieSet(name, value, opts) {
+    opts = Object.assign({ secure: cookiesSecureHere() }, opts || {});
+    if (cookiesAvailable()) {
+      try { document.cookie = buildCookieString(name, value, opts); } catch (e) {}
+    }
+    localSet("ck_" + name, String(value)); // mirror so the fallback path stays in sync
+  }
+  function cookieDel(name) {
+    if (cookiesAvailable()) {
+      try { document.cookie = buildCookieString(name, "", { expire: true, secure: cookiesSecureHere() }); } catch (e) {}
+    }
+    localDel("ck_" + name);
+  }
+
+  // ---- Cookie-borne session identifiers (the small, long-lived datums) -----
+  // Stored as one compact JSON object in the cookie: a session id, the chosen
+  // locale + graphics tier, the cloud-autosave flag, and the Google auth hint.
+  // Read/merge/write so updating one field never drops the others.
+  function readCookieState() {
+    const raw = cookieGet(COOKIE_NAME);
+    if (!raw) return {};
+    try { const o = JSON.parse(raw); return (o && typeof o === "object") ? o : {}; }
+    catch (e) { return {}; }
+  }
+  function writeCookieState(patch) {
+    const cur = readCookieState();
+    const next = Object.assign({}, cur, patch || {});
+    // Drop nulls so an explicit clear shrinks the cookie instead of storing null.
+    for (const k in next) if (next[k] == null) delete next[k];
+    try { cookieSet(COOKIE_NAME, JSON.stringify(next)); } catch (e) {}
+    return next;
+  }
+
+  // ---- Pure scheduler decision -------------------------------------------
+  // Should a debounced auto-persist flush now? Pure over the scheduler state so
+  // the debounce + immediate-flush behaviour is unit-testable without timers.
+  // A `force` beat (hide/pagehide) always flushes; otherwise the debounce window
+  // must have elapsed since the last queued beat.
+  function sessionPersistDue(s, now) {
+    if (!s || !s.dirty) return false;
+    if (s.force) return true;
+    const debounce = s.debounceMs != null ? s.debounceMs : SESSION_DEBOUNCE_MS;
+    return (now - (s.queuedAt || 0)) >= debounce;
+  }
+
+  // ---- Pure silent-auth decision -----------------------------------------
+  // Given the persisted auth hint, decide whether to attempt a SILENT Google
+  // token refresh on boot: only when the player had opted in (a stored hint) and
+  // hasn't signed out. Returns { attempt, loginHint } so the caller can pass the
+  // hint to GIS. Signing out clears the hint, so this returns attempt:false after.
+  function silentAuthDecision(hint) {
+    if (!hint || !hint.optedIn) return { attempt: false, loginHint: "" };
+    return { attempt: true, loginHint: hint.email || "" };
+  }
+
+  // ---- The session controller --------------------------------------------
+  const Session = {
+    sched: { dirty: false, force: false, queuedAt: 0 },
+    _restoring: false,   // suppress auto-persist while applySave lays a run in
+    _wired: false,
+
+    // Read the auto-persisted run snapshot (the parsed serializeGame() JSON), or
+    // null when there's nothing stored / it's unreadable / it fails validation.
+    readSnapshot() {
+      let raw;
+      try { raw = localGet(SESSION_KEY); } catch (e) { raw = null; }
+      if (!raw) return null;
+      let data; try { data = JSON.parse(raw); } catch (e) { data = null; }
+      return validateSave(data) ? data : null;
+    },
+    rawSnapshot() { try { return localGet(SESSION_KEY); } catch (e) { return null; } },
+    hasSnapshot() { return !!this.readSnapshot(); },
+
+    // Persist the live run right now (synchronous). No-ops before a run exists.
+    flush() {
+      if (this._restoring) return false;
+      const data = serializeGame();
+      if (!data) return false;
+      try { localSet(SESSION_KEY, JSON.stringify(data)); } catch (e) { return false; }
+      // Stamp the cookie with the session id + the device prefs that should ride
+      // along (so a desktop⇄mobile reload restores the same locale/quality).
+      const st = readCookieState();
+      writeCookieState({
+        sid: st.sid || ("s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)),
+        locale: I18N.locale,
+        gfx: (typeof Quality !== "undefined" && Quality.pref) ? Quality.pref : st.gfx,
+        cloud: CloudSave.enabled ? 1 : 0,
+      });
+      this.sched.dirty = false; this.sched.force = false;
+      return true;
+    },
+
+    // Mark the run dirty (a key beat happened). The render-loop tick flushes once
+    // the debounce window elapses, coalescing rapid beats into a single write.
+    mark(force) {
+      if (this._restoring) return;
+      if (!gameStarted) return;
+      this.sched.dirty = true;
+      this.sched.queuedAt = nowMs();
+      if (force) this.sched.force = true;
+    },
+
+    // Render-loop hook (cheap, wall-clock gated): flush when the debounce is due.
+    tick(now) {
+      if (sessionPersistDue(this.sched, now)) this.flush();
+    },
+
+    // Clear the auto-persisted run snapshot (and the "Continue" affordance). Keeps
+    // the cookie's device prefs; only wipes the run + makes Continue disappear.
+    clearSnapshot() {
+      try { localDel(SESSION_KEY); } catch (e) {}
+      this.sched.dirty = false; this.sched.force = false;
+    },
+
+    // Wipe EVERYTHING this device persisted for the player: the run snapshot, the
+    // session cookie, and the Google sign-in (so no silent re-auth happens after).
+    clearAll() {
+      this.clearSnapshot();
+      try { cookieDel(COOKIE_NAME); } catch (e) {}
+      this.forgetAuth();
+    },
+
+    // ---- Google auth hint (non-sensitive) --------------------------------
+    // Remember that the player opted into cloud + an optional account hint so we
+    // can silently re-acquire a token next boot. NEVER stores tokens/secrets.
+    rememberAuth(email) {
+      writeCookieState({ auth: { optedIn: true, email: email || "" } });
+    },
+    forgetAuth() { writeCookieState({ auth: null }); },
+    authHint() { const st = readCookieState(); return st.auth || null; },
+
+    // Flush on tab-hide / navigation so an unexpected close still saves the run.
+    wireUnload() {
+      if (this._wired) return;
+      this._wired = true;
+      const flushNow = () => { this.sched.force = true; this.flush(); };
+      try {
+        if (typeof document !== "undefined" && document.addEventListener) {
+          document.addEventListener("visibilitychange", () => { if (document.hidden) flushNow(); });
+        }
+        if (typeof window !== "undefined" && window.addEventListener) {
+          window.addEventListener("pagehide", flushNow);
+        }
+      } catch (e) {}
+    },
+  };
+  // Monotonic-ish wall clock (Date.now wrapper kept tiny + headless-safe).
+  function nowMs() { try { return Date.now(); } catch (e) { return 0; } }
+
+  // =========================================================================
   // Cloud saves — Google Drive `appDataFolder` (Task 15). OPT-IN: the player
   // signs in with Google (drive.appdata scope only — a private folder no other
   // app can see). Manual "Save to Drive" + a 5-minute autosave that keeps a
@@ -7891,7 +8151,11 @@ import {
         client_id: clientId, scope: CLOUD_SCOPE, callback: () => {},
       });
     }
-    function requestToken(prompt) {
+    // Request an access token. `prompt` is the GIS consent prompt: "consent" for
+    // an explicit sign-in, "" for a SILENT refresh (no dialog when the user has
+    // an active Google session that already granted the scope — Task 17). An
+    // optional `loginHint` (a remembered account email) steers the silent path.
+    function requestToken(prompt, loginHint) {
       return new Promise((resolve, reject) => {
         try {
           ensureTokenClient();
@@ -7899,7 +8163,9 @@ import {
             if (resp && resp.access_token) { accessToken = resp.access_token; resolve(accessToken); }
             else reject(new Error(resp && resp.error ? resp.error : "no_token"));
           };
-          tokenClient.requestAccessToken({ prompt: prompt || "" });
+          const req = { prompt: prompt || "" };
+          if (loginHint) req.hint = loginHint;
+          tokenClient.requestAccessToken(req);
         } catch (e) { reject(e); }
       });
     }
@@ -7920,6 +8186,10 @@ import {
     return {
       hasToken() { return !!accessToken; },
       async signIn() { await loadGis(); await requestToken("consent"); return true; },
+      // Silent re-auth on boot: no consent dialog. Rejects if the browser has no
+      // active, already-consented Google session — the caller then falls back to
+      // the explicit Sign-in button (Task 17).
+      async signInSilent(loginHint) { await loadGis(); await requestToken("", loginHint); return true; },
       signOut() {
         try { if (accessToken && gisReady() && google.accounts.oauth2.revoke) google.accounts.oauth2.revoke(accessToken, () => {}); } catch (e) {}
         accessToken = null;
@@ -8018,6 +8288,10 @@ import {
         await this.ensureClient().signIn();
         this.signedIn = true;
         this.sched.lastAt = Date.now();       // first autosave one interval from now
+        // Remember the opt-in (a non-sensitive hint) so a reload can SILENTLY
+        // re-acquire a token without a fresh consent dialog (Task 17). No secret
+        // is stored — only the "opted in" flag (+ optional account email hint).
+        Session.rememberAuth("");
         Sfx.play("ui_click");
         toast(t("toast.cloudSignedIn"));
         return true;
@@ -8027,8 +8301,27 @@ import {
     async signOut() {
       if (this.client) { try { await this.client.signOut(); } catch (e) {} }
       this.signedIn = false;
+      // Honour sign-out: drop the auth hint so NO silent re-auth happens after.
+      Session.forgetAuth();
       toast(t("toast.cloudSignedOut"));
       this._sync();
+    },
+
+    // Boot-time SILENT re-auth (Task 17): if the player had opted into cloud and
+    // hasn't signed out (an auth hint is stored), try to re-acquire a Google
+    // token without a consent prompt. Fails soft — on any rejection the explicit
+    // Sign-in button remains the path. No-ops when not configured/available.
+    async trySilentSignIn() {
+      if (!this.available() || this.signedIn) return false;
+      const decision = silentAuthDecision(Session.authHint());
+      if (!decision.attempt) return false;
+      try {
+        await this.ensureClient().signInSilent(decision.loginHint);
+        this.signedIn = true;
+        this.sched.lastAt = Date.now();
+        this._sync();
+        return true;
+      } catch (e) { return false; }
     },
 
     setAutosave(on) {
@@ -8168,6 +8461,9 @@ import {
       CloudSave.onVisibility();
       this._wired = true;
       this.sync();
+      // Durable sign-in (Task 17): attempt a silent token refresh when the player
+      // had opted in, so a reload keeps them effectively signed in with no dialog.
+      try { Promise.resolve(CloudSave.trySilentSignIn()).then(() => this.sync()).catch(() => {}); } catch (e) {}
     },
     sync() {
       const avail = CloudSave.available(), cfg = CloudSave.configured();
@@ -8336,6 +8632,11 @@ import {
     // restoring a save (mid-story) and under the headless harness (which drives
     // input directly and must not be blocked by the modal).
     if (!loaded && !(typeof window !== "undefined" && window.__GG_TEST__)) Story.maybeShowIntro();
+    // Durable session (Task 17): start auto-persisting from now on, flush an
+    // immediate snapshot, and arm the hide/pagehide flush so an unexpected close
+    // still saves the run.
+    Session.wireUnload();
+    Session.flush();
   }
 
   // =========================================================================
@@ -9006,17 +9307,36 @@ import {
         try { pendingLoad = JSON.parse(rawPending); } catch (e) { pendingLoad = null; }
         if (pendingLoad && !validateSave(pendingLoad)) pendingLoad = null;
       }
-      if (pendingLoad) setSeed(pendingLoad.seed);
+      // Durable session (Task 17): with no explicit pick pending, auto-restore the
+      // last in-progress run from first-party storage. We DON'T force it — the seed
+      // is set so the world regenerates identically, a "Continue" entry point is
+      // offered, and the player chooses to resume (Start still begins a fresh run,
+      // overwriting the snapshot). The seed is set before the world builds either
+      // way so the regenerated environment matches the snapshot.
+      const autoSnapshot = pendingLoad ? null : Session.readSnapshot();
+      const resumeFrom = pendingLoad || autoSnapshot;
+      if (resumeFrom) setSeed(resumeFrom.seed);
 
       const wantAutostart = sessionGet(AUTOSTART_KEY) === "1";
       if (wantAutostart) sessionDel(AUTOSTART_KEY);
+
+      // Show + wire the "Continue" button when a resumable session exists.
+      const resumeRun = (snap) => {
+        try { applySave(snap); startGame(true); Session.flush(); toast(t("toast.loaded")); }
+        catch (e) { console.error(e); showFatal("Couldn't load save: " + e.message); }
+      };
+      if (autoSnapshot && dom.continueBtn) {
+        dom.continueBtn.classList.remove("hidden");
+        dom.continueBtn.addEventListener("click", () => resumeRun(autoSnapshot));
+      }
 
       const scene = createScene();
       scene.executeWhenReady(() => {
         dom.loadHint.textContent = t("hint.ready");
         dom.startBtn.disabled = false;
+        if (dom.continueBtn) dom.continueBtn.disabled = false;
         if (pendingLoad) {
-          try { applySave(pendingLoad); startGame(true); toast(t("toast.loaded")); }
+          try { applySave(pendingLoad); startGame(true); Session.flush(); toast(t("toast.loaded")); }
           catch (e) { console.error(e); showFatal("Couldn't load save: " + e.message); }
         } else if (wantAutostart) {
           startGame();
@@ -9095,6 +9415,18 @@ import {
           e.target.value = ""; // allow re-picking the same file
         });
       }
+
+      // Durable-session controls (Task 17): "Clear saved session & sign out" wipes
+      // the auto-persisted run, the session cookie and the Google sign-in, then
+      // refreshes the start screen so "Continue" disappears.
+      const clearSession = () => {
+        Session.clearAll();
+        if (CloudSave.signedIn) { try { CloudSave.signOut(); } catch (e) {} }
+        if (dom.continueBtn) dom.continueBtn.classList.add("hidden");
+        toast(t("toast.sessionCleared"));
+      };
+      if (dom.clearSessionBtn) dom.clearSessionBtn.addEventListener("click", clearSession);
+      if (dom.clearSessionBtnP) dom.clearSessionBtnP.addEventListener("click", clearSession);
 
       // In-game pause menu + Escape behaviour: Escape closes the shop if it's
       // open, otherwise toggles the pause menu (or backs out of a confirm).
@@ -9272,6 +9604,10 @@ import {
       tSkillName, tSkillDesc, tElementLabel, tEffectLabel,
       // ---- Audio: mixer, per-zone ambience, footsteps (Task 6) ----
       Mixer, Ambience, AudioUI, Footsteps, LowHealth, surfaceForZone, AUDIO_KEY,
+      // ---- Durable session persistence (Task 17) ----
+      Session, buildCookieString, parseCookies, cookieGet, cookieSet, cookieDel,
+      readCookieState, writeCookieState, sessionPersistDue, silentAuthDecision,
+      SESSION_KEY, COOKIE_NAME, COOKIE_MAX_AGE, SESSION_DEBOUNCE_MS, localDel,
       // ---- Cloud saves: Google Drive appDataFolder (Task 15) ----
       CloudSave, CloudUI, makeGoogleDriveClient, CLOUD_KEY,
       CLOUD_AUTOSAVE_MS, CLOUD_HISTORY_MS, CLOUD_MAX_SLOTS, CLOUD_MANUAL_NAME, CLOUD_AUTO_PREFIX,
