@@ -35,6 +35,60 @@ delta it shipped with, since later tasks reference those.
   `session-s24-landscape` Playwright E2E (resume-via-Continue → open pause → open
   Cloud Saves), which previously timed out on `master`.
 
+## [2026-06-25] — Task 19 — Replace the arcade score with the experience (XP) system
+
+The game carried a legacy arcade **score** in parallel with the real RPG
+progression (XP / levels) from Task 14. Task 19 **removes the score system
+entirely** and routes every reward moment into **XP**, so there is one coherent
+progression currency — what modern RPGs do.
+
+### Removed
+
+- **The score HUD, run state, save field and config knobs.** Gone: the ⭐ score
+  chip (`#score` in `index.html`, its `.stat #score` CSS, the `dom.score` hook and
+  `addScore`), the `state.score` run-state field, the `score` save field, and the
+  `CONFIG.scorePerMonster` / `scorePerArtifact` / `bossScore` / `dragonScore`
+  knobs. The score phrasing is removed from the pause-stats, game-over and victory
+  summaries and from every affected EN + RU string. A **grep guard** test fails on
+  any lingering `score` identifier in the player-facing source.
+
+### Changed
+
+- **Every former score event now grants XP** through the single `Skills.gainXp`
+  funnel. Kills already paid `Skills.xpFor` (sweet `6 + 2·level`, boss
+  `60 + 25·cycle`, dragon `600`); **artifact pickups** now grant a retuned
+  **`XP_PER_ARTIFACT = 40`** (roughly four sweet kills — between a sweet and a
+  boss) on top of their existing heal + coin reward. Quests (`45`, side `60%`) and
+  gathering (`3`) are unchanged. **Award values, before → after:** monster
+  `+25 score → +xpFor XP`, artifact `+50 score → +40 XP`, boss `+400 score → +xpFor
+  XP`, dragon `+5000 score → +600 XP`. The XP curve (`xpToNext`) is unchanged
+  (retuned the new artifact source, not rebuilt — out of scope); a pure simulated
+  run confirms an early run lands at **level ~3–6** (early levels quick, later ones
+  earned), so pacing stays well-spaced now that artifacts feed it.
+- **End-screen + tracker glow-up.** A new pure `runRecap(state)` drives the
+  game-over, victory and pause summaries: they now show the **level reached**,
+  **total XP earned** this run and the key **tallies** (monsters felled, relics
+  collected) instead of a score number. The HUD keeps the existing **level badge +
+  XP bar** as the single progression readout. The save-file download name now
+  embeds the player **level** (`…-lv7-…`) instead of points.
+
+### Save format
+
+- **`SAVE_VERSION` 10 → 11.** The `score` field is dropped; a new lifetime
+  **`relicsFound`** tally is added (for the recap, since relics are consumed when
+  the castle is built). Older saves (v2…v10) still load: a legacy `score` is
+  ignored, and missing `relicsFound` defaults to however many relics the player is
+  still carrying (XP/level default to a clean level 1 as before).
+
+### Tests
+
+- New **`test/score-to-xp.test.js`** (19 cases; **Vitest 189 → 208**): each former
+  score event grants XP through the live path; the level pacing simulation; the
+  v10→v11 **migration** + v11 **round-trip** of `relicsFound`; the recap rendering
+  (level/XP/tallies, no "score") on the game-over / victory / pause screens; and
+  the grep guard. The existing harness / functional / cloud-save suites were
+  updated off the removed `score` field onto `relicsFound` / XP.
+
 ## [2026-06-25] — Task 18 — Cloud-saves browser fix + multiple named save slots with full management
 
 The single file-download save model is replaced by a proper **save-management system** like a shipped RPG:

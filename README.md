@@ -180,8 +180,8 @@ runs in English without a browser.
   your weapons and equipment (`+1`, `+2`, …). Rarer gear (**common → rare → epic →
   legendary**) forges to a higher level and gains more per level, so prize loot is worth
   investing in. Enhancement boosts the item's stats / weapon damage and its resale value.
-- **Artifacts:** grabbing a glowing artifact now also **heals** you a little and pays a
-  small **coin** reward on top of the score — handy mid-fight.
+- **Artifacts:** grabbing a glowing artifact grants a chunk of **XP** (toward your next
+  level), **heals** you a little and pays a small **coin** reward — handy mid-fight.
 - **Coins:** defeated sweets sometimes drop **golden coins**. Walk near one and it's
   scooped up (coins even magnet toward you). Coins are the currency you spend at the
   merchant's shop.
@@ -218,8 +218,13 @@ runs in English without a browser.
 - **Living sweets:** a dozen kinds — lollipops, gummy bears, cupcakes, donuts, candy
   canes, ice-cream cones, macarons, candy corn, chocolate bars, jelly beans,
   marshmallows and pretzels — each land drawing from its own palette.
-- **Score:** **+25** per monster defeated, **+50** per artifact collected. **Coins** are a
-  separate currency spent at the merchant.
+- **Experience (XP):** there's **no arcade score** — every reward moment feeds your **RPG
+  progression** instead. Defeating a sweet, a boss or the dragon, turning in a quest,
+  gathering a node and **collecting an artifact** all grant **XP**; fill the bar to **level
+  up** (more max health + focus, and auto-learned skills). Artifacts give **+40 XP** (roughly
+  four sweet kills), sweets `6 + 2·level`, a boss `60 + 25·cycle`, the dragon `600`, a quest
+  `45`, a gather `3`. **Coins** remain a separate currency spent at the merchant. *(Before
+  Task 19 the same moments paid a parallel "score": +25 / +50 / +400 / +5000 — now retired.)*
 - **Music:** a procedurally-synthesised soundtrack plays as you fight (no audio files —
   it's generated in-browser). Toggle it with `M`, or mute everything from the **Audio**
   sub-panel in the start screen / pause settings.
@@ -232,7 +237,8 @@ runs in English without a browser.
   (Master · Music · Effects · Ambience volume sliders + a **Mute all** toggle) lives on the
   **start screen** and in the **pause settings**, and your choice **persists** across reload.
 - **Health:** the sweets bite on contact. When your health hits zero it's **game over** —
-  your final score and the wave you reached are shown.
+  a run recap shows the **level** you reached, your **total XP** and your tallies (monsters
+  felled, relics collected). The **victory** screen shows the same recap.
 - **Camera:** the view follows Lily at a fixed distance; zoom only with the mouse
   wheel (or a two-finger pinch on mobile).
 - **Pause menu:** press **Esc** or the **☰** button to pause the game at any time. The
@@ -241,7 +247,7 @@ runs in English without a browser.
 - **Save slots & management:** the **Manage Saves** screen (reachable from the **start screen**
   *and* the **pause menu**) gives you **six named save slots** on this device, like a shipped RPG.
   Each slot stores *everything* needed to resume — the procedural environment (via its world seed),
-  the **land you're in**, your score, money, **gear & inventory**, health, **materials & relics**,
+  the **land you're in**, your **XP & level**, money, **gear & inventory**, health, **materials & relics**,
   **story progress** (current chapter, completed missions, reach/talk objectives, side-quest
   tallies), the **castle build state**, cleared **lair bosses**, the **time/weather**, and your
   **playtime** — plus a label (name, when it was saved, your level/zone). You can **Load**,
@@ -497,7 +503,13 @@ a **per-slot round-trip** through `applySave`, the **migration** of the prior
 single-slot (auto-session) snapshot into a named slot, the **cloud-slot delete**
 via the injected Drive client, the headless-safe **SavesUI** open/render path, and
 the cloud browser opening with a **sign-in CTA** when signed out (no dead click).
-On top of that, a
+The **score→XP** suite (`test/score-to-xp.test.js`) locks in Task 19: every former
+score event (sweet / boss / dragon kill + artifact pickup) now grants **XP**, the
+retuned level pacing stays sane under those sources (a pure simulated run), a v10
+`score`-bearing save still **migrates** (the field is dropped, XP/level/relicsFound
+default sanely), the v11 schema round-trips, the end/pause **recap** renders
+level + XP + tallies, and a **grep guard** fails on any lingering `score` identifier
+in the player-facing source. On top of that, a
 **functional** suite (`test/functional.test.js`) boots the assembled game in
 isolation and drives whole flows (start → zone travel → save/reload round-trip),
 and **Playwright** suites load the built bundle in real headless Chromium: the
@@ -574,8 +586,10 @@ whole thing is unit-testable without a GPU:
 A second declarative, **data-driven** layer in `src/data/skills.js` — pure level math + a
 deterministic fusion blend, so the whole system is unit-testable headless:
 
-- **Leveling & focus.** Defeating foes, turning in quests and gathering grant **XP** (`Skills.xpFor`);
-  `xpToNext(level)` is a smooth super-linear curve. Each level grants **+max health** (folded into the
+- **Leveling & focus.** Defeating foes (`Skills.xpFor`), turning in quests, gathering and — since
+  Task 19 — **collecting artifacts** (`XP_PER_ARTIFACT`) all grant **XP** (the legacy arcade score was
+  retired so there's one progression currency); `xpToNext(level)` is a smooth super-linear curve.
+  Each level grants **+max health** (folded into the
   player's `base`, so the gear `recomputeStats` pipeline is untouched) and **+max focus** — the
   spell resource that regenerates over time (`maxFocusForLevel`). Newly-unlocked base skills are
   **auto-learned** on level-up.
@@ -668,11 +682,13 @@ is fully testable headless:
 - **`setupZoneContent`** — lays the per-zone content on a freshly built world: the hub gets
   the merchant, blacksmith, NPCs, resource nodes, castle and artifacts; the wild lands get
   themed resource nodes.
-- **Save/load (`serializeGame` / `applySave`)** — snapshots the run to JSON (schema **v10**;
-  Task 18 added **playtime**) and rebuilds it: re-seed, restore the player (pose + **inventory &
-  equipment**, materials, relics), score, money, quests, castle, cleared lairs and time/weather,
-  then **stream to the saved zone** (its monsters regenerate from the spawn table). Stats are
-  recomputed from the restored gear. Older saves still load (missing fields default).
+- **Save/load (`serializeGame` / `applySave`)** — snapshots the run to JSON (schema **v11**;
+  Task 18 added **playtime**, Task 19 dropped the legacy `score` and added the lifetime
+  `relicsFound` tally) and rebuilds it: re-seed, restore the player (pose + **inventory &
+  equipment**, materials, relics, **XP/level**), money, quests, castle, cleared lairs and
+  time/weather, then **stream to the saved zone** (its monsters regenerate from the spawn
+  table). Stats are recomputed from the restored gear. Older saves still load (missing fields
+  default; a pre-v11 `score` is ignored).
 - **`SaveSlots` / `SavesUI`** — **multiple named manual save slots** (Task 18). `SaveSlots` is a
   **pure** store over `localStorage` (six slots, each holding the full `serializeGame()` payload +
   metadata; create / list / rename / delete / overwrite / next-free, with the prior single-slot run
@@ -777,7 +793,7 @@ Source: GitHub Actions**.
 - [x] **Lair bosses** placed in distant lands (Crystal Caverns, Bramblewood Thicket) that
       **stay cleared** for the run; save/load is **zone-aware**
 - [x] Third-person character, movement & camera (mobile + desktop)
-- [x] Collect artifacts for score
+- [x] Collect artifacts for **XP** (the arcade score was retired — combat, quests, gathering and artifacts all feed one RPG progression)
 - [x] Weapons (wand / bow / staff / sword / axe / dagger) with ranged + melee combat
 - [x] Gravity-bound projectiles (arcing arrows/bolts) that never fly forever
 - [x] Gear system: a **12-slot** loadout — armour (helmet/pauldrons/breastplate/gloves/belt/boots/cloak), accessories (2 rings + necklace), 2 hands — with **affixes** + **set bonuses**

@@ -1285,7 +1285,19 @@ A task is **done** only when **all** of these are true:
   restore never clobbers newer local work.
 
 ### Task 19 — Replace the score system with the experience (XP) system
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-25 · Retired the legacy arcade **score** entirely (the ⭐ HUD chip +
+  `#score`/`addScore`, the run-state + save field, the `score*` config knobs, and every score mention
+  in the pause/game-over/victory summaries + their EN/RU strings) and routed every former score moment
+  into **XP** via `Skills.gainXp`: kills already paid `Skills.xpFor`; **artifact** pickups now grant a
+  retuned **`XP_PER_ARTIFACT = 40`** (~4 sweet kills, between a sweet and a boss) on top of their heal +
+  coins, so there's **one** progression currency. The end/pause screens now show a **run recap** (level
+  reached, total XP, monsters felled + relics collected) via a new pure `runRecap`; a v11 `relicsFound`
+  lifetime tally feeds it. `SAVE_VERSION` **10 → 11** (drops `score`, adds `relicsFound`; pre-v11 saves
+  load with score ignored + sane defaults). New `test/score-to-xp.test.js` (19 cases; Vitest 189 → 208):
+  each former score event grants XP, pacing stays sane under the new sources (pure sim), v10→v11
+  migration + v11 round-trip, the recap renders level/XP/tallies (no "score"), and a **grep guard** that
+  fails on any lingering `score` identifier in the player-facing source. Before→after award docs in the
+  CHANGELOG + README. Full pipeline green; E2E confirmed `#score` removed (CI runs the browser suite).
 - **Depends on:** the **XP/leveling** layer (Task 14, `src/data/skills.js`:
   `xpToNext`/`gainXp`/`player.progress`). None else.
 - **Goal.** The game still carries a **legacy arcade "score"** (the on‑screen
