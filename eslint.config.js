@@ -55,6 +55,16 @@ export default [
     },
   },
   {
-    ignores: ["dist/**", "node_modules/**", "js/**", "playwright-report/**", "test-results/**"],
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "js/**",
+      "playwright-report/**",
+      "test-results/**",
+      // Agent tooling, not app code: `.claude/workflows/*.js` run inside the
+      // Workflow runtime's async wrapper (top-level await/return + injected
+      // globals like agent()/phase()), so they don't parse as standalone modules.
+      ".claude/**",
+    ],
   },
 ];
