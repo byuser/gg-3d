@@ -58,14 +58,10 @@
     bossSpeed: 2.0,           // bosses are slower but relentless
     bossContactDamage: 22,    // they hit much harder than a regular sweet
     bossRadius: 2.4,          // big body → big hit/contact radius
-    bossScore: 400,           // score for felling a boss
     bossCoinDrop: 30,         // guaranteed coins when a boss is defeated
 
-    // Score
-    scorePerMonster: 25,
-    scorePerArtifact: 50,
-
-    // Artifacts also restore a little health and pay a small coin reward.
+    // Artifacts restore a little health and pay a small coin reward. (The XP
+    // they grant lives with the other XP awards in src/data/skills.js.)
     artifactHeal: 12,
     artifactCoinMin: 2,
     artifactCoinMax: 5,
@@ -97,7 +93,6 @@
     // The dragon — the final boss summoned once the castle is complete.
     dragonBaseHp: 900,
     dragonContactDamage: 30,
-    dragonScore: 5000,
   };
 
   const PALETTE = ["#6cc6ff", "#a06cff", "#ff6c8a", "#ffd34e", "#5be0a0", "#ff944e"];

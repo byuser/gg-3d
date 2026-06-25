@@ -49,7 +49,7 @@ import {
 } from "./data/worldmap.js";
 import {
   SKILL_DB, getSkill, ELEMENTS, EFFECTS, BASE_SKILL_IDS, BOSS_SKILL_IDS, STARTER_SKILL_IDS,
-  SKILL_SLOTS, MAX_FUSE_INPUTS, FOCUS_REGEN, XP_PER_GATHER, XP_PER_QUEST,
+  SKILL_SLOTS, MAX_FUSE_INPUTS, FOCUS_REGEN, XP_PER_GATHER, XP_PER_QUEST, XP_PER_ARTIFACT,
   xpToNext, totalXpToReach, maxFocusForLevel, levelHealthBonus, skillsUnlockedAt,
   skillTier, canFuse, fuseSkills, fusionCost,
 } from "./data/skills.js";
@@ -447,7 +447,12 @@ import {
   // ---- Castle relics ------------------------------------------------------
   function addRelic(player, id) {
     if (!RELICS[id]) return;
-    if (!player.relics.includes(id)) player.relics.push(id);
+    if (!player.relics.includes(id)) {
+      player.relics.push(id);
+      // Lifetime tally for the end-screen recap (relics are consumed when the
+      // castle is built, so we count them as they're found, not just held).
+      if (stateRef) stateRef.relicsFound = (stateRef.relicsFound | 0) + 1;
+    }
     updateRelicHud(player);
   }
   const hasRelic = (player, id) => player.relics.includes(id);
@@ -495,7 +500,6 @@ import {
     continueBtn: document.getElementById("continueBtn"),
     loadHint: document.getElementById("loadHint"),
     hud: document.getElementById("hud"),
-    score: document.getElementById("score"),
     coins: document.getElementById("coins"),
     shop: document.getElementById("shop"),
     shopClose: document.getElementById("shopClose"),
@@ -4219,7 +4223,7 @@ import {
     return { root, gem, halo };
   }
 
-  // Spawn one artifact somewhere valid and wire it into the interaction/score systems.
+  // Spawn one artifact somewhere valid and wire it into the interaction/XP systems.
   // `fixed` (optional) places a saved artifact exactly: { pos:[x,z], color }.
   function spawnArtifact(scene, world, interaction, player, state, near, fixed) {
     let pos = null;
@@ -4258,10 +4262,11 @@ import {
         if (i >= 0) state.artifacts.splice(i, 1);
         player.startPickup(artifact.gem, () => {
           artifact.root.dispose(); // clean up halo/beam/root (gem is now carried)
-          addScore(state, CONFIG.scorePerArtifact);
+          // Artifacts feed the RPG progression: a meaningful chunk of XP plus a
+          // small heal + a little coin reward, so grabbing them mid-fight is
+          // meaningfully helpful (Task 19 retired the legacy arcade score).
+          if (playerRef) Skills.gainXp(playerRef, XP_PER_ARTIFACT);
           state.waveStats.artifacts++;
-          // Artifacts are restorative: a small heal + a little coin reward on top
-          // of the score, so grabbing them mid-fight is meaningfully helpful.
           let healed = 0;
           if (player.health < player.maxHealth) {
             healed = Math.min(CONFIG.artifactHeal, player.maxHealth - player.health);
@@ -4275,7 +4280,7 @@ import {
           updateCoins(state);
           Sfx.play("artifact");
           const extra = (healed > 0 ? t("toast.artifactHeal", { n: Math.round(healed) }) : "") + t("toast.artifactCoin", { n: bonus });
-          toast(t("toast.artifact", { score: CONFIG.scorePerArtifact, extra }));
+          toast(t("toast.artifact", { xp: XP_PER_ARTIFACT, extra }));
         });
       },
     });
@@ -6532,7 +6537,7 @@ import {
 
     const state = {
       scene, shadow: world.shadow, world,
-      score: 0, coins: 0, wave: 0, waveTotal: 0, over: false, won: false,
+      coins: 0, wave: 0, waveTotal: 0, over: false, won: false,
       zoneId: world.zone.id,        // the currently loaded zone
       bossesCleared: {},            // lair bosses defeated this run, by zone id
       discovered: { [world.zone.id]: true }, // zones the player has visited (map fog-of-war)
@@ -6546,7 +6551,8 @@ import {
       npcs: [],         // story NPCs (QuestGiver)
       castle: null,     // the CastleSite build system
       dragon: null,     // the final boss, once summoned
-      totalKills: 0,    // lifetime sweets felled (quest "hunt" progress)
+      totalKills: 0,    // lifetime sweets felled (quest "hunt" progress + recap)
+      relicsFound: 0,   // lifetime relics collected (recap; survives castle builds)
       playSec: 0,       // accumulated active playtime (seconds) — save-slot metadata
       waveStats: { kills: 0, artifacts: 0, coins: 0 },
       merchant: null, blacksmith: null, boss: null,
@@ -6831,7 +6837,7 @@ import {
     }
   }
 
-  // A monster (regular sweet or boss) was just killed: award score/coins, apply
+  // A monster (regular sweet or boss) was just killed: award XP/coins, apply
   // lifesteal, and clean up the boss bar when a Sweet King falls.
   function onMonsterDefeated(state, m) {
     // Lifesteal heals the player a little per kill (Vampiric Gem upgrade).
@@ -6843,7 +6849,6 @@ import {
     if (playerRef) Skills.gainXp(playerRef, Skills.xpFor(m));
     // The dragon is the climax: felling it wins the game.
     if (m.isDragon) {
-      addScore(state, CONFIG.dragonScore);
       spawnImpact(state, m.position, "#ff6a3a", { y: 3, count: 28, spread: 9, up: 6, life: 1.1 });
       hideBossBar();
       state.dragon = null;
@@ -6852,7 +6857,6 @@ import {
       return;
     }
     if (m.isBoss) {
-      addScore(state, CONFIG.bossScore);
       state.waveStats.kills++;
       state.totalKills++;
       Quests.onKill(playerRef, state);
@@ -6893,7 +6897,6 @@ import {
       toast(t("toast.bossDefeated", { boss: bossDisplayName(m), item: tItemName(getDef(rareId)) }));
       return;
     }
-    addScore(state, CONFIG.scorePerMonster);
     state.waveStats.kills++;
     state.totalKills++;
     // A candy-pop burst in the sweet's own colour.
@@ -7289,13 +7292,8 @@ import {
   }
 
   // =========================================================================
-  // Score / HUD helpers
+  // HUD helpers
   // =========================================================================
-  function addScore(state, points) {
-    state.score += points;
-    dom.score.textContent = state.score;
-  }
-
   function updateCoins(state) {
     if (dom.coins) dom.coins.textContent = state.coins;
     if (dom.shopCoins) dom.shopCoins.textContent = state.coins;
@@ -7406,7 +7404,7 @@ import {
   }
 
   // ---- Skills, leveling & focus HUD (Task 14) ----------------------------
-  // Level badge + XP progress bar (top-left, by the location/score row).
+  // Level badge + XP progress bar (top-left, by the location/coins row).
   function updateXpHud(player) {
     if (!player || !player.progress) return;
     const pr = player.progress;
@@ -7516,12 +7514,33 @@ import {
     dom.waveBanner.classList.add("show");
   }
 
+  // A run recap for the end / pause screens: the RPG progression (level + total
+  // XP earned across the run) plus the key tallies (monsters felled, relics
+  // collected). Replaces the retired arcade "score" (Task 19). Pure + defensive
+  // so it's safe to call from the headless tests.
+  function runRecap(state) {
+    const pr = (playerRef && playerRef.progress) || null;
+    const level = (pr && pr.level) || 1;
+    const xp = (pr && pr.xp) || 0;
+    const totalXp = totalXpToReach(level) + xp; // cumulative XP earned this run
+    return {
+      level,
+      totalXp,
+      kills: state ? state.totalKills | 0 : 0,
+      relics: state ? state.relicsFound | 0 : 0,
+    };
+  }
+
   function gameOver(state) {
     state.over = true;
     dom.prompt.classList.add("hidden");
     hideBossBar();
     const where = (state.world && state.world.zone) ? tZoneName(state.world.zone) : "—";
-    if (dom.overText) dom.overText.innerHTML = t("over.tagline", { score: state.score, where });
+    const r = runRecap(state);
+    if (dom.overText) {
+      dom.overText.innerHTML = t("over.tagline", { level: r.level, xp: r.totalXp, where }) +
+        "<br>" + t("recap.tallies", { kills: r.kills, relics: r.relics });
+    }
     setTimeout(() => dom.over.classList.remove("hidden"), 600);
   }
 
@@ -7534,7 +7553,11 @@ import {
     hideBossBar();
     Story.onWin();                         // mark the finale resolved
     updateQuestTracker();                  // campaign complete → clear the tracker
-    if (dom.winText) dom.winText.innerHTML = t("win.tagline", { score: state.score, kills: state.totalKills });
+    const r = runRecap(state);
+    if (dom.winText) {
+      dom.winText.innerHTML = t("win.tagline", { level: r.level, xp: r.totalXp }) +
+        "<br>" + t("recap.tallies", { kills: r.kills, relics: r.relics });
+    }
     if (dom.winStory) dom.winStory.innerHTML = t("win.ending", { title: tStoryEndingTitle(), text: tStoryEndingText() }); // ending framing
     Sfx.play("artifact");
     setTimeout(() => { if (dom.win) dom.win.classList.remove("hidden"); }, 800);
@@ -7545,11 +7568,11 @@ import {
   // and restore it from a file on any device.
   //
   // The procedural environment is captured by its RNG seed (re-seeded + rebuilt
-  // on load), while every live entity (player stats + perks, money, score,
+  // on load), while every live entity (player stats + perks, money,
   // monsters, the boss, artifacts and dropped coins, plus the wave clock) is
   // serialized explicitly so the run resumes exactly where it left off.
   // =========================================================================
-  const SAVE_VERSION = 10;
+  const SAVE_VERSION = 11;
   const PENDING_LOAD_KEY = "gg3d_pending_load"; // sessionStorage hand-off across reload
   const AUTOSTART_KEY = "gg3d_autostart";       // restart -> skip the start screen
 
@@ -7590,7 +7613,6 @@ import {
       // waypoint ({ kind, id }) so the player's chosen destination survives reload.
       discovered: Object.keys(state.discovered || {}),
       waypoint: state.waypoint || null,
-      score: state.score,
       money: state.coins,
       player: {
         health: round(player.health),
@@ -7613,6 +7635,7 @@ import {
       // Story progression: quests, the campaign-flow state, the castle build
       // state, day/night + weather.
       totalKills: state.totalKills,
+      relicsFound: state.relicsFound,   // v11: lifetime relics for the end-screen recap
       // Active playtime in seconds (v10) — drives the save-slot "time played"
       // metadata. Legacy saves without it default to 0 on load.
       playSec: Math.round(state.playSec || 0),
@@ -7693,8 +7716,8 @@ import {
   }
   function _applySaveBody(d, state, player, interaction) {
 
-    // Score / money economy.
-    state.score = d.score | 0;
+    // Money economy. (The legacy `score` field, dropped in v11, is ignored: older
+    // saves still carry it but the game no longer tracks a score.)
     state.coins = d.money | 0;
 
     // Persistent progression the zone rebuild reads.
@@ -7745,6 +7768,9 @@ import {
     // Story progression: kills, quests, the campaign-flow state, win flag.
     // Unknown ids (e.g. from a pre-campaign save) drop out, defaulting cleanly.
     state.totalKills = d.totalKills | 0;
+    // v11: lifetime relics for the recap. Pre-v11 saves default to however many
+    // the player is still carrying (a sane lower bound — built ones are gone).
+    state.relicsFound = d.relicsFound != null ? d.relicsFound | 0 : (player.relics ? player.relics.length : 0);
     state.playSec = Math.max(0, +d.playSec || 0);   // v10 (legacy → 0)
     state.won = !!d.won;
     const q = d.quests || {};
@@ -7777,7 +7803,7 @@ import {
     updateHealthBar(player.health);
 
     // Refresh every HUD readout.
-    addScore(state, 0);
+    updateXpHud(player);
     updateCoins(state);
     updateLocationHud(ZONE_BY_ID[state.zoneId]);
     WorldMap.update(0);                 // redraw the minimap + restored compass
@@ -7795,7 +7821,8 @@ import {
       const a = document.createElement("a");
       const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
       a.href = url;
-      a.download = `good-game-3d-${data.zone || "meadow"}-${data.score | 0}pts-${stamp}.json`;
+      const lvl = (data.player && data.player.progress && data.player.progress.level) || 1;
+      a.download = `good-game-3d-${data.zone || "meadow"}-lv${lvl}-${stamp}.json`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -8987,12 +9014,11 @@ import {
       this.refreshTexts();
       dom.pauseMenu.classList.remove("hidden");
     },
-    // The wave/score line + any open confirm message are interpolated, so they
-    // localize live when the language is switched from the pause settings.
+    // The level/XP recap line + any open confirm message are interpolated, so
+    // they localize live when the language is switched from the pause settings.
     refreshTexts() {
-      const wave = waveSystem ? waveSystem.wave : 0;
-      const score = stateRef ? stateRef.score : 0;
-      if (dom.pauseStats) dom.pauseStats.innerHTML = t("pause.stats", { wave, score });
+      const r = runRecap(stateRef);
+      if (dom.pauseStats) dom.pauseStats.innerHTML = t("pause.stats", { level: r.level, xp: r.totalXp });
       _syncGfxButtons();   // reflect the current graphics preference + detected tier
       if (this.pendingAction && dom.confirmText) {
         if (this.pendingAction === "restart") dom.confirmText.textContent = t("pause.confirmRestart");
@@ -10088,6 +10114,7 @@ import {
       BASE_SKILL_IDS, BOSS_SKILL_IDS, STARTER_SKILL_IDS, SKILL_SLOTS, MAX_FUSE_INPUTS,
       xpToNext, totalXpToReach, maxFocusForLevel, levelHealthBonus, skillsUnlockedAt,
       skillTier, canFuse, fuseSkills, fusionCost, newProgress,
+      XP_PER_GATHER, XP_PER_QUEST, XP_PER_ARTIFACT, runRecap,
       tSkillName, tSkillDesc, tElementLabel, tEffectLabel,
       // ---- Audio: mixer, per-zone ambience, footsteps (Task 6) ----
       Mixer, Ambience, AudioUI, Footsteps, LowHealth, surfaceForZone, AUDIO_KEY,
@@ -10135,7 +10162,7 @@ import {
       makeEnvironment, mat, emat, stdMat, stdEmat, pbrMat, pbrEmat, gloss, usePBR,
       get envOn() { return ENV_ON; },
       addMaterial, spendMaterials, hasMaterials, craftRecipe, addRelic, hasRelic,
-      grantReward, spawnImpact, winGame,
+      grantReward, spawnImpact, winGame, gameOver,
       get interaction() { return interactionRef; },
       get zoneManager() { return zoneManager; },
       get waves() { return waveSystem; },

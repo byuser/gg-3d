@@ -25,6 +25,11 @@
   const HEALTH_PER_LEVEL = 8;     // +max health granted per level
   const XP_PER_GATHER = 3;        // XP for harvesting a resource node
   const XP_PER_QUEST = 45;        // XP for turning a quest in
+  // XP for collecting an artifact/relic. Task 19 retired the legacy arcade
+  // "score" (artifacts paid +50 score) and folds that reward into XP instead: a
+  // meaningful chunk (~4 sweet kills, between a sweet and a boss) so grabbing one
+  // mid-fight is worth the detour without trivialising level pacing.
+  const XP_PER_ARTIFACT = 40;
 
   // Schools of magic: a colour + emoji for the bolt / impact tint and the UI.
   // `label` is the English fallback; i18n overrides it via tElementLabel().
@@ -240,7 +245,7 @@ export {
   SKILL_DB, getSkill, ELEMENTS, EFFECTS,
   BASE_SKILL_IDS, BOSS_SKILL_IDS, STARTER_SKILL_IDS,
   SKILL_SLOTS, MAX_FUSE_INPUTS, FOCUS_BASE, FOCUS_PER_LEVEL, FOCUS_REGEN,
-  HEALTH_PER_LEVEL, XP_PER_GATHER, XP_PER_QUEST,
+  HEALTH_PER_LEVEL, XP_PER_GATHER, XP_PER_QUEST, XP_PER_ARTIFACT,
   xpToNext, totalXpToReach, maxFocusForLevel, levelHealthBonus, skillsUnlockedAt,
   skillTier, blendElement, canFuse, fuseSkills, fusionCost,
 };

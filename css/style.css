@@ -177,7 +177,6 @@ html, body {
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 8px 16px; border-radius: 999px; font-size: 15px; font-weight: 600;
 }
-.stat #score { color: var(--accent); }
 .stat #coins { color: #ffd34e; }
 .stat #location { color: var(--accent2); }
 /* The current-location chip stands out a touch from the other stats. */

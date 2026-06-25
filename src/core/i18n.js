@@ -137,16 +137,18 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "prompt.withKey": "{label} · <b>E</b>",
       // ---- game over / victory ----
       "over.title": "Game Over 🍭",
-      "over.tagline": "The wild monsters got you! You scored <b>{score}</b> and fell in <b>{where}</b>.",
+      "over.tagline": "The wild monsters got you! You reached <b>Level {level}</b> ({xp} XP) and fell in <b>{where}</b>.",
       "over.replay": "Play Again",
       "win.title": "Victory! 🐉🏰",
       "win.tagline": "The castle stands and the <b>Ancient Dragon</b> is slain! Meadowgate is " +
-        "saved. You finished with <b>{score}</b> points after felling <b>{kills}</b> monsters.",
+        "saved. You finished at <b>Level {level}</b> with <b>{xp} XP</b>.",
       "win.replay": "Play Again",
       "win.ending": "<b>{title}</b><br>{text}",
+      // Run recap (shared by the game-over + victory screens): the key tallies.
+      "recap.tallies": "🗡️ {kills} monsters felled · 🏰 {relics} relics",
       // ---- pause menu ----
       "pause.title": "Paused",
-      "pause.stats": "Wave <b>{wave}</b> · Score <b>{score}</b>",
+      "pause.stats": "Level <b>{level}</b> · <b>{xp}</b> XP",
       "pause.resume": "Resume",
       "pause.save": "Save Progress",
       "pause.savedBtn": "Saved! 💾",
@@ -327,7 +329,7 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "toast.castleComplete": "🐉 The castle is complete... the DRAGON awakens!",
       "toast.dragonDives": "🐉 The dragon dives!",
       "toast.dragonBreath": "🔥 Dragon's breath!",
-      "toast.artifact": "Artifact! +{score}{extra}",
+      "toast.artifact": "Artifact! +{xp} XP{extra}",
       "toast.artifactHeal": " · +{n} ❤",
       "toast.artifactCoin": " · 🪙 +{n}",
       "toast.noCoins": "Not enough coins",
@@ -553,16 +555,18 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "prompt.withKey": "{label} · <b>E</b>",
       // ---- game over / victory ----
       "over.title": "Игра окончена 🍭",
-      "over.tagline": "Дикие монстры одолели вас! Вы набрали <b>{score}</b> и пали в <b>{where}</b>.",
+      "over.tagline": "Дикие монстры одолели вас! Вы достигли <b>{level}-го уровня</b> ({xp} опыта) и пали в <b>{where}</b>.",
       "over.replay": "Играть снова",
       "win.title": "Победа! 🐉🏰",
       "win.tagline": "Замок стоит, а <b>Древний Дракон</b> повержен! Лугоград спасён. " +
-        "Вы завершили с <b>{score}</b> очками, сразив <b>{kills}</b> монстров.",
+        "Вы завершили на <b>{level}-м уровне</b> с <b>{xp} опыта</b>.",
       "win.replay": "Играть снова",
       "win.ending": "<b>{title}</b><br>{text}",
+      // Сводка забега (для экранов поражения и победы): ключевые показатели.
+      "recap.tallies": "🗡️ Монстров сражено: {kills} · 🏰 Реликвий: {relics}",
       // ---- pause menu ----
       "pause.title": "Пауза",
-      "pause.stats": "Волна <b>{wave}</b> · Очки <b>{score}</b>",
+      "pause.stats": "Уровень <b>{level}</b> · <b>{xp}</b> опыта",
       "pause.resume": "Продолжить",
       "pause.save": "Сохранить прогресс",
       "pause.savedBtn": "Сохранено! 💾",
@@ -743,7 +747,7 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "toast.castleComplete": "🐉 Замок достроен... ДРАКОН пробуждается!",
       "toast.dragonDives": "🐉 Дракон пикирует!",
       "toast.dragonBreath": "🔥 Дыхание дракона!",
-      "toast.artifact": "Артефакт! +{score}{extra}",
+      "toast.artifact": "Артефакт! +{xp} опыта{extra}",
       "toast.artifactHeal": " · +{n} ❤",
       "toast.artifactCoin": " · 🪙 +{n}",
       "toast.noCoins": "Недостаточно монет",
