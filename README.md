@@ -245,6 +245,19 @@ runs in English without a browser.
   tallies), the **castle build state**, cleared **lair bosses**, and the **time/weather**. Back on
   the **start screen**, **Load Progress** reads a save file from your device and drops you right
   back where you left off — even on a different device or browser.
+- **Auto-resume (durable session):** your in-progress run is **continuously auto-saved to this
+  device** (debounced on key beats — travel, level-up, quest turn-in, purchase — and on tab-hide),
+  so **reloading the page** — or switching desktop⇄mobile layout, re-orienting, or changing graphics
+  quality — drops you straight back into the run. On the start screen a **Continue** button appears
+  when a saved run exists (Start always begins a fresh one). If you opted into Google Drive, the
+  sign-in is **remembered and silently refreshed** so a reload keeps you logged in without a new
+  consent dialog. A small **first-party cookie** (`SameSite=Lax`, `Secure` on HTTPS) holds only a
+  session id, your locale/quality, the cloud-autosave flag and a **non-sensitive** sign-in hint —
+  never a token or secret, no third-party/tracking cookies; the run snapshot itself lives in
+  `localStorage`. Everything is feature-detected (cookies fall back to `localStorage`), so private
+  mode / blocked cookies / headless still play. **Clear saved session & sign out** (in the Cloud
+  Saves panel on the start screen and pause settings) wipes the local session, the cookie and the
+  Google sign-in.
 - **Cloud saves (optional):** if the game has been configured with a Google OAuth client id (see
   [Cloud saves](#cloud-saves-optional-google-drive) below), you can **Sign in with Google** from the
   start screen or pause settings and back your progress up to your **own private Google Drive** — a

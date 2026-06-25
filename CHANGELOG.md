@@ -24,6 +24,44 @@ delta it shipped with, since later tasks reference those.
 
 _Nothing pending._
 
+## [2026-06-25] — Task 17 — Durable session persistence
+
+Reloading the page — or switching desktop⇄mobile layout / re-orienting / changing graphics quality (all of which
+reboot the view) — now **resumes the in-progress run exactly where it left off** and **keeps the player effectively
+signed in to Google Drive**, the way shipped web games keep you logged in and mid-run. **No save-schema change**
+(`SAVE_VERSION` stays **9** — it reuses the existing `serializeGame()`/`applySave()` JSON). Vitest **141 → 164**
+(new `test/session.test.js`, 23 cases) plus a new Playwright `session.spec.js` (resume-after-reload) run at desktop
+**and** the S24 Ultra portrait + landscape profiles.
+
+- **Auto-persisted local session (resume-on-reload).** A new first-party `Session` module continuously persists the
+  live run (the exact `serializeGame()` JSON) to `localStorage`, debounced (1.5 s) on key beats — zone travel,
+  level-up, quest turn-in, purchase/sale — and flushed synchronously on `visibilitychange`/`pagehide`. On boot, with
+  no explicit file/cloud pick pending, the snapshot is auto-restored through the **same `gg3d_pending_load` seam**
+  the file/cloud load uses (re-seed → rebuild → lay the run in), surfaced as a **"Continue"** button on the start
+  screen rather than silently forced. `Start` still begins a fresh run (overwriting the snapshot).
+- **First-party cookie for the small, long-lived identifiers.** A pure, attribute-complete cookie helper
+  (`buildCookieString`/`parseCookies` + `cookieGet`/`cookieSet`/`cookieDel`) stores a session id, the chosen
+  locale/quality, the cloud-autosave flag and a **non-sensitive Google auth hint** in one compact first-party cookie
+  (`SameSite=Lax`, `Secure` on HTTPS Pages, 180-day `Max-Age`). It is **feature-detected** and falls back to
+  `localStorage` (mirrored `ck_*` keys) when `document.cookie` is unavailable (private mode / headless). The bulky
+  run snapshot stays in `localStorage` (cookies are size-limited). No third-party/tracking cookies; **no secrets**
+  are ever stored.
+- **Durable Google sign-in across reload.** The Drive client gained a silent token path (`signInSilent` → GIS
+  `prompt: ""` + `login_hint`). On opt-in, `CloudSave` remembers a non-sensitive hint; on boot `CloudUI` attempts a
+  **silent token refresh** so a reload keeps you signed in **without a fresh consent dialog**, falling back to the
+  explicit Sign-in button if it fails. **Sign-out clears the hint** so no silent re-auth happens afterward. Pure
+  `silentAuthDecision(hint)` gates the attempt and is unit-tested.
+- **Layout-agnostic + privacy control.** The persisted session is independent of layout, so a desktop⇄mobile switch
+  restores the same run **and** sign-in; the Task 16 HUD/menu rebuild reads from the restored state. A
+  **"Clear saved session & sign out"** control (start screen + pause settings, EN+RU) wipes the snapshot, the cookie
+  and the Google sign-in. README documents what is stored and where.
+- **Tests.** New `test/session.test.js` (23 cases): the pure cookie helper (attributes + fallback + throw-safety),
+  the cookie-state merge, the `sessionPersistDue` debounce scheduler, the `silentAuthDecision` gate, the snapshot
+  flush/restore round-trip (parity with file/cloud payloads, save-in-progress guard) and clear-session. A Playwright
+  `session.spec.js` starts a run, reloads, and asserts **Continue** resumes it — at desktop + both S24 Ultra
+  orientations. Feature-detected throughout (cookies / `localStorage` / GIS / `document`): the headless suite stays
+  green and signed-out/offline still play.
+
 ## [2026-06-25] — Task 16 — Responsive, mobile-first HUD & menu overhaul
 
 Rebuilt the menus + HUD to the standard of well-reviewed mobile action-RPGs: every control reachable at every

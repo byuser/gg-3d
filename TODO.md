@@ -1108,7 +1108,19 @@ A task is **done** only when **all** of these are true:
   as a pure function so the DOM layer stays thin.
 
 ### Task 17 — Durable session persistence (progress + Google sign‑in survive reload and desktop⇄mobile mode switches)
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-25 · Shipped a first‑party `Session` module that auto‑persists the live run
+  (the exact `serializeGame()` JSON) to `localStorage`, debounced (1.5 s) on key beats + flushed on
+  `visibilitychange`/`pagehide`, and **auto‑restores it on boot** through the same `gg3d_pending_load` seam as
+  the file/cloud load — surfaced as a **"Continue"** button (Start still begins fresh). A pure, feature‑detected
+  cookie helper (`buildCookieString`/`parseCookies` + `cookieGet/Set/Del`, `SameSite=Lax`/`Secure`/180‑day
+  `Max‑Age`, `localStorage` fallback via `ck_*`) carries a session id + locale/quality + cloud flag + a
+  **non‑sensitive Google auth hint**; the bulky snapshot stays in `localStorage`. The Drive client gained a
+  **silent token path** (`signInSilent` → GIS `prompt:""` + `login_hint`); `CloudUI` re‑auths silently on boot
+  when the player had opted in (sign‑out clears the hint → no silent re‑auth), gated by the pure
+  `silentAuthDecision`. A **"Clear saved session & sign out"** control (start + pause, EN+RU) wipes everything.
+  No `SAVE_VERSION` change (reuses the existing schema; older saves still load). New `test/session.test.js`
+  (23 cases; Vitest 141 → 164) + a Playwright `session.spec.js` (resume‑after‑reload) at desktop + the S24 Ultra
+  portrait + landscape profiles.
 - **Depends on:** the existing `serializeGame`/`applySave` + `localStorage` prefs
   (Tasks 9/15). Coordinate with **Task 18** (save management) and **Task 15**
   (cloud auth) — they share the persistence layer. Do this **before/with** Task 18.
