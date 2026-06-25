@@ -104,6 +104,7 @@
   // the story sends you to; several host a story NPC with quests + rewards. ----
   const LOCATIONS = [
     { id: "village",  name: "Meadowgate Village", icon: "🏘️", x: 0,    z: -14, color: "#ffd98a" },
+    { id: "apothecary", name: "Meadowgate Apothecary", icon: "⚗️", x: 8, z: 2, color: "#9ad6a0" },
     { id: "grove",    name: "Whisperwood Grove",  icon: "🌲", x: -48,  z: -40, color: "#5be0a0" },
     { id: "seaside",  name: "Saltmarsh Shore",    icon: "🌊", x: 60,   z: 52,  color: "#6cc6ff" },
     { id: "mountain", name: "Frostpeak Pass",     icon: "⛰️", x: -58,  z: 50,  color: "#cfe3ff" },
@@ -123,6 +124,10 @@
   const NPC_DATA = [
     { id: "mayor",     name: "Mayor Plum",       icon: "🎩", loc: "village",
       intro: "Meadowgate is besieged by living sweets! They say a castle once warded this vale. Help us raise it again, hero." },
+    // The apothecary is a dedicated VENDOR, not a quest giver (vendor: "alchemist").
+    // She stocks potions + basic ingredients; the merchant no longer sells them.
+    { id: "alchemist", name: "Apothecary Miriel", icon: "⚗️", loc: "apothecary", vendor: "alchemist",
+      intro: "Looking for a remedy? I brew every potion in the vale, and trade in fresh-cut reagents besides." },
     { id: "herbalist", name: "Sage Willow",      icon: "👩‍🌾", loc: "grove",
       intro: "The Whisperwood gives freely to those who listen. Gather with me, and I'll share old secrets." },
     { id: "fisher",    name: "Old Brin",         icon: "🎣", loc: "seaside",

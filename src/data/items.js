@@ -345,12 +345,24 @@
     crown_eternal:  { name: "Crown Eternal", icon: "👑", type: "helmet", rarity: "legendary", value: 280, desc: "+90 health, +18% resist, +3 damage.", stats: { maxHealth: 90, damageReduction: 0.18, damage: 3 } },
     wings_of_dawn:  { name: "Wings of Dawn", icon: "🪽", type: "cloak", rarity: "legendary", value: 300, desc: "+1.6 speed, +35 health, +8% resist.", stats: { moveSpeed: 1.6, maxHealth: 35, damageReduction: 0.08 } },
 
-    // ----- Potions / consumables (the potion belt) -----
+    // ----- Potions / consumables (drag-slotted from the unified bag) -----
     minor_potion:   { name: "Minor Health Potion", icon: "🧪", type: "potion", rarity: "normal", cost: 8,  desc: "Restore 30 health.", potion: { heal: 30 } },
     health_potion:  { name: "Health Potion",       icon: "❤️", type: "potion", rarity: "normal", cost: 16, desc: "Restore 65 health.", potion: { heal: 65 } },
     greater_potion: { name: "Greater Health Potion", icon: "💖", type: "potion", rarity: "rare", cost: 30, desc: "Restore 140 health.", potion: { heal: 140 } },
     elixir_might:   { name: "Elixir of Might",     icon: "⚗️", type: "potion", rarity: "rare", cost: 34, desc: "+4 damage for 18s.", potion: { buff: { damage: 4 }, time: 18, label: "Might" } },
     elixir_swift:   { name: "Elixir of Swiftness", icon: "🌀", type: "potion", rarity: "rare", cost: 30, desc: "+2.5 speed for 18s.", potion: { buff: { moveSpeed: 2.5 }, time: 18, label: "Swift" } },
+
+    // ----- Crafting materials / reagents (Task 21) -----------------------------
+    // Materials are first-class, STACKABLE bag items now (they used to live in an
+    // ad-hoc `player.materials` dictionary). The alchemist sells the basic ones;
+    // every material can be sold back via `value`. Icons/labels mirror the
+    // MATERIALS table (resolved through i18n for display).
+    wood:    { name: "Wood",    icon: "🪵", type: "material", rarity: "normal", cost: 3,  desc: "Stout timber for crafting." },
+    stone:   { name: "Stone",   icon: "🪨", type: "material", rarity: "normal", cost: 3,  desc: "Solid building stone." },
+    water:   { name: "Water",   icon: "💧", type: "material", rarity: "normal", cost: 3,  desc: "Clean water for brewing." },
+    herb:    { name: "Herb",    icon: "🌿", type: "material", rarity: "normal", cost: 4,  desc: "A fragrant medicinal herb." },
+    fiber:   { name: "Fiber",   icon: "🧵", type: "material", rarity: "normal", cost: 3,  desc: "Tough plant fiber for cloth." },
+    crystal: { name: "Crystal", icon: "🔮", type: "material", rarity: "rare",   cost: 12, desc: "A humming arcane crystal." },
   };
 
   // Fill in derived fields (id, sell value) once.
@@ -360,11 +372,24 @@
     if (d.value == null) d.value = d.cost != null ? Math.max(1, Math.round(d.cost * 0.5)) : 40;
   }
   const getDef = (id) => ITEM_DB[id];
-  const isGear = (id) => ITEM_DB[id].type !== "potion";
-  // The merchant's normal gear stock (potions are stocked separately).
+  // "Gear" = wearable/wieldable equipment (everything that ISN'T a stackable
+  // consumable or reagent). Materials + potions are stackable bag items, never
+  // gear, so they stay out of the gear tab / anvil / affix rolls / gear shop.
+  const isGear = (id) => { const ty = ITEM_DB[id].type; return ty !== "potion" && ty !== "material"; };
+  // Stackable items (potions + materials) share one bag code path; they stack and
+  // never carry enhancement levels or affixes.
+  const isMaterial = (id) => ITEM_DB[id] && ITEM_DB[id].type === "material";
+  const isStackable = (id) => { const d = ITEM_DB[id]; return !!d && (d.type === "potion" || d.type === "material"); };
+  // The merchant's normal gear stock (potions + materials are stocked separately
+  // by the dedicated alchemist now — see ALCHEMIST_STOCK).
   const SHOP_STOCK = Object.keys(ITEM_DB).filter((id) => ITEM_DB[id].rarity === "normal" && ITEM_DB[id].cost != null && isGear(id));
-  // Potions sold by the merchant (any consumable with a price).
+  // Potions the alchemist sells (any consumable with a price).
   const POTION_STOCK = Object.keys(ITEM_DB).filter((id) => ITEM_DB[id].type === "potion" && ITEM_DB[id].cost != null);
+  // Basic reagents the alchemist sells (the cheap, common gathered materials —
+  // not the rarer crystal, which the player must gather/quest for).
+  const INGREDIENT_STOCK = Object.keys(ITEM_DB).filter((id) => ITEM_DB[id].type === "material" && ITEM_DB[id].rarity === "normal" && ITEM_DB[id].cost != null);
+  // The alchemist's full stock: potions first, then basic ingredients.
+  const ALCHEMIST_STOCK = POTION_STOCK.concat(INGREDIENT_STOCK);
   // Rare gear bosses can drop (rare-rarity gear only — never potions/epic/legend).
   const RARE_DROPS = Object.keys(ITEM_DB).filter((id) => ITEM_DB[id].rarity === "rare" && isGear(id));
   // The pool the rotating "Featured" shop tab draws its wares from: every piece
@@ -375,7 +400,7 @@
 export {
   RARITY, ENHANCE, enhanceRule, instLevel, enhanceMult, enhanceCost, enhanceName,
   effectiveStats, EQUIP_SLOTS, WORN_SLOTS, TWO_HANDED, SLOT_META, FISTS, ITEM_DB, getDef, isGear,
-  SHOP_STOCK, POTION_STOCK, RARE_DROPS, FEATURED_POOL,
+  isMaterial, isStackable, SHOP_STOCK, POTION_STOCK, INGREDIENT_STOCK, ALCHEMIST_STOCK, RARE_DROPS, FEATURED_POOL,
   AFFIXES, RARITY_AFFIX_COUNT, AFFIX_TIER_MULT, itemCategory, affixPoolFor, rollAffixes,
   affixStats, affixMagMult, SETS, setCounts, setBonusStats, activeSets,
 };

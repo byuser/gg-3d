@@ -28,7 +28,7 @@ import { CONFIG, PALETTE, rng, setSeed, getSeed } from "./core/config.js";
 import {
   RARITY, ENHANCE, enhanceRule, instLevel, enhanceMult, enhanceCost, enhanceName,
   effectiveStats, EQUIP_SLOTS, WORN_SLOTS, TWO_HANDED, SLOT_META, FISTS, ITEM_DB, getDef, isGear,
-  SHOP_STOCK, POTION_STOCK, RARE_DROPS, FEATURED_POOL,
+  isMaterial, isStackable, SHOP_STOCK, POTION_STOCK, INGREDIENT_STOCK, ALCHEMIST_STOCK, RARE_DROPS, FEATURED_POOL,
   AFFIXES, rollAffixes, affixStats, SETS, setBonusStats, activeSets, itemCategory,
 } from "./data/items.js";
 import {
@@ -111,7 +111,6 @@ import {
     // Dynamic HUD + any open overlay (all guarded — null before the scene boots).
     if (typeof playerRef !== "undefined" && playerRef) {
       recomputeStats(playerRef);            // rebuilds the weapon's display name
-      updateMaterialsHud(playerRef);
       updateRelicHud(playerRef);
       updatePotionBar(playerRef);
       if (typeof updateSkillsHud === "function") updateSkillsHud(playerRef);
@@ -317,14 +316,67 @@ import {
   }
 
   // ---- Inventory / equipment operations ----------------------------------
+  // The bag (player.inventory) is now UNIFIED (Task 21): gear instances live
+  // alongside STACKABLE consumable/material stacks ({ id, uid, count }). Gear is
+  // one slot per instance; potions + materials stack up to STACK_MAX per slot and
+  // overflow into additional slots. A "slot" is one array entry, capped by invCap.
+  const STACK_MAX = 99;
+
   function invRemove(player, inst) {
     const i = player.inventory.indexOf(inst);
     if (i >= 0) player.inventory.splice(i, 1);
   }
+  // Add a single bag entry (gear instance, or a stackable instance). Stackable
+  // instances merge into an existing same-id stack first (so they don't waste a
+  // slot); only when every existing stack is full does a new slot get used.
   function invAdd(player, inst) {
+    if (inst && isStackable(inst.id)) {
+      const n = inst.count != null ? inst.count : 1;
+      return bagAdd(player, inst.id, n) > 0;
+    }
     if (player.inventory.length >= player.invCap) return false;
     player.inventory.push(inst);
     return true;
+  }
+  // Total count of a stackable item across all its bag stacks.
+  function bagCount(player, id) {
+    let n = 0;
+    for (const it of player.inventory) if (it && it.id === id) n += (it.count || 0);
+    return n;
+  }
+  // Add `n` of a stackable item to the bag: top up existing stacks, then open new
+  // slots while there's room. Returns how many were actually added (capped by the
+  // bag's free slots × STACK_MAX). Non-stackable ids are rejected (use invAdd).
+  function bagAdd(player, id, n) {
+    if (!isStackable(id) || n <= 0) return 0;
+    let added = 0;
+    for (const it of player.inventory) {
+      if (added >= n) break;
+      if (it && it.id === id && it.count < STACK_MAX) {
+        const take = Math.min(STACK_MAX - it.count, n - added);
+        it.count += take; added += take;
+      }
+    }
+    while (added < n && player.inventory.length < player.invCap) {
+      const take = Math.min(STACK_MAX, n - added);
+      player.inventory.push({ id, uid: _instSeq++, count: take });
+      added += take;
+    }
+    return added;
+  }
+  // Remove up to `n` of a stackable item from the bag (drains stacks, dropping
+  // emptied slots). Returns how many were actually removed.
+  function bagSpend(player, id, n) {
+    if (n <= 0) return 0;
+    let removed = 0;
+    for (let i = player.inventory.length - 1; i >= 0 && removed < n; i--) {
+      const it = player.inventory[i];
+      if (!it || it.id !== id || it.count == null) continue;
+      const take = Math.min(it.count, n - removed);
+      it.count -= take; removed += take;
+      if (it.count <= 0) player.inventory.splice(i, 1);
+    }
+    return removed;
   }
   // Move whatever occupies a slot back into the bag. For a two-handed weapon
   // (held in hand1) this also clears the hand2 sentinel.
@@ -363,28 +415,47 @@ import {
     recomputeStats(player);
   }
 
-  // ---- Potion belt + buffs ----------------------------------------------
-  // The belt is a fixed array of up to POTION_SLOTS stacks, each { id, count }
-  // of a single potion kind. Buying a potion fills/stacks it; using one quaffs
-  // the top of a stack and applies its effect (instant heal or a timed buff).
+  // ---- Potion quick-slots + buffs ---------------------------------------
+  // Potions now live in the UNIFIED bag as stackable items (Task 21). The 3
+  // combat quick-slots are an ASSIGNMENT over those bag stacks — each slot holds
+  // a potion *id* (or null), chosen by the player via drag-and-drop. Drinking a
+  // slot consumes one of that potion from the bag stack; emptying the stack
+  // auto-clears the slot. `potionAdd` is just a bag add (kept as a name a lot of
+  // callers use — quests, crafting, starting loadout).
   const POTION_SLOTS = 3;
-  const POTION_STACK_MAX = 9;
 
-  function potionAdd(player, id) {
-    const belt = player.potions;
-    for (const s of belt) {
-      if (s && s.id === id && s.count < POTION_STACK_MAX) { s.count++; return true; }
+  function potionAdd(player, id) { return bagAdd(player, id, 1) > 0; }
+
+  // Assign / clear a quick-slot (pure model; the drag layer + tap fallback both
+  // funnel through these, like the skill quick-bar's assignSlot/clearSlot).
+  function assignPotionSlot(player, slot, id) {
+    if (slot < 0 || slot >= POTION_SLOTS || !id || !getDef(id) || getDef(id).type !== "potion") return false;
+    // Keep slots unique: if this potion already sits in another slot, swapping is
+    // handled by the reducer; a plain assign just drops any duplicate elsewhere.
+    for (let i = 0; i < POTION_SLOTS; i++) if (i !== slot && player.potionSlots[i] === id) player.potionSlots[i] = null;
+    player.potionSlots[slot] = id;
+    return true;
+  }
+  function clearPotionSlot(player, slot) {
+    if (slot < 0 || slot >= POTION_SLOTS) return false;
+    player.potionSlots[slot] = null;
+    return true;
+  }
+  // Drop any quick-slot pointing at a potion the bag no longer holds (called
+  // after a drink / sale so a slot never shows a phantom potion).
+  function syncPotionSlots(player) {
+    for (let i = 0; i < POTION_SLOTS; i++) {
+      const id = player.potionSlots[i];
+      if (id && bagCount(player, id) <= 0) player.potionSlots[i] = null;
     }
-    for (let i = 0; i < belt.length; i++) {
-      if (!belt[i]) { belt[i] = { id, count: 1 }; return true; }
-    }
-    return false; // belt full (3 different kinds already, none stackable)
   }
 
-  function potionUse(player, slot) {
-    const s = player.potions[slot];
-    if (!s || s.count <= 0 || player.health <= 0) return false;
-    const def = getDef(s.id);
+  // Drink one of a potion by id: apply its effect (instant heal or a timed buff)
+  // and consume one from the bag stack. Shared by the combat quick-slots and the
+  // inventory's "drink from bag" action. Returns true if a potion was consumed.
+  function drinkPotionById(player, id) {
+    const def = getDef(id);
+    if (!def || def.type !== "potion" || player.health <= 0 || bagCount(player, id) <= 0) return false;
     const p = def.potion || {};
     if (p.heal) {
       if (player.health >= player.maxHealth) { toast(t("toast.fullHealth")); return false; }
@@ -392,14 +463,23 @@ import {
       updateHealthBar(player.health);
       toast(t("toast.potionHeal", { icon: def.icon, heal: p.heal }));
     } else if (p.buff) {
-      applyBuff(player, { id: s.id, label: p.label || def.name, stats: p.buff, time: p.time || 12 });
-      toast(t("toast.potionBuff", { icon: def.icon, label: tPotionLabel(s.id) }));
+      applyBuff(player, { id, label: p.label || def.name, stats: p.buff, time: p.time || 12 });
+      toast(t("toast.potionBuff", { icon: def.icon, label: tPotionLabel(id) }));
     }
     if (typeof Sfx !== "undefined") Sfx.play("potion");
-    s.count--;
-    if (s.count <= 0) player.potions[slot] = null;
+    bagSpend(player, id, 1);
+    syncPotionSlots(player);
     recomputeStats(player);
+    return true;
+  }
+
+  // Drink the potion assigned to a combat quick-slot (consumes from the bag).
+  function potionUse(player, slot) {
+    const id = player.potionSlots[slot];
+    if (!id) return false;
+    if (!drinkPotionById(player, id)) return false;
     updatePotionBar(player);
+    if (Inventory.open) Inventory.render();
     return true;
   }
 
@@ -422,21 +502,27 @@ import {
     updateBuffBar(player); // refresh the countdown each frame while buffs run
   }
 
-  // ---- Crafting materials -------------------------------------------------
+  // ---- Crafting materials (now bag-backed; Task 21) -----------------------
+  // Materials are stackable BAG items. addMaterial / hasMaterials / spendMaterials
+  // read & write the unified bag (player.inventory) instead of the old ad-hoc
+  // player.materials dictionary, so crafting, quests and the alchemist all share
+  // one code path. A gathered material that overflows the bag is simply dropped
+  // (the bag is capped) — bagAdd returns how many landed.
   function addMaterial(player, mat, n) {
-    if (!(mat in player.materials)) player.materials[mat] = 0;
-    player.materials[mat] += n;
-    updateMaterialsHud(player);
+    if (!isMaterial(mat) || n <= 0) return;
+    bagAdd(player, mat, n);
+    if (Inventory.open) Inventory.render();
     Quests.onGather(player, mat, n);
   }
+  // True if the bag holds at least the listed materials (map of id → count).
   function hasMaterials(player, mats) {
-    for (const k in mats) if ((player.materials[k] || 0) < mats[k]) return false;
+    for (const k in mats) if (bagCount(player, k) < mats[k]) return false;
     return true;
   }
   function spendMaterials(player, mats) {
     if (!hasMaterials(player, mats)) return false;
-    for (const k in mats) player.materials[k] -= mats[k];
-    updateMaterialsHud(player);
+    for (const k in mats) bagSpend(player, k, mats[k]);
+    if (Inventory.open) Inventory.render();
     return true;
   }
   // A short "3 🪵 · 2 💧" summary of a material cost map.
@@ -458,20 +544,21 @@ import {
   const hasRelic = (player, id) => player.relics.includes(id);
 
   // ---- Crafting -----------------------------------------------------------
-  // Spend a recipe's materials to produce its output (a potion → belt, or gear
-  // → bag). Returns true on success.
+  // Spend a recipe's materials to produce its output (potions + gear both go to
+  // the UNIFIED bag now). Returns true on success.
   function craftRecipe(player, recipe) {
     const def = getDef(recipe.out);
     if (!def) return false;
     if (!hasMaterials(player, recipe.mats)) { toast(t("toast.noMaterials")); Sfx.play("error"); return false; }
-    if (def.type === "potion") {
-      if (!potionAdd(player, recipe.out)) { toast(t("toast.beltFull")); Sfx.play("error"); return false; }
-    } else {
-      if (player.inventory.length >= player.invCap) { toast(t("toast.bagFull")); Sfx.play("error"); return false; }
-      invAdd(player, makeLoot(recipe.out));
-    }
+    // A potion stacks into an existing stack (no new slot); gear (and a potion
+    // that would need a brand-new slot) needs a free bag slot.
+    const needsSlot = def.type !== "potion" || !player.inventory.some((it) => it && it.id === recipe.out && it.count < STACK_MAX);
+    if (needsSlot && player.inventory.length >= player.invCap) { toast(t("toast.bagFull")); Sfx.play("error"); return false; }
+    if (def.type === "potion") bagAdd(player, recipe.out, 1);
+    else invAdd(player, makeLoot(recipe.out));
     spendMaterials(player, recipe.mats);
     updatePotionBar(player);
+    if (Inventory.open) Inventory.render();
     Sfx.play("enhance");
     toast(t("toast.crafted", { icon: def.icon, name: tItemName(def) }));
     Quests.onCraft(player, recipe.out);
@@ -484,8 +571,8 @@ import {
     if (reward.coins) { state.coins += reward.coins; updateCoins(state); }
     if (reward.mats) for (const k in reward.mats) addMaterial(player, k, reward.mats[k]);
     if (reward.item && getDef(reward.item)) {
-      const d = getDef(reward.item);
-      if (d.type === "potion") potionAdd(player, reward.item);
+      // Potions + materials stack into the bag; gear gets a rolled instance.
+      if (isStackable(reward.item)) bagAdd(player, reward.item, 1);
       else invAdd(player, makeLoot(reward.item));
       updatePotionBar(player);
     }
@@ -504,6 +591,8 @@ import {
     shop: document.getElementById("shop"),
     shopClose: document.getElementById("shopClose"),
     shopDone: document.getElementById("shopDone"),
+    shopTitle: document.getElementById("shopTitle"),
+    shopTagline: document.getElementById("shopTagline"),
     shopCoins: document.getElementById("shopCoins"),
     shopItems: document.getElementById("shopItems"),
     shopTabBuy: document.getElementById("shopTabBuy"),
@@ -595,8 +684,8 @@ import {
     confirmText: document.getElementById("confirmText"),
     confirmYes: document.getElementById("confirmYes"),
     confirmNo: document.getElementById("confirmNo"),
-    // ---- Adventure HUD: materials pouch, relics, quest tracker, clock, weather ----
-    materialsBar: document.getElementById("materialsBar"),
+    // ---- Adventure HUD: relics, quest tracker, clock, weather ----
+    // (Materials moved into the unified bag in Task 21 — no on-HUD chip strip.)
     relicBar: document.getElementById("relicBar"),
     questTracker: document.getElementById("questTracker"),
     clock: document.getElementById("clock"),
@@ -879,18 +968,18 @@ import {
 
       // Inventory + equipment. The active weapon profile (this.weapon) is
       // derived from the equipped hands by recomputeStats(); FISTS until then.
-      this.invCap = 24;
-      this.inventory = [];       // owned-but-unequipped item instances
+      // The bag is UNIFIED (Task 21): gear AND stackable potions/materials share
+      // these 30 slots; the 3 potion quick-slots are an assignment over the bag.
+      this.invCap = 30;
+      this.inventory = [];       // owned items: gear instances + { id, uid, count } stacks
       this.equipment = { helmet: null, pauldrons: null, breastplate: null, gloves: null,
                          belt: null, boots: null, cloak: null, necklace: null,
                          ring1: null, ring2: null, hand1: null, hand2: null };
-      this.potions = [null, null, null]; // the 3-slot potion belt
+      this.potionSlots = [null, null, null]; // the 3 combat quick-slots → potion ids
       this.buffs = [];           // active timed potion buffs
       this.weapon = cloneWeapon(FISTS);
 
-      // Adventure state: gathered crafting materials + collected castle relics.
-      this.materials = {};       // { wood: n, stone: n, … }
-      for (const id of MATERIAL_IDS) this.materials[id] = 0;
+      // Adventure state: collected castle relics (materials live in the bag now).
       this.relics = [];          // relic ids collected but not yet built in
 
       // Skill & leveling progression (Task 14): level/xp, the focus resource, the
@@ -907,9 +996,10 @@ import {
       this.equipment.hand1 = makeItem("magic_wand");
       this.inventory.push(makeItem("leather_cap"));
       this.inventory.push(makeItem("iron_dagger"));
-      // A couple of starter potions so the belt is useful from the first wave.
-      potionAdd(this, "minor_potion");
-      potionAdd(this, "minor_potion");
+      // A couple of starter potions in the bag, pre-assigned to quick-slot 1 so
+      // the player can heal from the first wave (drag others in from the bag).
+      bagAdd(this, "minor_potion", 2);
+      assignPotionSlot(this, 0, "minor_potion");
       // Learn the level-1 skill(s) + slot the first on the quick bar.
       Skills.init(this);
       recomputeStats(this);
@@ -2395,6 +2485,89 @@ import {
       this.sign.rotation.y += dt * 1.5;
       // Flicker the forge glow.
       if (this.glow) this.glow.intensity = 0.6 + Math.abs(Math.sin(this.bob * 5)) * 0.5;
+    }
+  }
+
+  // =========================================================================
+  // Alchemist — the dedicated apothecary vendor (Task 21). She stands at the
+  // hub plaza by a bubbling cauldron; walk up + press E to open her shop, which
+  // sells potions + basic ingredients (the merchant no longer stocks them).
+  // Shares the Merchant/Blacksmith Interactable contract.
+  // =========================================================================
+  class Alchemist {
+    constructor(scene, shadow, interaction, onOpen) {
+      const root = new BABYLON.TransformNode("alchemist", scene);
+      root.position.set(8, 0, 2); // the "apothecary" landmark, opposite the smith
+      this.root = root;
+      this.bob = 0;
+      this._build(scene, shadow);
+
+      this.it = new Interactable(root, { label: t("label.alchemist"), range: 3.4, onInteract: () => onOpen() });
+      this.it.enabled = false;
+      this.interaction = interaction;
+      interaction.register(this.it);
+      root.setEnabled(false);
+      this.visible = false;
+    }
+
+    _build(scene, shadow) {
+      const robe = emat(scene, "aRobe", "#2f7a52", 0.08);
+      const robeDk = emat(scene, "aRobeDk", "#236040", 0.06);
+      const skin = emat(scene, "aSkin", "#f3d3b3", 0.08);
+      const hair = emat(scene, "aHair", "#8a5a2a", 0.05);
+      const brew = emat(scene, "aBrew", "#9ad6a0", 0.6);
+      const iron = emat(scene, "aIron", "#5a5f68", 0.1);
+      const glass = emat(scene, "aGlass", "#bfe3ff", 0.4);
+      const add = (m) => { m.parent = this.root; shadow.addShadowCaster(m); return m; };
+
+      add(cone(scene, "aBody", 1.0, 0.4, 1.5, robe)).position.y = 0.75;
+      add(cyl(scene, "aBelt", 0.66, 0.82, 0.16, robeDk)).position.y = 0.95;
+      const head = add(sphere(scene, "aHead", 0.52, skin)); head.position.y = 1.72;
+      // A neat bob of hair + a small pointed apothecary hood.
+      add(sphere(scene, "aHair", 0.56, hair)).position.set(0, 1.84, -0.04);
+      add(cone(scene, "aHood", 0.5, 0.02, 0.7, robeDk)).position.y = 2.2;
+      for (const s of [-1, 1]) {
+        const eye = add(sphere(scene, "aEye", 0.07, emat(scene, "aEyeM", "#2a2a3a", 0)));
+        eye.position.set(0.12 * s, 1.76, 0.44);
+      }
+      // A little potion bottle held at her side.
+      const vial = add(cyl(scene, "aVial", 0.1, 0.14, 0.34, glass)); vial.position.set(-0.62, 1.2, 0.1);
+
+      // A bubbling cauldron beside her.
+      const pot = add(cyl(scene, "aPot", 0.62, 0.5, 0.62, iron)); pot.position.set(1.4, 0.5, 0);
+      const liquid = add(cyl(scene, "aBrewTop", 0.56, 0.56, 0.08, brew)); liquid.position.set(1.4, 0.84, 0);
+      this.brew = liquid;
+      add(box(scene, "aPotBase", 0.5, 0.3, 0.5, robeDk)).position.set(1.4, 0.18, 0);
+
+      // A floating flask marker so the apothecary is easy to spot.
+      const sign = new BABYLON.TransformNode("aSign", scene);
+      sign.parent = this.root; sign.position.y = 3.3; this.sign = sign;
+      const flask = sphere(scene, "aFlask", 0.4, brew);
+      flask.parent = sign; flask.scaling.set(1, 1.15, 1);
+      shadow.addShadowCaster(flask);
+      const neck = cyl(scene, "aNeck", 0.12, 0.12, 0.3, glass);
+      neck.parent = sign; neck.position.set(0, 0.34, 0);
+
+      const glow = new BABYLON.PointLight("aGlow", new BABYLON.Vector3(1.4, 1.2, 0), scene);
+      glow.parent = this.root; glow.diffuse = BABYLON.Color3.FromHexString("#9ad6a0");
+      glow.intensity = 0.55; glow.range = 7;
+      this.glow = glow;
+    }
+
+    show() { if (this.visible) return; this.visible = true; this.root.setEnabled(true); this.it.enabled = true; }
+    hide() { if (!this.visible) return; this.visible = false; this.root.setEnabled(false); this.it.enabled = false; }
+    update(dt) {
+      if (!this.visible) return;
+      this.bob += dt;
+      this.sign.position.y = 3.3 + Math.sin(this.bob * 2) * 0.12;
+      this.sign.rotation.y += dt * 1.4;
+      // Gently bob the cauldron's brew + pulse its glow as if simmering.
+      if (this.brew) this.brew.position.y = 0.84 + Math.sin(this.bob * 4) * 0.03;
+      if (this.glow) this.glow.intensity = 0.45 + Math.abs(Math.sin(this.bob * 3)) * 0.35;
+    }
+    dispose() {
+      try { if (this.interaction && this.it) this.interaction.remove(this.it); } catch (e) {}
+      try { if (this.root) this.root.dispose(); } catch (e) {}
     }
   }
 
@@ -4320,8 +4493,10 @@ import {
         state.resources.push(new ResourceNode(scene, world.shadow, interaction, new BABYLON.Vector3(p.x, 0, p.z), s.kind, player, state));
       }
     }
-    // Story NPCs at their landmarks.
+    // Story NPCs at their landmarks (vendor NPCs like the alchemist are placed
+    // separately as dedicated shop vendors — they don't give quests).
     for (const data of NPC_DATA) {
+      if (data.vendor) continue;
       state.npcs.push(new QuestGiver(scene, world.shadow, interaction, data, (npc) => Dialogue.talk(npc)));
     }
     // The castle build site.
@@ -4339,10 +4514,13 @@ import {
   function setupZoneContent(scene, world, interaction, player, state) {
     const zone = world.zone;
     if (zone.home) {
-      const merchant = new Merchant(scene, world.shadow, interaction, () => Shop.openShop());
+      const merchant = new Merchant(scene, world.shadow, interaction, () => Shop.openShop("merchant"));
       state.merchant = merchant; merchant.show();
       const blacksmith = new Blacksmith(scene, world.shadow, interaction, () => Anvil.openAnvil());
       state.blacksmith = blacksmith; blacksmith.show();
+      // The dedicated alchemist (Task 21): sells potions + basic ingredients.
+      const alchemist = new Alchemist(scene, world.shadow, interaction, () => Shop.openShop("alchemist"));
+      state.alchemist = alchemist; alchemist.show();
       populateAdventure(scene, world, interaction, player, state);
       // Re-raise any castle parts already built this run, then re-wake the
       // dragon if the keep was finished but it hasn't been slain.
@@ -4350,7 +4528,7 @@ import {
       if (state.castle) state.castle.resummon();
       for (let i = 0; i < 3; i++) spawnArtifact(scene, world, interaction, player, state);
     } else {
-      state.merchant = null; state.blacksmith = null; state.castle = null;
+      state.merchant = null; state.blacksmith = null; state.alchemist = null; state.castle = null;
       populateWildResources(scene, world, interaction, player, state);
     }
   }
@@ -4495,21 +4673,34 @@ import {
   const featuredCost = (def) => Math.max(40, Math.round(def.value * 2.6));
 
   // =========================================================================
-  // Shop — the merchant BUYS your gear and SELLS normal wares. Rare gear can
-  // only be won from bosses, so it's never stocked here — but you can sell it.
-  // Two tabs: Buy (the merchant's stock) and Sell (your bag).
+  // Shop — vendors BUY your wares and SELL their stock. Two specialised vendors
+  // share this one UI (Task 21): the travelling MERCHANT sells gear + a rotating
+  // rare/featured tab; the ALCHEMIST sells potions + basic ingredients. Either
+  // vendor's Sell tab buys back ANY item (gear, potions, materials), so the bag
+  // never traps junk. The resale value comes from each item's ITEM_DB `value`.
   // =========================================================================
+  // The sell-back worth of one unit of an item instance. Enhanced gear recoups
+  // part of what was forged in; stackable items sell for their flat value.
+  function sellWorth(inst) {
+    const def = getDef(inst.id);
+    if (!def) return 0;
+    return def.value + Math.round(def.value * 0.5 * instLevel(inst));
+  }
+
   const Shop = {
-    state: null, player: null, open: false, tab: "buy",
+    state: null, player: null, open: false, tab: "buy", vendor: "merchant",
 
     init(state, player) { this.state = state; this.player = player; },
 
-    openShop() {
+    // vendor: "merchant" (gear) | "alchemist" (potions + ingredients).
+    openShop(vendor) {
       if (this.open) return;
       if (Inventory.open) Inventory.close();
       if (Anvil.open) Anvil.close();
+      this.vendor = vendor === "alchemist" ? "alchemist" : "merchant";
       this.open = true; uiPaused = true; this.tab = "buy";
       dom.shop.classList.remove("hidden");
+      this._applyVendorChrome();
       this.render();
     },
     closeShop() {
@@ -4519,6 +4710,16 @@ import {
     },
     setTab(tab) { this.tab = tab; this.render(); },
 
+    // Swap the dialog title/tagline + hide the gear-only "Rare" tab for the
+    // alchemist (who has no featured-gear rotation).
+    _applyVendorChrome() {
+      const alch = this.vendor === "alchemist";
+      if (dom.shopTitle) dom.shopTitle.innerHTML = t(alch ? "shop.titleAlchemist" : "shop.title");
+      if (dom.shopTagline) dom.shopTagline.innerHTML = t(alch ? "shop.taglineAlchemist" : "shop.tagline");
+      if (dom.shopTabRare) dom.shopTabRare.classList.toggle("hidden", alch);
+    },
+
+    // Buy gear (a fresh, clean instance into the bag).
     buy(def, cost) {
       cost = cost == null ? def.cost : cost;
       if (this.state.coins < cost) { toast(t("toast.noCoins")); Sfx.play("error"); return; }
@@ -4531,10 +4732,10 @@ import {
       Session.mark(); // persist on purchase (Task 17)
       this.render();
     },
-    // Potions go onto the 3-slot belt, not the bag.
+    // Buy a stackable item (potion or ingredient) into the unified bag.
     buyPotion(def) {
       if (this.state.coins < def.cost) { toast(t("toast.noCoins")); Sfx.play("error"); return; }
-      if (!potionAdd(this.player, def.id)) { toast(t("toast.beltFull")); Sfx.play("error"); return; }
+      if (bagAdd(this.player, def.id, 1) <= 0) { toast(t("toast.bagFull")); Sfx.play("error"); return; }
       this.state.coins -= def.cost;
       updateCoins(this.state);
       updatePotionBar(this.player);
@@ -4543,13 +4744,22 @@ import {
       Session.mark(); // persist on purchase (Task 17)
       this.render();
     },
+    // Sell one item: a whole gear instance, or ONE unit off a stackable stack.
     sell(inst) {
       const def = getDef(inst.id);
-      // Enhancement adds resale value (you recoup part of what you forged in).
-      const worth = def.value + Math.round(def.value * 0.5 * instLevel(inst));
-      invRemove(this.player, inst);
+      if (!def) return;
+      const worth = sellWorth(inst);
+      if (inst.count != null) {
+        // Stackable: peel one off; drop the stack when it empties.
+        inst.count -= 1;
+        if (inst.count <= 0) invRemove(this.player, inst);
+        if (def.type === "potion") syncPotionSlots(this.player);
+      } else {
+        invRemove(this.player, inst);
+      }
       this.state.coins += worth;
       updateCoins(this.state);
+      updatePotionBar(this.player);
       Sfx.play("coin");
       toast(t("toast.sold", { name: enhanceName(tItemName(def), instLevel(inst)), worth }));
       Session.mark(); // persist on sale (Task 17)
@@ -4564,23 +4774,34 @@ import {
       if (dom.shopTabSell) dom.shopTabSell.classList.toggle("active", this.tab === "sell");
       dom.shopItems.innerHTML = "";
       const full = () => this.player.inventory.length >= this.player.invCap;
+      const alch = this.vendor === "alchemist";
 
       if (this.tab === "buy") {
-        this._heading(t("shop.gear"));
-        for (const id of SHOP_STOCK) {
-          const def = getDef(id);
-          const card = itemCard(def, t("btn.buyCost", { cost: def.cost }), "buy-btn", this.state.coins < def.cost || full(),
-            () => this.buy(def));
-          dom.shopItems.appendChild(card);
+        if (alch) {
+          this._heading(t("shop.potions"));
+          for (const id of POTION_STOCK) {
+            const def = getDef(id);
+            const card = itemCard(def, t("btn.buyCost", { cost: def.cost }), "buy-btn potion-buy-btn", this.state.coins < def.cost || full(),
+              () => this.buyPotion(def));
+            dom.shopItems.appendChild(card);
+          }
+          this._heading(t("shop.ingredients"));
+          for (const id of INGREDIENT_STOCK) {
+            const def = getDef(id);
+            const card = itemCard(def, t("btn.buyCost", { cost: def.cost }), "buy-btn potion-buy-btn", this.state.coins < def.cost || full(),
+              () => this.buyPotion(def), "", 0, null, `<div class="stack-count inline">${t("shop.owned", { n: bagCount(this.player, id) })}</div>`);
+            dom.shopItems.appendChild(card);
+          }
+        } else {
+          this._heading(t("shop.gear"));
+          for (const id of SHOP_STOCK) {
+            const def = getDef(id);
+            const card = itemCard(def, t("btn.buyCost", { cost: def.cost }), "buy-btn", this.state.coins < def.cost || full(),
+              () => this.buy(def));
+            dom.shopItems.appendChild(card);
+          }
         }
-        this._heading(t("shop.potions"));
-        for (const id of POTION_STOCK) {
-          const def = getDef(id);
-          const card = itemCard(def, t("btn.buyCost", { cost: def.cost }), "buy-btn potion-buy-btn", this.state.coins < def.cost,
-            () => this.buyPotion(def));
-          dom.shopItems.appendChild(card);
-        }
-      } else if (this.tab === "rare") {
+      } else if (this.tab === "rare" && !alch) {
         const note = document.createElement("div");
         note.className = "shop-note";
         note.textContent = t("shop.rareNote");
@@ -4601,9 +4822,10 @@ import {
         }
         for (const inst of this.player.inventory.slice()) {
           const def = getDef(inst.id);
-          const worth = def.value + Math.round(def.value * 0.5 * instLevel(inst));
+          const worth = sellWorth(inst);
+          const below = inst.count != null ? `<div class="stack-count inline">×${inst.count}</div>` : "";
           const card = itemCard(def, t("btn.sellWorth", { worth }), "buy-btn sell-btn", false,
-            () => this.sell(inst), def.rarity !== "normal" ? tRarityLabel(def.rarity).toUpperCase() : "", instLevel(inst), inst);
+            () => this.sell(inst), def.rarity !== "normal" ? tRarityLabel(def.rarity).toUpperCase() : "", instLevel(inst), inst, below);
           dom.shopItems.appendChild(card);
         }
       }
@@ -4626,6 +4848,8 @@ import {
     tab: "gear",        // gear | materials | potions
     filter: "all",      // all | weapon | armor | jewelry  (gear tab)
     sort: "rarity",     // rarity | type | name            (gear tab)
+    picked: null,       // accessible tap-to-pick: a pending potion/slot source
+    _potionDrops: null, // live quick-slot drop targets (rebuilt each render)
 
     init(state, player) { this.state = state; this.player = player; },
 
@@ -4635,21 +4859,28 @@ import {
       if (Shop.open) Shop.closeShop();
       if (Anvil.open) Anvil.close();
       this.open = true; uiPaused = true;
+      this.picked = null;
       dom.inventory.classList.remove("hidden");
       this.render();
     },
     close() {
       if (!this.open) return;
       this.open = false; uiPaused = false;
+      this.picked = null;
       dom.inventory.classList.add("hidden");
     },
 
-    setTab(tab) { this.tab = tab; this.render(); },
+    setTab(tab) { this.tab = tab; this.picked = null; this.render(); },
     setFilter(f) { this.filter = f; this.render(); },
     setSort(s) { this.sort = s; this.render(); },
     equip(inst) { equipItem(this.player, inst); this.render(); if (Shop.open) Shop.render(); },
     unequip(slot) { unequipSlot(this.player, slot); recomputeStats(this.player); this.render(); },
+    // Drink the potion in quick-slot `slot` (consumes from the bag stack).
     drink(slot) { if (potionUse(this.player, slot)) this.render(); },
+    // Drink one of a bag potion directly by id (applies its effect, consumes one
+    // from the bag). Routes through potionUse via a temporary quick-slot-less
+    // path: apply the effect, then bagSpend.
+    drinkBag(id) { if (drinkPotionById(this.player, id)) { updatePotionBar(this.player); this.render(); } },
 
     render() {
       if (!this.open) return;
@@ -4792,13 +5023,14 @@ import {
       }
     },
 
-    // Crafting materials, surfaced as stacks (read-only; spent by crafting/quests).
+    // Crafting materials, surfaced as bag stacks (read-only; spent by crafting/
+    // quests, sellable at the alchemist).
     _renderMaterials(p) {
       dom.invBag.innerHTML = "";
       const title = document.createElement("div");
       title.className = "bag-title"; title.textContent = t("inv.matsTitle");
       dom.invBag.appendChild(title);
-      const owned = MATERIAL_IDS.filter((id) => (p.materials[id] || 0) > 0);
+      const owned = MATERIAL_IDS.filter((id) => bagCount(p, id) > 0);
       if (owned.length === 0) {
         const empty = document.createElement("div");
         empty.className = "shop-empty"; empty.textContent = t("inv.matsEmpty");
@@ -4811,31 +5043,166 @@ import {
         row.className = "shop-item stack-row";
         row.innerHTML = `<div class="icon">${m.icon || "▫"}</div>` +
           `<div class="info"><div class="name">${tMaterialLabel(id)}</div></div>` +
-          `<div class="stack-count">×${p.materials[id]}</div>`;
+          `<div class="stack-count">×${bagCount(p, id)}</div>`;
         dom.invBag.appendChild(row);
       }
     },
 
-    // The 3-slot potion belt, quaffable straight from the bag.
+    // The potions tab (Task 21): the 3 combat QUICK-SLOTS as drag targets across
+    // the top, then the bag's potion stacks below. Drag a bag potion onto a slot
+    // to assign it; drag a slotted potion onto another slot to move/swap, or onto
+    // empty space to clear it. Tap-to-pick is the accessible fallback. Drinking a
+    // bag potion (or a quick-slot) consumes one from the bag stack.
     _renderPotions(p) {
       dom.invBag.innerHTML = "";
-      const title = document.createElement("div");
-      title.className = "bag-title"; title.textContent = t("inv.potionsTitle");
-      dom.invBag.appendChild(title);
-      const slots = p.potions.map((s, i) => ({ s, i })).filter((x) => x.s && x.s.count > 0);
-      if (slots.length === 0) {
+      this._potionDrops = [];   // rebuilt every render so drops resolve to live cards
+
+      // ---- The 3 assignable quick-slots ----
+      const slotTitle = document.createElement("div");
+      slotTitle.className = "bag-title"; slotTitle.textContent = t("inv.quickSlots");
+      dom.invBag.appendChild(slotTitle);
+      const hint = document.createElement("p");
+      hint.className = "inv-pot-hint"; hint.textContent = t("inv.potDragHint");
+      dom.invBag.appendChild(hint);
+      const slotRow = document.createElement("div");
+      slotRow.className = "pot-slots";
+      for (let i = 0; i < POTION_SLOTS; i++) {
+        const id = p.potionSlots[i];
+        const def = id ? getDef(id) : null;
+        const have = id ? bagCount(p, id) : 0;
+        const card = document.createElement("div");
+        card.className = "pot-slot-card pot-droptarget" + (def ? " filled" : "");
+        const pickedHere = this.picked && this.picked.kind === "slot" && this.picked.slot === i;
+        if (pickedHere) card.classList.add("picked");
+        card.innerHTML = `<div class="pot-slot-key">${i + 4}</div>` +
+          (def ? `<div class="pot-slot-icon">${def.icon}</div>` +
+                 `<div class="pot-slot-name">${tItemName(def)}</div>` +
+                 `<div class="pot-slot-count">×${have}</div>`
+               : `<div class="pot-slot-empty">${t("inv.slotEmpty")}</div>`);
+        this._potionDrops.push({ el: card, slot: i, occupantId: id || null });
+        // Tap to complete a pending pick, or (on a filled slot) pick it up.
+        card.addEventListener("click", () => this.tapSlot(i, id || null));
+        if (def) {
+          card.classList.add("draggable");
+          this._wirePotionDrag(card, { kind: "slot", slot: i, id, icon: def.icon });
+        }
+        slotRow.appendChild(card);
+      }
+      dom.invBag.appendChild(slotRow);
+
+      // ---- The bag's potion stacks (drag onto a slot, or Drink straight away) ----
+      const bagTitle = document.createElement("div");
+      bagTitle.className = "bag-title"; bagTitle.textContent = t("inv.potionsTitle");
+      dom.invBag.appendChild(bagTitle);
+      const stacks = p.inventory.filter((it) => it && it.count != null && getDef(it.id) && getDef(it.id).type === "potion");
+      if (stacks.length === 0) {
         const empty = document.createElement("div");
         empty.className = "shop-empty"; empty.textContent = t("inv.potionsEmpty");
         dom.invBag.appendChild(empty);
         return;
       }
-      for (const { s, i } of slots) {
-        const def = getDef(s.id);
-        const below = `<div class="stack-count inline">×${s.count}</div>`;
-        const card = itemCard(def, t("inv.drink"), "buy-btn potion-buy-btn", false,
-          () => this.drink(i), "", 0, null, below);
+      for (const inst of stacks) {
+        const def = getDef(inst.id);
+        const below = `<div class="stack-count inline">×${inst.count}</div>`;
+        const slotted = p.potionSlots.includes(inst.id);
+        const card = itemCard(def, t("inv.drinkOne"), "buy-btn potion-buy-btn", false,
+          () => this.drinkBag(inst.id), slotted ? t("inv.slottedTag") : "", 0, null, below);
+        card.classList.add("draggable", "pot-bag-card");
+        // A bag potion is the drag SOURCE (roster → slot assigns it).
+        this._wirePotionDrag(card, { kind: "roster", id: inst.id, icon: def.icon });
+        // Tap-to-pick a bag potion (accessible fallback).
+        card.addEventListener("click", (e) => {
+          // Don't double-fire when the Drink button was the target.
+          if (e && e.target && e.target.tagName === "BUTTON") return;
+          this.tapPick({ kind: "roster", id: inst.id });
+        });
         dom.invBag.appendChild(card);
       }
+    },
+
+    // ---- Potion quick-slot drag wiring (reuses the Task 16 pointer-drag model) ----
+    // Run the pure dragSlotReducer over the assignment model, then redraw.
+    applyPotionDrag(source, target) {
+      const cmds = dragSlotReducer(source, target, POTION_SLOTS);
+      if (!cmds.length) { this.render(); return false; }
+      for (const c of cmds) {
+        if (c.op === "assign") assignPotionSlot(this.player, c.slot, c.id);
+        else if (c.op === "clear") clearPotionSlot(this.player, c.slot);
+      }
+      Sfx.play("ui_click");
+      this.picked = null;
+      updatePotionBar(this.player);
+      this.render();
+      return true;
+    },
+    // Accessible (non-drag) fallback: tap a bag potion or a slot to "pick", then
+    // tap a slot (or the same item to cancel) to complete the assignment.
+    tapPick(source) {
+      const same = this.picked && this.picked.kind === source.kind &&
+        this.picked.id === source.id && this.picked.slot === source.slot;
+      this.picked = same ? null : source;
+      Sfx.play("ui_click");
+      this.render();
+    },
+    tapSlot(slot, occupantId) {
+      if (!this.picked) {
+        if (occupantId != null) this.tapPick({ kind: "slot", slot, id: occupantId });
+        return;
+      }
+      this.applyPotionDrag(this.picked, { kind: "slot", slot, occupantId: occupantId ?? null });
+    },
+    // Wire a Pointer-Events drag on a bag-potion card or a quick-slot. Falls back
+    // to tap-to-pick where Pointer Events aren't available (listener not attached).
+    _wirePotionDrag(el, source) {
+      if (!el || !pointerDragSupported() || !el.addEventListener) return;
+      el.addEventListener("pointerdown", (e) => {
+        if (e.button != null && e.button !== 0) return;
+        if (typeof e.preventDefault === "function") e.preventDefault();
+        const startX = e.clientX || 0, startY = e.clientY || 0;
+        let dragging = false, ghost = null;
+        try { if (el.setPointerCapture && e.pointerId != null) el.setPointerCapture(e.pointerId); } catch (err) {}
+        const beginGhost = () => {
+          dragging = true;
+          el.classList && el.classList.add("dragging");
+          try {
+            ghost = document.createElement("div");
+            ghost.className = "sk-drag-ghost";
+            ghost.textContent = source.icon || "🧪";
+            ghost.style.left = startX + "px"; ghost.style.top = startY + "px";
+            (document.body || document.documentElement).appendChild(ghost);
+          } catch (err) { ghost = null; }
+        };
+        const moveGhost = (x, y) => { if (ghost) { ghost.style.left = x + "px"; ghost.style.top = y + "px"; } };
+        const onMove = (ev) => {
+          const x = ev.clientX || 0, y = ev.clientY || 0;
+          if (!dragging && (Math.abs(x - startX) > 6 || Math.abs(y - startY) > 6)) beginGhost();
+          if (dragging) {
+            moveGhost(x, y);
+            const tgt = dropTargetAt(x, y, this._potionDrops || []);
+            for (const t2 of (this._potionDrops || [])) t2.el.classList && t2.el.classList.toggle("drop-hot", !!(tgt && tgt.el === t2.el));
+          }
+        };
+        const cleanup = () => {
+          el.removeEventListener("pointermove", onMove);
+          el.removeEventListener("pointerup", onUp);
+          el.removeEventListener("pointercancel", onCancel);
+          el.classList && el.classList.remove("dragging");
+          if (ghost) { try { ghost.remove(); } catch (err) {} ghost = null; }
+          for (const t2 of (this._potionDrops || [])) t2.el.classList && t2.el.classList.remove("drop-hot");
+        };
+        const onUp = (ev) => {
+          const x = ev.clientX || startX, y = ev.clientY || startY;
+          cleanup();
+          if (!dragging) { this.tapPick(source); return; }
+          const tgt = dropTargetAt(x, y, this._potionDrops || []);
+          const target = tgt ? { kind: "slot", slot: tgt.slot, occupantId: tgt.occupantId } : { kind: "void" };
+          this.applyPotionDrag(source, target);
+        };
+        const onCancel = () => { const was = dragging; cleanup(); if (!was) this.tapPick(source); };
+        el.addEventListener("pointermove", onMove);
+        el.addEventListener("pointerup", onUp);
+        el.addEventListener("pointercancel", onCancel);
+      });
     },
   };
 
@@ -5149,7 +5516,7 @@ import {
       const preview = fuseSkills(defs);
       const cost = fusionCost(defs);
       const coinsOk = this.state.coins >= cost.coins;
-      const crysOk = (this.player.materials.crystal || 0) >= cost.crystal;
+      const crysOk = bagCount(this.player, "crystal") >= cost.crystal;
       const body = document.createElement("div");
       body.innerHTML =
         `<div class="sk-fuse-row">${defs.map((d) => `${d.icon} ${tSkillName(d)}`).join(" + ")}</div>` +
@@ -5342,7 +5709,7 @@ import {
     progress(q) {
       const o = q.obj, s = this.state;
       if (o.type === "hunt") return { have: Math.min(o.count, Math.max(0, s.totalKills - (this.acceptKills[q.id] || 0))), need: o.count };
-      if (o.type === "gather") return { have: Math.min(o.count, this.player.materials[o.target] || 0), need: o.count };
+      if (o.type === "gather") return { have: Math.min(o.count, bagCount(this.player, o.target)), need: o.count };
       if (o.type === "reach") return { have: this.reached[o.target] ? 1 : 0, need: 1 };
       if (o.type === "talk") return { have: this.talked[o.target] ? 1 : 0, need: 1 };
       if (o.type === "defeat_boss") return { have: (s.bossesCleared && s.bossesCleared[o.target]) ? 1 : 0, need: 1 };
@@ -6117,9 +6484,9 @@ import {
     render() {
       if (!this.open) return;
       const p = this.player;
-      // Owned-materials strip.
+      // Owned-materials strip (read from the unified bag).
       dom.craftMats.innerHTML = MATERIAL_IDS.map((id) =>
-        `<span class="mat-chip">${MATERIALS[id].icon} ${p.materials[id] || 0}</span>`).join("");
+        `<span class="mat-chip">${MATERIALS[id].icon} ${bagCount(p, id)}</span>`).join("");
       dom.craftItems.innerHTML = "";
       for (const recipe of CRAFT_RECIPES) {
         const def = getDef(recipe.out);
@@ -6482,8 +6849,9 @@ import {
     for (const n of state.npcs) { try { n.dispose(); } catch (e) {} } state.npcs.length = 0;
     if (state.merchant && state.merchant.dispose) { try { state.merchant.dispose(); } catch (e) {} }
     if (state.blacksmith && state.blacksmith.dispose) { try { state.blacksmith.dispose(); } catch (e) {} }
+    if (state.alchemist && state.alchemist.dispose) { try { state.alchemist.dispose(); } catch (e) {} }
     if (state.castle && state.castle.dispose) { try { state.castle.dispose(); } catch (e) {} }
-    state.merchant = null; state.blacksmith = null; state.castle = null;
+    state.merchant = null; state.blacksmith = null; state.alchemist = null; state.castle = null;
     state.boss = null; state.dragon = null;
     state.pendingAttack = null;   // drop any mid-swing attack queued in the old zone
     if (interaction && interaction.clear) interaction.clear();
@@ -6555,7 +6923,7 @@ import {
       relicsFound: 0,   // lifetime relics collected (recap; survives castle builds)
       playSec: 0,       // accumulated active playtime (seconds) — save-slot metadata
       waveStats: { kills: 0, artifacts: 0, coins: 0 },
-      merchant: null, blacksmith: null, boss: null,
+      merchant: null, blacksmith: null, alchemist: null, boss: null,
       pendingAttack: null, // attack awaiting its swing's strike (impact) frame
     };
 
@@ -6577,7 +6945,6 @@ import {
     SkillsUI.init(state, player);
     WorldMap.init(state, player, camera);
     updatePotionBar(player);
-    updateMaterialsHud(player);
     updateRelicHud(player);
     updateSkillsHud(player);
     updateQuestTracker(Quests);
@@ -6629,6 +6996,7 @@ import {
       if (uiPaused) {
         if (state.merchant) state.merchant.update(dt);
         if (state.blacksmith) state.blacksmith.update(dt);
+        if (state.alchemist) state.alchemist.update(dt);
         for (const n of state.npcs) n.update(dt);
         if (state.castle) state.castle.update(dt);
         cosmetics(state, dt);
@@ -6657,6 +7025,7 @@ import {
       waveSystem.update(dt);
       if (state.merchant) state.merchant.update(dt);
       if (state.blacksmith) state.blacksmith.update(dt);
+      if (state.alchemist) state.alchemist.update(dt);
       updateBuffs(player, dt);
       Skills.update(state, player, dt); // focus regen + skill cooldowns (pause-safe)
 
@@ -7133,11 +7502,12 @@ import {
       const defs = (ids || []).map((id) => this.def(player, id)).filter(Boolean);
       if (!canFuse(defs)) { toast(t("toast.fuseSelect")); Sfx.play("error"); return null; }
       const cost = fusionCost(defs);
-      if (state.coins < cost.coins || (player.materials.crystal || 0) < cost.crystal) {
+      if (state.coins < cost.coins || bagCount(player, "crystal") < cost.crystal) {
         toast(t("toast.fuseNeed", cost)); Sfx.play("error"); return null;
       }
       state.coins -= cost.coins; updateCoins(state);
-      player.materials.crystal -= cost.crystal; updateMaterialsHud(player);
+      bagSpend(player, "crystal", cost.crystal);
+      if (Inventory.open) Inventory.render();
       const fused = fuseSkills(defs);
       const id = "fused_" + (++pr.fusedSeq);
       fused.id = id;
@@ -7323,16 +7693,8 @@ import {
       : "linear-gradient(90deg, #ff5c7a, #ff3b3b)";
   }
 
-  // ---- Materials pouch readout (top-left chip strip) ----
-  function updateMaterialsHud(player) {
-    if (!dom.materialsBar || !player) return;
-    const bits = [];
-    for (const id of MATERIAL_IDS) {
-      const n = player.materials[id] || 0;
-      if (n > 0) bits.push(`<span class="mat-chip">${MATERIALS[id].icon} ${n}</span>`);
-    }
-    dom.materialsBar.innerHTML = bits.join("");
-  }
+  // (Task 21 removed the on-HUD materials chip strip — materials now live in the
+  // unified bag and are seen only in the inventory's Materials tab.)
 
   // ---- Castle relics collected (small icon row in the HUD) ----
   function updateRelicHud(player) {
@@ -7385,13 +7747,14 @@ import {
     if (!dom.potionBar || !player) return;
     dom.potionBar.innerHTML = "";
     for (let i = 0; i < POTION_SLOTS; i++) {
-      const slot = player.potions[i];
+      const id = player.potionSlots[i];     // the assigned potion id (or null)
+      const have = id ? bagCount(player, id) : 0;
       const key = i + 4; // 4 / 5 / 6 — the quick bar (1/2/3) now casts skills
       const cell = document.createElement("button");
-      cell.className = "potion-slot" + (slot ? " filled" : " empty");
-      if (slot) {
-        const def = getDef(slot.id);
-        cell.innerHTML = `<span class="pk">${key}</span><span class="pi">${def.icon}</span><span class="pc">×${slot.count}</span>`;
+      cell.className = "potion-slot" + (id && have > 0 ? " filled" : " empty");
+      if (id && have > 0) {
+        const def = getDef(id);
+        cell.innerHTML = `<span class="pk">${key}</span><span class="pi">${def.icon}</span><span class="pc">×${have}</span>`;
         cell.title = t("potion.slotTitle", { name: tItemName(def), desc: tItemDesc(def), key });
         cell.addEventListener("click", () => { if (gameStarted && !paused && !uiPaused) potionUse(player, i); });
       } else {
@@ -7572,7 +7935,7 @@ import {
   // monsters, the boss, artifacts and dropped coins, plus the wave clock) is
   // serialized explicitly so the run resumes exactly where it left off.
   // =========================================================================
-  const SAVE_VERSION = 11;
+  const SAVE_VERSION = 12;
   const PENDING_LOAD_KEY = "gg3d_pending_load"; // sessionStorage hand-off across reload
   const AUTOSTART_KEY = "gg3d_autostart";       // restart -> skip the start screen
 
@@ -7618,15 +7981,15 @@ import {
         health: round(player.health),
         facing: round(player.facing),
         pos: xz(player.position),
-        // The gear *is* the build now: save the bag + equipped slots (with their
-        // enhancement levels + rolled affixes) and the stat block rebuilds via
-        // recomputeStats().
+        // The gear *is* the build now: save the UNIFIED bag + equipped slots
+        // (gear with enhancement levels + affixes; potions/materials as stacks)
+        // and the stat block rebuilds via recomputeStats().
         inventory: player.inventory.map(serializeInst),
         equipment: serializeEquipment(player),
-        // The 3-slot potion belt.
-        potions: player.potions.map((s) => (s ? { id: s.id, count: s.count } : null)),
-        // Adventure state: gathered materials + collected castle relics.
-        materials: Object.assign({}, player.materials),
+        // The 3 combat quick-slots are an assignment over bag potions (Task 21):
+        // save the potion id in each slot (or null).
+        potionSlots: player.potionSlots.slice(),
+        // Castle relics (materials live in the bag now, serialized above).
         relics: player.relics.slice(),
         // Skill & leveling progression (Task 14, v8): level/xp, focus, owned +
         // fused skills, and the 3-slot quick bar.
@@ -7654,9 +8017,11 @@ import {
     };
   }
 
-  // One item instance → a compact { id, lvl, aff } save entry (aff omitted when the
-  // item carries no enchantments, keeping older-style saves byte-identical).
+  // One item instance → a compact save entry. Gear keeps { id, lvl, aff } (aff
+  // omitted when unenchanted, keeping older-style saves byte-identical). A
+  // STACKABLE potion/material stack instead serialises { id, count } (Task 21).
   function serializeInst(inst) {
+    if (inst && inst.count != null && isStackable(inst.id)) return { id: inst.id, count: inst.count | 0 };
     const out = { id: inst.id, lvl: instLevel(inst) };
     if (inst.affixes && inst.affixes.length) out.aff = inst.affixes.slice();
     return out;
@@ -7673,12 +8038,19 @@ import {
   }
 
   // Rebuild an item instance from a save entry: a plain id string (legacy v2) or a
-  // { id, lvl, aff } object (v3+; affixes added in v7). Unknown items/affixes are
-  // dropped so a foreign/older file still loads cleanly.
+  // { id, lvl, aff } object (v3+; affixes added in v7). A STACKABLE entry carries
+  // { id, count } (v12+) → a stack instance. Unknown items/affixes are dropped so
+  // a foreign/older file still loads cleanly.
   function itemFromSave(entry) {
     if (entry == null) return null;
     const id = typeof entry === "string" ? entry : entry.id;
     if (!getDef(id)) return null;
+    // Stackable item: rebuild as a counted stack (clamped ≥ 1).
+    if (isStackable(id)) {
+      const count = (typeof entry === "object" && entry.count != null) ? (entry.count | 0) : 1;
+      if (count <= 0) return null;
+      return { id, uid: _instSeq++, count: Math.min(STACK_MAX, count) };
+    }
     const inst = makeItem(id);
     const lvl = typeof entry === "object" ? (entry.lvl | 0) : 0;
     if (lvl > 0) inst.level = lvl;
@@ -7687,6 +8059,50 @@ import {
       if (aff.length) inst.affixes = aff;
     }
     return inst;
+  }
+
+  // ---- Legacy bag migration (Task 21; SAVE_VERSION 12) --------------------
+  // Pure: takes a saved player block + its save version and returns the unified
+  // bag's `inventory` save-entries + the 3 `potionSlots` (potion ids). It runs
+  // for every save, but only *folds in* the legacy side-stores when the save
+  // predates v12:
+  //   - legacy `materials` map ({ wood: n, … })   → stackable bag entries
+  //   - legacy `potions` belt ([{ id, count }|null]) → stackable bag entries +
+  //     each occupied belt slot's potion id becomes that quick-slot's assignment
+  // v12+ saves already store the unified bag + `potionSlots`, so they pass
+  // through untouched. Counts are coalesced per id and clamped to ≥ 1.
+  function migrateLegacyBag(ps, version) {
+    ps = ps || {};
+    const out = (ps.inventory || []).slice();
+    // v12+ save: bag + quick-slots are already unified.
+    if (version >= 12) {
+      const slots = Array.isArray(ps.potionSlots) ? ps.potionSlots.slice(0, POTION_SLOTS) : [];
+      while (slots.length < POTION_SLOTS) slots.push(null);
+      const valid = slots.map((id) => (id && getDef(id) && getDef(id).type === "potion") ? id : null);
+      return { inventory: out, potionSlots: valid };
+    }
+    // Pre-v12: fold the side-stores in. Coalesce material counts per id so they
+    // land as proper stacks; append one entry per id.
+    const matCounts = {};
+    const mats = ps.materials || {};
+    for (const k in mats) {
+      if (!isMaterial(k)) continue;
+      const n = mats[k] | 0;
+      if (n > 0) matCounts[k] = (matCounts[k] || 0) + n;
+    }
+    for (const k in matCounts) out.push({ id: k, count: matCounts[k] });
+    // The legacy belt: each non-empty slot becomes a bag potion stack AND that
+    // slot index keeps its potion id as the quick-slot assignment.
+    const potionSlots = [null, null, null];
+    const belt = Array.isArray(ps.potions) ? ps.potions : [];
+    for (let i = 0; i < POTION_SLOTS; i++) {
+      const s = belt[i];
+      if (s && getDef(s.id) && getDef(s.id).type === "potion" && (s.count | 0) > 0) {
+        out.push({ id: s.id, count: s.count | 0 });
+        potionSlots[i] = s.id;
+      }
+    }
+    return { inventory: out, potionSlots };
   }
 
   // Basic structural validation so a bad/old/foreign file fails cleanly. Accepts
@@ -7730,11 +8146,16 @@ import {
     for (const id of (Array.isArray(d.discovered) ? d.discovered : [])) if (ZONE_BY_ID[id]) state.discovered[id] = true;
     state.waypoint = validWaypoint(d.waypoint) ? { kind: d.waypoint.kind, id: d.waypoint.id } : null;
 
-    // Player gear (zone-independent). Rebuild the bag + equipped slots from item
-    // ids, then recompute the whole derived stat block.
+    // Player gear (zone-independent). Rebuild the UNIFIED bag + equipped slots,
+    // then recompute the whole derived stat block. Pre-v12 saves carried a
+    // separate `potions` belt + `materials` map; fold them into the bag here
+    // (migrateLegacyBag, exactly once) so existing players keep all their stuff.
     const ps = d.player;
     player.facing = ps.facing || 0;
-    player.inventory = (ps.inventory || []).map(itemFromSave).filter(Boolean);
+    const migrated = migrateLegacyBag(ps, (d.v | 0) || 0);
+    player.inventory = migrated.inventory.map(itemFromSave).filter(Boolean);
+    player.potionSlots = migrated.potionSlots.slice(0, POTION_SLOTS);
+    while (player.potionSlots.length < POTION_SLOTS) player.potionSlots.push(null);
     const eq = player.equipment;
     for (const slot of EQUIP_SLOTS) eq[slot] = null;
     const savedEq = ps.equipment || {};
@@ -7743,25 +8164,17 @@ import {
       if (v === TWO_HANDED) eq[slot] = TWO_HANDED;
       else { const inst = itemFromSave(v); if (inst) eq[slot] = inst; }
     }
-    // Restore the potion belt (defaults to empty for legacy saves).
-    player.potions = [null, null, null];
-    const savedPot = ps.potions || [];
-    for (let i = 0; i < POTION_SLOTS; i++) {
-      const s = savedPot[i];
-      if (s && getDef(s.id) && s.count > 0) player.potions[i] = { id: s.id, count: Math.min(POTION_STACK_MAX, s.count | 0) };
-    }
-    // Crafting materials + collected relics (default for legacy saves).
-    for (const id of MATERIAL_IDS) player.materials[id] = 0;
-    if (ps.materials) for (const k in ps.materials) if (k in player.materials) player.materials[k] = ps.materials[k] | 0;
+    // Castle relics collected (materials now live in the bag, restored above).
     player.relics = (ps.relics || []).filter((id) => RELICS[id]);
     player.buffs = [];
+    // Drop any quick-slot whose potion isn't actually in the restored bag.
+    syncPotionSlots(player);
     // Skill & leveling progression (defaults sanely for legacy < v8 saves: level 1,
     // the starter skill, full focus). Restored BEFORE recompute so the level's
     // bonus max-health is folded into the stat block.
     Skills.restore(player, ps.progress);
     recomputeStats(player);
     updatePotionBar(player);
-    updateMaterialsHud(player);
     updateRelicHud(player);
     updateSkillsHud(player);
 
@@ -10103,6 +10516,11 @@ import {
       ENHANCE, RARITY, getDef, makeItem, makeLoot,
       equipItem, unequipSlot, recomputeStats, TWO_HANDED, EQUIP_SLOTS, WORN_SLOTS, SLOT_META,
       potionAdd, potionUse, POTION_SLOTS, enhanceItem, enhanceCost, enhanceMult,
+      // ---- Unified bag: stacking, potion quick-slots, alchemist (Task 21) ----
+      bagCount, bagAdd, bagSpend, STACK_MAX, isStackable, isMaterial,
+      assignPotionSlot, clearPotionSlot, syncPotionSlots, drinkPotionById,
+      migrateLegacyBag, sellWorth, Alchemist,
+      INGREDIENT_STOCK, ALCHEMIST_STOCK,
       effectiveStats, featuredForWave, computeWeapon, Sfx, spawnArtifact,
       // ---- Items & equipment depth (Task 12): affixes, sets, derived stats ----
       AFFIXES, SETS, rollAffixes, affixStats, setBonusStats, activeSets, itemCategory,

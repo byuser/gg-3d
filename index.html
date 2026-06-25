@@ -106,8 +106,8 @@
       <div class="stat" id="weather">☀️ Clear</div>
       <div id="prompt" class="prompt hidden" data-i18n-html="prompt.pressE">Press <b>E</b></div>
     </div>
-    <!-- Materials pouch, collected relics, and the active-quest tracker. -->
-    <div id="materialsBar" class="materials-bar"></div>
+    <!-- Collected relics + the active-quest tracker. (Materials moved into the
+         unified inventory bag in Task 21 — no on-HUD chip strip anymore.) -->
     <div id="relicBar" class="relic-bar"></div>
     <div id="questTracker" class="quest-tracker hidden"></div>
     <div class="healthwrap">
@@ -280,8 +280,8 @@
   <div id="shop" class="shop-overlay hidden">
     <div class="shop-panel">
       <button id="shopClose" class="shop-close" data-i18n-title="btn.close" title="Close" aria-label="Close shop">×</button>
-      <h2 data-i18n="shop.title">🧙 Travelling Merchant</h2>
-      <p class="shop-tagline" data-i18n-html="shop.tagline">Buy weapons, armour &amp; accessories — or sell your spare gear.</p>
+      <h2 id="shopTitle" data-i18n-html="shop.title">🧙 Travelling Merchant</h2>
+      <p id="shopTagline" class="shop-tagline" data-i18n-html="shop.tagline">Buy weapons, armour &amp; accessories — or sell your spare gear.</p>
       <div class="shop-coins">🪙 <span id="shopCoins">0</span> <span data-i18n="shop.coins">coins</span></div>
       <div class="shop-tabs">
         <button id="shopTabBuy" class="shop-tab active" data-i18n="shop.tabBuy">Buy</button>
