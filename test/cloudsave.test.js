@@ -230,8 +230,9 @@ describe("Task 15 — local↔cloud payload parity (save versioning just works)"
   it("a serialized run uploaded to Drive round-trips back through applySave", async () => {
     const drive = makeFakeDrive();
     arm(drive);
-    // Mutate some state so the round-trip is observable.
-    T.state.score = 4242;
+    // Mutate some state so the round-trip is observable. (Score was retired in
+    // Task 19; relicsFound is the v11 run-state field we round-trip here.)
+    T.state.relicsFound = 9;
     await CS.saveManual();
     const manual = [...drive._files.values()].find((f) => f.name === T.CLOUD_MANUAL_NAME);
     const cloudJson = manual.content;
@@ -241,9 +242,9 @@ describe("Task 15 — local↔cloud payload parity (save versioning just works)"
     expect(norm(JSON.parse(cloudJson))).toEqual(norm(T.serializeGame()));
     expect(JSON.parse(cloudJson).savedAt).toEqual(expect.any(String));
     // And it restores cleanly through the same applySave path the local file uses.
-    T.state.score = 0;
+    T.state.relicsFound = 0;
     expect(() => T.applySave(JSON.parse(cloudJson))).not.toThrow();
-    expect(T.state.score).toBe(4242);
+    expect(T.state.relicsFound).toBe(9);
   });
 });
 

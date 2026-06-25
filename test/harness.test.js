@@ -114,11 +114,14 @@ T.state.monsters.length = 0; T.state.enemyBolts.length = 0; T.state.drops.length
 T.player.root.position.set(-60, 0, -60);
 const killBoss = new T.Boss(scene, world.shadow, new Vec3(50, 0, 50), 10, "stomper");
 T.state.boss = killBoss; T.state.monsters.push(killBoss);
-const sScore = T.state.score, sCoins = T.state.coinsList.length;
+const bossXp = T.Skills.xpFor(killBoss);
+const sXpTotal = T.totalXpToReach(T.player.progress.level) + T.player.progress.xp;
+const sCoins = T.state.coinsList.length;
 T.state.bolts.push(shoot(killBoss, killBoss.maxHp + 50));
 step(3);
 ok(killBoss.dying > 0 || !killBoss.alive, "boss took lethal damage from a bolt");
-ok(T.state.score >= sScore + T.CONFIG.bossScore, `boss kill awarded +${T.CONFIG.bossScore} score`);
+const eXpTotal = T.totalXpToReach(T.player.progress.level) + T.player.progress.xp;
+ok(eXpTotal >= sXpTotal + bossXp, `boss kill awarded +${bossXp} XP (XP replaced score, Task 19)`);
 ok(T.state.coinsList.length > sCoins, "boss dropped a purse of coins");
 ok(T.state.drops.length > 0, "boss dropped a RARE item");
 ok(T.getDef(T.state.drops[0].id).rarity === "rare", `dropped item (${T.state.drops[0].id}) is rare`);
@@ -180,7 +183,6 @@ p.castCooldown = 0; p.meleeAnim = 0;
 // (player is currently dual-wielding melee from [6])
 const act = p.tryCast();
 ok(act && act.type === "melee", "melee weapon yields a melee attack");
-const killsBefore = T.state.score;
 // Damage now lands on the swing's STRIKE (impact) frame, not the wind-up, so
 // the hit lines up with the animation (Task 10). Drive it through the live path.
 T.state.monsters.length = 0;
@@ -213,7 +215,7 @@ ok(seqA[0] !== seqA[1] && seqA.every((v) => v >= 0 && v < 1), "RNG yields varied
 console.log("\n[9] save / load round-trip (gear + progression + zone)");
 const st = T.state;
 const pl = T.player;
-st.score = 4242; st.coins = 99;
+st.relicsFound = 6; st.coins = 99;   // score retired (Task 19); relicsFound is v11 run state
 // A known build: wand in hand, plate on chest, a cap and a rare sword in the bag.
 for (const slot of T.EQUIP_SLOTS) pl.equipment[slot] = null;
 pl.inventory = [T.makeItem("leather_cap"), T.makeItem("excalibur")];
@@ -232,7 +234,8 @@ ok(save && save.v === T.SAVE_VERSION, "serializeGame produced a versioned save")
 ok(T.validateSave(save), "save passes structural validation");
 ok(save.zone === st.zoneId, "current zone captured");
 ok(save.bossesCleared && save.bossesCleared.caverns === true, "cleared lair captured");
-ok(save.score === 4242 && save.money === 99, "score + money captured");
+ok(save.score === undefined, "legacy score field is gone from the save (Task 19)");
+ok(save.relicsFound === 6 && save.money === 99, "relics-found + money captured");
 ok(save.player.inventory.length === 2, "bag captured");
 ok(save.player.equipment.hand1.id === "magic_wand" && save.player.equipment.breastplate.id === "iron_plate", "equipment captured");
 ok(save.player.materials.wood === 5, "gathered materials captured");
@@ -240,13 +243,13 @@ ok(save.totalKills === 17, "lifetime kills captured");
 ok(!T.validateSave({ v: 999 }), "validation rejects a foreign/old file");
 
 // Trash the live state, then restore from the save.
-st.score = 0; st.coins = 0;
+st.relicsFound = 0; st.coins = 0;
 for (const slot of T.EQUIP_SLOTS) pl.equipment[slot] = null;
 pl.inventory = []; pl.materials.wood = 0; st.bossesCleared = {}; st.totalKills = 0;
 pl.health = 1;
 
 T.applySave(save);
-ok(st.score === 4242 && st.coins === 99, "score + money restored");
+ok(st.relicsFound === 6 && st.coins === 99, "relics-found + money restored");
 ok(pl.equipment.hand1 && pl.equipment.hand1.id === "magic_wand", "equipped weapon restored");
 ok(pl.equipment.breastplate && pl.equipment.breastplate.id === "iron_plate", "equipped armour restored");
 ok(pl.equipment.ring1 && pl.equipment.ring1.id === "ring_power", "equipped accessory restored");
@@ -379,12 +382,14 @@ T.state.waveStats = { kills: 0, artifacts: 0, coins: 0 };
 ap.root.position.set(0, 0, 0);
 // Spawn an artifact at a fixed spot and trigger its "collect" interaction.
 const art = T.spawnArtifact(scene, world, T.interaction, ap, T.state, null, { pos: [0, 0], color: "#ffffff" });
-const aHpBefore = ap.health, aCoinBefore = T.state.coins, aScoreBefore = T.state.score;
+const aHpBefore = ap.health, aCoinBefore = T.state.coins;
+const aXpBefore = T.totalXpToReach(ap.progress.level) + ap.progress.xp;
 art._it.onInteract(art._it);          // begins the pick-up animation
 for (let i = 0; i < 60 && ap.state === "pickup"; i++) ap.update(0.05, { alpha: 0 });
 ok(ap.health > aHpBefore, `artifact pickup healed the player (${aHpBefore} -> ${ap.health})`);
 ok(T.state.coins > aCoinBefore, "artifact pickup paid out coins");
-ok(T.state.score === aScoreBefore + T.CONFIG.scorePerArtifact, "artifact pickup still awards score");
+const aXpAfter = T.totalXpToReach(ap.progress.level) + ap.progress.xp;
+ok(aXpAfter === aXpBefore + T.XP_PER_ARTIFACT, `artifact pickup awards +${T.XP_PER_ARTIFACT} XP (XP replaced score, Task 19)`);
 
 console.log("\n[18] save/load round-trips enhancement levels + potion belt");
 const sp = T.player;

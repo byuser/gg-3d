@@ -38,10 +38,13 @@ describe("functional flows (isolated boot of the assembled game)", () => {
   });
 
   it("round-trips a full save through serialize → travel → applySave", () => {
-    // Stamp some persistent state, then capture it.
-    T.state.score = 1234;
+    // Stamp some persistent state, then capture it. (Score was retired in Task
+    // 19 — XP/level is the run's progression now, so we round-trip that.)
+    T.state.relicsFound = 4;
     T.state.coins = 56;
     T.player.materials.wood = 7;
+    T.Skills.gainXp(T.player, T.totalXpToReach(3)); // reach level 3
+    const lvl = T.player.progress.level;
     const save = T.serializeGame();
     expect(save.v).toBeGreaterThanOrEqual(6);
     expect(T.validateSave(save)).toBe(true);
@@ -50,7 +53,7 @@ describe("functional flows (isolated boot of the assembled game)", () => {
     // Drift away: travel to a different zone and clobber the live stats.
     T.zoneManager._swap(T.state.zoneId, "shore", T.ZONE_BY_ID.shore);
     expect(T.state.zoneId).toBe("shore");
-    T.state.score = 0;
+    T.state.relicsFound = 0;
     T.state.coins = 0;
     T.player.materials.wood = 0;
 
@@ -58,7 +61,8 @@ describe("functional flows (isolated boot of the assembled game)", () => {
     T.applySave(save);
     expect(T.seed).toBe(save.seed);
     expect(T.state.zoneId).toBe(T.HUB_ZONE);
-    expect(T.state.score).toBe(1234);
+    expect(T.player.progress.level).toBe(lvl);
+    expect(T.state.relicsFound).toBe(4);
     expect(T.state.coins).toBe(56);
     expect(T.player.materials.wood).toBe(7);
 
