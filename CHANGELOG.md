@@ -24,6 +24,40 @@ delta it shipped with, since later tasks reference those.
 
 _Nothing pending._
 
+## [2026-06-25] — Task 16 — Responsive, mobile-first HUD & menu overhaul
+
+Rebuilt the menus + HUD to the standard of well-reviewed mobile action-RPGs: every control reachable at every
+resolution (verified on the **Galaxy S24 Ultra** profile — 1440 × 3120, DPR ≈ 3.5 — in portrait **and**
+landscape, plus a ≈360 px small width and desktop), no overlapping widgets, no duplicates, a one-thumb combat
+cluster in landscape, and drag-and-drop skill slotting. Layout/UX only — **no save-schema change**
+(`SAVE_VERSION` stays **9**). Vitest **126 → 141** (new `test/hud.test.js`, 15 cases) and a new Playwright
+responsive suite at the S24 Ultra device profile (portrait + landscape) added to `playwright.config.js`.
+
+- **Auto-fitting, scrollable menus with progressive disclosure.** The start screen (`#overlay`) and pause menu
+  (`#pauseMenu`) are now flex columns capped at the safe viewport (`100dvh` minus `env(safe-area-inset-*)`) that
+  scroll internally so nothing clips. Primary actions (Start / Resume / Load / Save / Exit) stay visible; the
+  secondary settings (Controls, Language, Audio, Graphics, Cloud saves) fold into labelled `<details>` sub-panels
+  opened on demand. The Google-Drive / cloud panel is fully reachable on the S24 Ultra in both orientations.
+- **Fullscreen ⇒ landscape on mobile.** Entering fullscreen on a touch device also requests landscape via the
+  Screen Orientation API (`screen.orientation.lock("landscape")`), released on exit. Both the lock and fullscreen
+  are feature-detected and degrade gracefully — the lock's promise rejection is swallowed (e.g. on iOS Safari);
+  desktop behaviour is unchanged.
+- **Decluttered HUD.** Removed the "monsters in this land" counter (`#monsters` + `updateMonsterCounter`), the
+  on-HUD music button (`#musicBtn` — mute now lives in the audio sub-panel; the M hotkey still toggles), the
+  duplicate map button (`#mapBtn` — the minimap is the single map entry point, now with an obvious tap hint) and
+  the round bag button (`#bagBtn` — the square inventory button remains). Gave the HUD deliberate z-layered,
+  non-overlapping anchored regions (top status row, corner minimap, bottom action cluster).
+- **One-thumb combat cluster (landscape).** The 3 skill quick-slots, the interact (E) button and the fire (✨)
+  button now form an ergonomic arc in the bottom-right (right-thumb) zone, all within a comfortable thumb sweep,
+  ≥ 48 px tap targets, clear of the left-thumb joystick and the safe-area insets. Portrait keeps a sensible
+  fallback.
+- **Drag-and-drop skill slotting.** Replaced the per-skill assign buttons with direct manipulation: drag a roster
+  skill onto a quick-slot to assign, drag a slotted skill onto another slot to move/swap, or onto empty space to
+  clear. Built on a **pure `dragSlotReducer`** (the gesture model) + one reusable Pointer-Events drag controller
+  (`setPointerCapture`, touch + mouse from one code path), with an accessible tap-to-pick → tap-slot fallback when
+  Pointer Events are unavailable. The pure `Skills.assignSlot` / `clearSlot` model is unchanged and still
+  round-trips through save/load.
+
 ## [2026-06-23] — Cloud saves: inject the Google OAuth client id at deploy time
 
 Follow-up to Task 15 so the OAuth 2.0 **Web-app client id** no longer has to be hardcoded in

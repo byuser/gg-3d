@@ -968,7 +968,18 @@ A task is **done** only when **all** of these are true:
 > and assert layouts against it; also keep a desktop profile so both are covered.
 
 ### Task 16 — Responsive, mobile‑first HUD & menu overhaul (auto‑fit at any resolution; one‑thumb combat; drag‑and‑drop skill slots)
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-25 · Rebuilt the start screen + pause menu as auto‑fitting `100dvh`/safe‑area
+  flex columns that scroll internally and fold their settings into labelled `<details>` sub‑panels
+  (Controls/Language/Audio/Graphics/Cloud saves) — the Google‑Drive panel is now reachable on the S24 Ultra
+  in both orientations. Fullscreen on touch also locks **landscape** via the Screen Orientation API (feature‑
+  detected; the lock’s rejection is swallowed; released on exit). Decluttered the HUD: removed the monster
+  counter, the on‑HUD music button (mute lives in settings), the duplicate map button (the minimap is the one
+  map entry point, now with a tap hint) and the round bag button (the square inventory button stays). Re‑laid
+  the **one‑thumb action arc** (3 skill slots + E + ✨) into the bottom‑right in landscape, clear of the joystick.
+  Replaced the per‑skill assign buttons with **drag‑and‑drop** slotting on a pure `dragSlotReducer` + one reusable
+  Pointer‑Events drag controller (touch + mouse), with an accessible tap‑to‑pick fallback. New EN+RU strings; no
+  save‑schema change (`SAVE_VERSION` 9). New `test/hud.test.js` (15 cases; Vitest 126 → 141) + a Playwright
+  responsive suite at the new **S24 Ultra** device profile (portrait + landscape) added to `playwright.config.js`.
 - **Depends on:** none directly, but it **touches** the minimap/map button (Task 13),
   the skill quick‑bar + `SkillsUI` (Task 14), the audio mixer (Task 6) and the
   cloud‑saves controls (Task 15). Pairs naturally with **Task 20** (map) — both

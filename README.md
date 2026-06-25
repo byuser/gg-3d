@@ -40,18 +40,18 @@ and gear without ever blocking the main line. Slay the dragon to **win**.
 | Move | `WASD` / Arrow keys | on-screen stick (bottom-left) |
 | Look | drag mouse | drag the screen |
 | Zoom | mouse wheel | two-finger pinch |
-| Attack (weapon) | `Space` or `F` (hold) | ✨ button (bottom-right) |
-| Cast a skill (quick bar 1/2/3) | `1` `2` `3` | tap a quick-bar slot (bottom-centre) |
+| Attack (weapon) | `Space` or `F` (hold) | ✨ button (one-thumb arc, bottom-right) |
+| Cast a skill (quick bar 1/2/3) | `1` `2` `3` | tap a quick-bar slot (the one-thumb arc in landscape) |
 | Use potion (belt 4/5/6) | `4` `5` `6` | tap a potion slot (bottom-left) |
-| Skills &amp; fusion | `K` | ✨ button (top-right) |
-| Inventory / equipment | `I` (or `B`) | 🎒 button |
+| Skills &amp; fusion (drag to slot) | `K` | ✨ button (top-right) |
+| Inventory / equipment | `I` (or `B`) | 🎒 button (top-right) |
 | Crafting bench | `C` | 🛠️ button (top-right) |
 | Quest log | `J` (or `L`) | 📜 button (top-right) |
-| World map / search / guide | `Tab` | 🗺️ button (top-right) |
+| World map / search / guide | `Tab` | tap the minimap (top-right) |
 | Toggle the minimap | `N` | tap the minimap to open the full map |
-| Talk / collect / gather / shop / build (`E`) | `E` | action button (bottom-right) |
+| Talk / collect / gather / shop / build (`E`) | `E` | E button (one-thumb arc, bottom-right) |
 | Travel to another land | walk into a path / bridge / cave portal | same |
-| Music on/off | `M` | 🔊 button (top-right) |
+| Music on/off | `M` | mute in pause → Audio settings |
 | Pause / menu | `Esc` | ☰ button (top-right) |
 | Language (EN / RU) | start screen · pause settings | same |
 | Audio volumes / mute | start screen · pause settings | same |
@@ -218,11 +218,11 @@ runs in English without a browser.
 - **Living sweets:** a dozen kinds — lollipops, gummy bears, cupcakes, donuts, candy
   canes, ice-cream cones, macarons, candy corn, chocolate bars, jelly beans,
   marshmallows and pretzels — each land drawing from its own palette.
-- **Monster counter:** the HUD shows how many monsters are currently roaming the land (`👹`).
 - **Score:** **+25** per monster defeated, **+50** per artifact collected. **Coins** are a
   separate currency spent at the merchant.
 - **Music:** a procedurally-synthesised soundtrack plays as you fight (no audio files —
-  it's generated in-browser). Toggle it with `M` or the 🔊 button.
+  it's generated in-browser). Toggle it with `M`, or mute everything from the **Audio**
+  sub-panel in the start screen / pause settings.
 - **Sound & ambience:** a fuller procedural soundscape (still no audio files). Richer
   **sound effects** — per-surface **footsteps** (grass / stone / sand / snow), gather/mine
   cues, quest accept/turn-in chimes, a portal **whoosh** on travel, UI clicks and a
@@ -463,12 +463,22 @@ flows against an in-memory stub, **local↔cloud payload parity** (byte-identica
 a local serialize, round-trips through `applySave`), and the **unconfigured /
 headless** path staying cleanly disabled (no throws). It needs **no save-schema
 change** (`SAVE_VERSION` stays 9).
+The **responsive HUD** suite (`test/hud.test.js`) locks in Task 16: the pure
+**drag-to-slot reducer** (pick → drop → assign / move / swap / clear, including
+out-of-range guards), the **feature detection** of Pointer Events + the Screen
+Orientation lock staying inert/no-op headless, the SkillsUI **tap-to-pick**
+fallback driving `Skills.assignSlot` / `clearSlot`, and the slotted quick-bar
+state still **round-tripping** through save/load.
 On top of that, a
 **functional** suite (`test/functional.test.js`) boots the assembled game in
 isolation and drives whole flows (start → zone travel → save/reload round-trip),
-and a **Playwright** suite (`test/e2e/boot.spec.js`) loads the built bundle in
-real headless Chromium and asserts the canvas boots with **no console errors**
-and the core overlays open:
+and **Playwright** suites load the built bundle in real headless Chromium: the
+boot smoke (`test/e2e/boot.spec.js`) asserts the canvas boots with **no console
+errors** and the core overlays open, and the **responsive** suite
+(`test/e2e/responsive.spec.js`) runs at desktop **and** the **Galaxy S24 Ultra**
+device profile (portrait + landscape) to assert every menu control is reachable
+(incl. the cloud panel), the removed widgets are gone, no two key HUD widgets
+overlap, and the one-thumb action arc sits bottom-right in landscape:
 
 ```bash
 npm ci          # once
@@ -546,7 +556,9 @@ deterministic fusion blend, so the whole system is unit-testable headless:
   feature-detect Babylon, so they never throw headless.
 - **Quick bar.** Up to **three** skills slot onto a HUD bar by the shoot button — cast with hotkeys
   `1` `2` `3` or a tap, with a radial cooldown sweep and a focus-cost readout. (The potion belt
-  moved one set over to `4` `5` `6`.)
+  moved one set over to `4` `5` `6`.) Skills are slotted by **drag-and-drop** in the Skills panel
+  (Task 16): drag a roster skill onto a slot to assign, between slots to swap, or onto empty space to
+  clear — touch + mouse from one Pointer-Events code path, with an accessible tap-to-pick fallback.
 - **Fusion (the marquee feature).** `fuseSkills(defs)` is **pure + deterministic**: it blends 2–3
   owned skills into a brand-new one — the strongest effect wins, power/cooldown/cost/AoE/count and
   the slow/lifesteal/pierce flags are combined, and the element is the shared school or _Prismatic_
@@ -835,4 +847,13 @@ Source: GitHub Actions**.
       cleanly disabled and the local save still works. Pure policy + an **injectable** Drive client in
       `src/game.js` (`CloudSave`), covered by `test/cloudsave.test.js`. See
       [Cloud saves](#cloud-saves-optional-google-drive) for setup.
+- [x] **Responsive, mobile-first HUD & menu overhaul** — the start screen + pause menu auto-fit at any
+      resolution (`100dvh` + safe-area, internal scroll) with settings folded into labelled `<details>`
+      sub-panels so **every control is reachable** (incl. the Google-Drive panel) on the **Galaxy S24
+      Ultra** in portrait + landscape; a decluttered HUD (no monster counter / on-HUD music / map / round
+      bag buttons — the minimap is the one map entry point, mute lives in settings) with non-overlapping
+      anchored regions; a **one-thumb** action arc (3 skill slots + E + ✨) in landscape; and
+      **drag-and-drop** skill slotting (Pointer Events, touch + mouse) on a pure reducer with an
+      accessible tap-to-pick fallback. Fullscreen on touch also locks **landscape**. Covered by
+      `test/hud.test.js` + a Playwright responsive suite at the S24 Ultra device profile.
 - [ ] Puzzles (levers, plates, gated doors)
