@@ -79,6 +79,24 @@ export default defineConfig({
       testMatch: /responsive\.spec\.js/,
       use: s24Landscape,
     },
+    // Durable session (Task 17): the auto-persist → reload → resume flow, run at
+    // desktop AND the S24 Ultra portrait + landscape profiles so a desktop⇄mobile
+    // mode switch / re-orientation still restores the same run.
+    {
+      name: "session-desktop",
+      testMatch: /session\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "session-s24-portrait",
+      testMatch: /session\.spec\.js/,
+      use: s24Portrait,
+    },
+    {
+      name: "session-s24-landscape",
+      testMatch: /session\.spec\.js/,
+      use: s24Landscape,
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",
