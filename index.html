@@ -38,6 +38,7 @@
       <div class="menu-actions">
         <button id="continueBtn" class="start-btn hidden" data-i18n="start.continueBtn" disabled>Continue</button>
         <button id="startBtn" class="start-btn" data-i18n="start.startBtn">Start Adventure</button>
+        <button id="savesBtn" class="start-btn secondary-btn" data-i18n="saves.manage">Manage Saves</button>
         <button id="loadBtn" class="start-btn secondary-btn" data-i18n="start.loadBtn">Load Progress</button>
       </div>
       <input id="loadFile" type="file" accept="application/json,.json" hidden />
@@ -201,7 +202,7 @@
       <p class="tagline" id="pauseStats">Wave <b>0</b> · Score <b>0</b></p>
       <div class="menu-actions">
         <button id="resumeBtn" class="start-btn" data-i18n="pause.resume">Resume</button>
-        <button id="saveBtn" class="start-btn secondary-btn" data-i18n="pause.save">Save Progress</button>
+        <button id="savesBtnP" class="start-btn secondary-btn" data-i18n="saves.manage">Manage Saves</button>
         <button id="restartBtn" class="start-btn secondary-btn" data-i18n="pause.restart">Restart</button>
         <button id="exitBtn" class="start-btn danger-btn" data-i18n="pause.exit">Exit to Menu</button>
       </div>
@@ -258,14 +259,19 @@
           <button id="clearSessionBtnP" class="lang-btn cloud-btn" data-i18n="session.clear">Clear saved session &amp; sign out</button>
         </div>
       </details>
+    </div>
+  </div>
 
-      <!-- Confirmation guard for the destructive Restart / Exit actions. -->
-      <div id="confirmDialog" class="confirm-dialog hidden">
-        <p id="confirmText" class="confirm-text">Are you sure?</p>
-        <div class="confirm-actions">
-          <button id="confirmYes" class="start-btn danger-btn" data-i18n="pause.confirmYes">Yes</button>
-          <button id="confirmNo" class="start-btn secondary-btn" data-i18n="pause.confirmNo">Cancel</button>
-        </div>
+  <!-- Confirmation guard for destructive actions (Restart / Exit, and the
+       save-slot delete / overwrite). A screen-centred modal so it floats above
+       any overlay — the pause menu OR the Saves screen opened from the start
+       menu (where the sim isn't paused). -->
+  <div id="confirmDialog" class="confirm-modal hidden">
+    <div class="confirm-dialog">
+      <p id="confirmText" class="confirm-text">Are you sure?</p>
+      <div class="confirm-actions">
+        <button id="confirmYes" class="start-btn danger-btn" data-i18n="pause.confirmYes">Yes</button>
+        <button id="confirmNo" class="start-btn secondary-btn" data-i18n="pause.confirmNo">Cancel</button>
       </div>
     </div>
   </div>
@@ -416,6 +422,41 @@
         <button id="mapGuideBtn" class="start-btn map-guide" data-i18n="map.guide" disabled>Guide me there</button>
         <button id="mapClearBtn" class="start-btn secondary-btn" data-i18n="map.clearGuide" disabled>Clear waypoint</button>
         <button id="mapDone" class="start-btn shop-done" data-i18n="map.done">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save management (Task 18): a single Saves screen reachable from the start
+       screen AND the pause menu. Lists the named local slots (Load / Rename /
+       Delete / New) and the cloud section (sign-in CTA or the cloud slot list),
+       plus file export/import. The slot rows are rendered from the pure SaveSlots
+       store by SavesUI. -->
+  <div id="savesOverlay" class="shop-overlay hidden">
+    <div class="shop-panel saves-panel">
+      <button id="savesClose" class="shop-close" data-i18n-title="btn.close" title="Close" aria-label="Close saves">×</button>
+      <h2 data-i18n="saves.title">Saves</h2>
+      <p class="cloud-intro" data-i18n="saves.intro">Keep several named saves on this device. Load, rename or delete any of them — or back them up to a file or the cloud.</p>
+
+      <h3 class="saves-subhead" data-i18n="saves.local">On this device</h3>
+      <div id="savesList" class="saves-list"></div>
+
+      <h3 class="saves-subhead" data-i18n="saves.cloudSection">Cloud (Google Drive)</h3>
+      <p id="savesCloudStatus" class="cloud-status" data-i18n="cloud.notConfigured">Cloud saves need a Google client ID — see the README to enable.</p>
+      <div class="cloud-btn-row">
+        <button id="savesCloudSignBtn" class="lang-btn cloud-btn" data-i18n="cloud.signIn">Sign in with Google</button>
+        <button id="savesCloudSaveBtn" class="lang-btn cloud-btn" data-i18n="cloud.save">Save to Drive</button>
+      </div>
+      <div id="savesCloudList" class="saves-list cloud-list"></div>
+
+      <h3 class="saves-subhead" data-i18n="saves.file">File</h3>
+      <div class="cloud-btn-row">
+        <button id="savesExportBtn" class="lang-btn cloud-btn" data-i18n="saves.export">Export to file</button>
+        <button id="savesImportBtn" class="lang-btn cloud-btn" data-i18n="saves.import">Import from file</button>
+      </div>
+      <input id="savesImportFile" type="file" accept="application/json,.json" hidden />
+
+      <div class="map-actions">
+        <button id="savesDone" class="start-btn shop-done" data-i18n="map.done">Done</button>
       </div>
     </div>
   </div>

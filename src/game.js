@@ -138,6 +138,7 @@ import {
     if (typeof Pause !== "undefined" && typeof paused !== "undefined" && paused) Pause.refreshTexts();
     if (typeof AudioUI !== "undefined" && AudioUI.sync) AudioUI.sync();
     if (typeof CloudUI !== "undefined" && CloudUI.sync) CloudUI.sync();
+    if (typeof SavesUI !== "undefined" && SavesUI.open) SavesUI.render();
     if (typeof Fullscreen !== "undefined" && Fullscreen.sync) Fullscreen.sync();
   }
 
@@ -548,6 +549,21 @@ import {
     // Start-screen "Load progress".
     loadBtn: document.getElementById("loadBtn"),
     loadFile: document.getElementById("loadFile"),
+    // Save management (Task 18): the "Manage Saves" entry points + the Saves
+    // overlay (local slots + cloud section + file export/import).
+    savesBtn: document.getElementById("savesBtn"),
+    savesBtnP: document.getElementById("savesBtnP"),
+    savesOverlay: document.getElementById("savesOverlay"),
+    savesClose: document.getElementById("savesClose"),
+    savesDone: document.getElementById("savesDone"),
+    savesList: document.getElementById("savesList"),
+    savesCloudStatus: document.getElementById("savesCloudStatus"),
+    savesCloudSignBtn: document.getElementById("savesCloudSignBtn"),
+    savesCloudSaveBtn: document.getElementById("savesCloudSaveBtn"),
+    savesCloudList: document.getElementById("savesCloudList"),
+    savesExportBtn: document.getElementById("savesExportBtn"),
+    savesImportBtn: document.getElementById("savesImportBtn"),
+    savesImportFile: document.getElementById("savesImportFile"),
     // Durable-session controls (Task 17): clear the saved session + sign-out,
     // on the start screen and pause settings.
     clearSessionBtn: document.getElementById("clearSessionBtn"),
@@ -6531,6 +6547,7 @@ import {
       castle: null,     // the CastleSite build system
       dragon: null,     // the final boss, once summoned
       totalKills: 0,    // lifetime sweets felled (quest "hunt" progress)
+      playSec: 0,       // accumulated active playtime (seconds) — save-slot metadata
       waveStats: { kills: 0, artifacts: 0, coins: 0 },
       merchant: null, blacksmith: null, boss: null,
       pendingAttack: null, // attack awaiting its swing's strike (impact) frame
@@ -6612,6 +6629,10 @@ import {
         return;
       }
 
+      // Accumulate active playtime (this branch runs only while truly playing —
+      // past every pause / menu / transition early-return above) for save-slot
+      // metadata. Frame-rate independent (dt seconds).
+      state.playSec += dt;
       player.update(dt, camera);
       // Per-surface footsteps + a low-health warning (both dt-driven → pause-safe).
       Footsteps.update(player, state.world && state.world.zone);
@@ -7528,7 +7549,7 @@ import {
   // monsters, the boss, artifacts and dropped coins, plus the wave clock) is
   // serialized explicitly so the run resumes exactly where it left off.
   // =========================================================================
-  const SAVE_VERSION = 9;
+  const SAVE_VERSION = 10;
   const PENDING_LOAD_KEY = "gg3d_pending_load"; // sessionStorage hand-off across reload
   const AUTOSTART_KEY = "gg3d_autostart";       // restart -> skip the start screen
 
@@ -7592,6 +7613,9 @@ import {
       // Story progression: quests, the campaign-flow state, the castle build
       // state, day/night + weather.
       totalKills: state.totalKills,
+      // Active playtime in seconds (v10) — drives the save-slot "time played"
+      // metadata. Legacy saves without it default to 0 on load.
+      playSec: Math.round(state.playSec || 0),
       won: !!state.won,
       quests: {
         active: Quests.active.slice(),
@@ -7721,6 +7745,7 @@ import {
     // Story progression: kills, quests, the campaign-flow state, win flag.
     // Unknown ids (e.g. from a pre-campaign save) drop out, defaulting cleanly.
     state.totalKills = d.totalKills | 0;
+    state.playSec = Math.max(0, +d.playSec || 0);   // v10 (legacy → 0)
     state.won = !!d.won;
     const q = d.quests || {};
     Quests.active = (q.active || []).filter((id) => QUEST_BY_ID[id]);
@@ -7801,6 +7826,208 @@ import {
     };
     reader.onerror = () => { if (onError) onError(t("toast.readError")); };
     reader.readAsText(file);
+  }
+
+  // =========================================================================
+  // Save slots (Task 18) — multiple NAMED manual save slots, like a shipped RPG.
+  // The single file-download model is kept as an extra export/import option, but
+  // the primary UX is in-game slots: 6 local slots persisted to localStorage,
+  // each storing the FULL serializeGame() payload + lightweight metadata (name,
+  // timestamp, zone, level, playtime) used to render the slot list without
+  // parsing every payload.
+  //
+  // The slot logic is PURE (a small store object the UI just renders); the only
+  // browser touch is read()/write() over localStorage, which fail soft like the
+  // rest. Older single-slot data (the Task-17 auto-session snapshot) migrates in
+  // gracefully on first read so an existing player's run is never stranded.
+  // =========================================================================
+  const SLOTS_KEY = "gg3d_slots";   // localStorage: the manual-slot store
+  const SLOTS_VERSION = 1;          // the SLOT-STORE envelope schema (not the save schema)
+  const SLOT_COUNT = 6;             // number of manual local slots
+  const SLOT_NAME_MAX = 40;         // rename length cap (i18n-safe; trimmed)
+
+  // Clamp a free-form slot name to something sane + length-capped. Pure.
+  function sanitizeSlotName(name) {
+    let s = (name == null ? "" : String(name)).replace(/[\r\n\t]+/g, " ").trim();
+    if (s.length > SLOT_NAME_MAX) s = s.slice(0, SLOT_NAME_MAX).trim();
+    return s;
+  }
+
+  // Default display name for a slot index (1-based), used for "New save" + the
+  // empty-slot label. Localized at render time, so store only the number.
+  function defaultSlotName(i) { return t("saves.slotN", { n: i + 1 }); }
+
+  // Derive the lightweight metadata shown in the slot list from a full save
+  // payload. Pure + defensive: a foreign/older payload still yields sane fields.
+  function slotMetaFromPayload(payload) {
+    const p = payload && typeof payload === "object" ? payload : {};
+    const player = p.player && typeof p.player === "object" ? p.player : {};
+    const prog = player.progress && typeof player.progress === "object" ? player.progress : {};
+    return {
+      zone: typeof p.zone === "string" ? p.zone : HUB_ZONE,
+      level: Math.max(1, prog.level | 0 || 1),
+      playSec: Math.max(0, +p.playSec || 0),
+      savedAt: typeof p.savedAt === "string" ? p.savedAt : null,
+    };
+  }
+
+  // ---- Pure store helpers (operate on a plain { v, slots:{} } object) -------
+
+  // Normalize any stored/garbage value into a valid slot store. Pure + total.
+  function normalizeSlotStore(raw) {
+    const store = { v: SLOTS_VERSION, slots: {} };
+    if (!raw || typeof raw !== "object") return store;
+    const slots = raw.slots && typeof raw.slots === "object" ? raw.slots : {};
+    for (let i = 0; i < SLOT_COUNT; i++) {
+      const rec = slots[i];
+      if (rec && typeof rec === "object" && validateSave(rec.payload)) {
+        store.slots[i] = {
+          name: sanitizeSlotName(rec.name) || defaultSlotName(i),
+          savedAt: typeof rec.savedAt === "string" ? rec.savedAt : (rec.payload.savedAt || null),
+          payload: rec.payload,
+          meta: slotMetaFromPayload(rec.payload),
+        };
+      }
+    }
+    return store;
+  }
+
+  // A render-friendly list of all SLOT_COUNT slots, occupied or empty, in order.
+  // Pure: returns [{ index, used, name, savedAt, meta }] — the UI maps over it.
+  function listSlots(store) {
+    const s = (store && store.slots) || {};
+    const out = [];
+    for (let i = 0; i < SLOT_COUNT; i++) {
+      const rec = s[i];
+      out.push(rec
+        ? { index: i, used: true, name: rec.name, savedAt: rec.savedAt, meta: rec.meta }
+        : { index: i, used: false, name: null, savedAt: null, meta: null });
+    }
+    return out;
+  }
+
+  // The first empty slot index, or -1 when every slot is full. Pure.
+  function nextFreeSlot(store) {
+    const s = (store && store.slots) || {};
+    for (let i = 0; i < SLOT_COUNT; i++) if (!s[i]) return i;
+    return -1;
+  }
+
+  // Pure mutators returning a NEW store (immutable-style, easy to test) -------
+  function putSlotRecord(store, index, payload, name) {
+    const next = { v: SLOTS_VERSION, slots: Object.assign({}, (store && store.slots) || {}) };
+    if (index < 0 || index >= SLOT_COUNT || !validateSave(payload)) return next;
+    next.slots[index] = {
+      name: sanitizeSlotName(name) || defaultSlotName(index),
+      savedAt: payload.savedAt || new Date().toISOString(),
+      payload,
+      meta: slotMetaFromPayload(payload),
+    };
+    return next;
+  }
+  function renameSlotRecord(store, index, name) {
+    const next = { v: SLOTS_VERSION, slots: Object.assign({}, (store && store.slots) || {}) };
+    const rec = next.slots[index];
+    if (!rec) return next;
+    next.slots[index] = Object.assign({}, rec, { name: sanitizeSlotName(name) || defaultSlotName(index) });
+    return next;
+  }
+  function deleteSlotRecord(store, index) {
+    const next = { v: SLOTS_VERSION, slots: Object.assign({}, (store && store.slots) || {}) };
+    delete next.slots[index];
+    return next;
+  }
+
+  // The slot controller: the thin persistence + game-facing API over the pure
+  // helpers above. Headless-safe (localStorage feature-detected via localGet/Set).
+  const SaveSlots = {
+    SLOT_COUNT,
+    _migrated: false,
+
+    // Read the persisted store, migrating a legacy single-slot snapshot in once.
+    read() {
+      let raw = null;
+      try { const s = localGet(SLOTS_KEY); if (s) raw = JSON.parse(s); } catch (e) { raw = null; }
+      const store = normalizeSlotStore(raw);
+      // First-ever read with NO slot store yet: import the Task-17 auto-session
+      // snapshot (the only prior local "single slot") so an in-progress run is
+      // preserved as a named slot rather than stranded. Done once, then persisted.
+      if (!raw && !this._migrated) {
+        this._migrated = true;
+        const legacy = (typeof Session !== "undefined" && Session.readSnapshot) ? Session.readSnapshot() : null;
+        if (legacy && nextFreeSlot(store) >= 0) {
+          const migrated = putSlotRecord(store, nextFreeSlot(store), legacy, t("saves.migrated"));
+          this.write(migrated);
+          return migrated;
+        }
+      }
+      return store;
+    },
+    write(store) {
+      try { localSet(SLOTS_KEY, JSON.stringify(normalizeSlotStore(store))); return true; }
+      catch (e) { return false; }
+    },
+
+    list() { return listSlots(this.read()); },
+    nextFree() { return nextFreeSlot(this.read()); },
+
+    // Save the live run into a slot (the full serializeGame() payload). Returns
+    // the written record's index, or -1 on failure / nothing to save.
+    saveTo(index, name) {
+      const payload = serializeGame();
+      if (!payload) return -1;
+      const cur = this.read();
+      const existing = cur.slots[index];
+      const next = putSlotRecord(cur, index, payload, name != null ? name : (existing ? existing.name : defaultSlotName(index)));
+      return this.write(next) ? index : -1;
+    },
+    // Save into the next free slot (or -1 when all full → caller offers overwrite).
+    saveNew() {
+      const idx = this.nextFree();
+      if (idx < 0) return -1;
+      return this.saveTo(idx, defaultSlotName(idx));
+    },
+    rename(index, name) {
+      const next = renameSlotRecord(this.read(), index, name);
+      return this.write(next);
+    },
+    remove(index) {
+      const next = deleteSlotRecord(this.read(), index);
+      return this.write(next);
+    },
+    // The raw payload behind a slot (for Load), or null when empty/unreadable.
+    payloadOf(index) {
+      const rec = this.read().slots[index];
+      return rec ? rec.payload : null;
+    },
+
+    // Load a slot into a running/ booting game through the SAME boot reload path
+    // the file/cloud load uses (re-seed → rebuild → applySave), so migration is
+    // identical. Reconciles against the live run so a load can't silently wipe
+    // newer in-progress work (reuse the Task-15 newer-of policy).
+    load(index) {
+      const payload = this.payloadOf(index);
+      if (!validateSave(payload)) { toast(t("toast.invalidSave")); return false; }
+      if (gameStarted) {
+        const cur = serializeGame();
+        if (cur && cloudNewer({ savedAt: cur.savedAt }, { savedAt: payload.savedAt }) === "a") {
+          if (typeof window !== "undefined" && typeof window.confirm === "function" && !window.confirm(t("saves.confirmOlder"))) return false;
+        }
+      }
+      sessionSet(PENDING_LOAD_KEY, JSON.stringify(payload));
+      try { if (typeof window !== "undefined" && window.location) window.location.reload(); } catch (e) {}
+      return true;
+    },
+  };
+
+  // Format a playtime (seconds) as a compact "1h 23m" / "12m" / "45s". Pure +
+  // feature-free so it's unit-testable; localized via the i18n unit suffixes.
+  function fmtPlaytime(sec) {
+    sec = Math.max(0, Math.floor(+sec || 0));
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    if (h > 0) return t("saves.hm", { h, m });
+    if (m > 0) return t("saves.ms", { m, s });
+    return t("saves.s", { s });
   }
 
   // =========================================================================
@@ -8417,6 +8644,14 @@ import {
       return true;
     },
 
+    // Delete a cloud save by id (Task 18 — cloud slot management). Uses the Drive
+    // client's `remove`; returns true on success, false (no throw) on failure.
+    async deleteSave(id) {
+      if (!this.signedIn || !this.client) return false;
+      try { await this.client.remove(id); return true; }
+      catch (e) { this._fail(e, {}); return false; }
+    },
+
     // Quiet failure: offline keeps the local save with a soft notice; autosave
     // failures stay silent so a flaky network never spams the player.
     _fail(e, opts) {
@@ -8474,21 +8709,47 @@ import {
         if (g.status) g.status.textContent = st;
         if (g.signBtn) { g.signBtn.textContent = t(CloudSave.signedIn ? "cloud.signOut" : "cloud.signIn"); g.signBtn.disabled = !avail || CloudSave.busy; }
         if (g.saveBtn) { g.saveBtn.textContent = t("cloud.save"); g.saveBtn.disabled = !CloudSave.signedIn || CloudSave.busy; }
-        if (g.listBtn) { g.listBtn.textContent = t("cloud.list"); g.listBtn.disabled = !CloudSave.signedIn; }
+        // The "Cloud saves…" button opens the browse overlay even when signed
+        // OUT (it shows a clear state + a sign-in CTA there) — so it is never a
+        // dead click (Task 18). Only a truly unavailable platform disables it.
+        if (g.listBtn) { g.listBtn.textContent = t("cloud.list"); g.listBtn.disabled = !avail; }
         if (g.autoBtn) {
           g.autoBtn.textContent = t(CloudSave.enabled ? "cloud.autosaveOn" : "cloud.autosaveOff");
           if (g.autoBtn.classList) g.autoBtn.classList.toggle("active", CloudSave.enabled);
           g.autoBtn.disabled = !avail;
         }
       }
+      // Keep the Saves screen's cloud section in step (sign-in state changes there
+      // too, e.g. silent re-auth on boot, or signing in from inside the screen).
+      if (typeof SavesUI !== "undefined" && SavesUI.syncCloud) SavesUI.syncCloud();
     },
     async openList() {
       if (!this.overlay) return;
       if (this.overlay.classList) this.overlay.classList.remove("hidden");
+      // Signed out / not configured: show a clear state + a sign-in CTA instead
+      // of a misleading empty list (Task 18 — no more dead cloud action).
+      if (!CloudSave.signedIn) { this.renderSignedOut(); return; }
       if (this.listEl) this.listEl.innerHTML = '<p class="cloud-empty">' + t("cloud.loading") + "</p>";
       let saves = [];
       try { saves = await CloudSave.listSaves(); } catch (e) { saves = []; }
       this.renderList(saves);
+    },
+    // A signed-out cloud browser: the status line + a sign-in CTA (or a "not
+    // available / not configured" note when the platform can't reach Drive).
+    renderSignedOut() {
+      if (!this.listEl) return;
+      this.listEl.innerHTML = "";
+      const avail = CloudSave.available(), cfg = CloudSave.configured();
+      const p = document.createElement("p"); p.className = "cloud-empty";
+      p.textContent = avail ? t("saves.cloudSignInHint") : t(cfg ? "cloud.unavailable" : "cloud.notConfigured");
+      this.listEl.appendChild(p);
+      if (avail) {
+        const btn = document.createElement("button");
+        btn.className = "start-btn secondary-btn cloud-restore";
+        btn.textContent = t("cloud.signIn");
+        btn.addEventListener("click", async () => { await CloudSave.signIn(); if (CloudSave.signedIn) this.openList(); });
+        this.listEl.appendChild(btn);
+      }
     },
     renderList(saves) {
       if (!this.listEl) return;
@@ -8506,6 +8767,202 @@ import {
       }
     },
     closeList() { if (this.overlay && this.overlay.classList) this.overlay.classList.add("hidden"); },
+  };
+
+  // ---- Saves UI: the single save-management screen (Task 18) ----------------
+  // Reachable from the start screen AND the pause menu. Renders the pure
+  // SaveSlots store as a list of named local slots (Load / Rename / Delete /
+  // New), plus a cloud section (a clear sign-in CTA when signed-out, or the
+  // cloud slot list when signed-in) and file export/import. The UI only renders
+  // state the pure module computes; destructive actions confirm via Pause.askConfirm.
+  const SavesUI = {
+    open: false, _wired: false, _renaming: -1,
+
+    init() {
+      if (this._wired) return;
+      this._wired = true;
+      const on = (el, ev, fn) => { if (el && el.addEventListener) el.addEventListener(ev, fn); };
+      on(dom.savesBtn, "click", () => { Sfx.play("ui_click"); this.openScreen(); });
+      on(dom.savesBtnP, "click", () => { Sfx.play("ui_click"); this.openScreen(); });
+      on(dom.savesClose, "click", () => this.closeScreen());
+      on(dom.savesDone, "click", () => this.closeScreen());
+      // Cloud section: sign-in/out toggle + manual "Save to Drive".
+      on(dom.savesCloudSignBtn, "click", () => { if (CloudSave.signedIn) CloudSave.signOut(); else CloudSave.signIn(); });
+      on(dom.savesCloudSaveBtn, "click", async () => { await CloudSave.saveManual(); this.renderCloud(); });
+      // File export/import (kept as an extra option alongside in-game slots).
+      on(dom.savesExportBtn, "click", () => downloadSave());
+      on(dom.savesImportBtn, "click", () => { if (dom.savesImportFile) dom.savesImportFile.click(); });
+      on(dom.savesImportFile, "change", (e) => {
+        const file = e.target && e.target.files && e.target.files[0];
+        loadFromFile(file, (msg) => toast(msg));
+        if (e.target) e.target.value = "";
+      });
+    },
+
+    openScreen() {
+      if (!dom.savesOverlay) return;
+      this._renaming = -1;
+      if (dom.savesOverlay.classList) dom.savesOverlay.classList.remove("hidden");
+      this.open = true;
+      this.render();
+      // Reflect cloud state; a silent re-auth may resolve shortly and re-sync.
+      try { Promise.resolve(CloudSave.trySilentSignIn()).then(() => { if (this.open) this.renderCloud(); }).catch(() => {}); } catch (e) {}
+    },
+    closeScreen() {
+      if (dom.savesOverlay && dom.savesOverlay.classList) dom.savesOverlay.classList.add("hidden");
+      this.open = false; this._renaming = -1;
+    },
+
+    render() { this.renderLocal(); this.renderCloud(); },
+
+    // The local named slots: each row shows the name + metadata and Load/Rename/
+    // Delete, or a "New save" action for an empty slot. A "New save" on an
+    // occupied slot overwrites it (confirmed first).
+    renderLocal() {
+      const host = dom.savesList;
+      if (!host) return;
+      host.innerHTML = "";
+      const canSave = gameStarted && !!serializeGame();
+      for (const slot of SaveSlots.list()) {
+        const row = document.createElement("div"); row.className = "saves-row";
+        const info = document.createElement("div"); info.className = "saves-info";
+
+        if (this._renaming === slot.index && slot.used) {
+          // Inline rename: a length-capped text field + Save / Cancel.
+          const input = document.createElement("input");
+          input.className = "saves-rename-input"; input.type = "text";
+          input.maxLength = SLOT_NAME_MAX; input.value = slot.name;
+          input.setAttribute("aria-label", t("saves.renameLabel"));
+          const commit = () => { SaveSlots.rename(slot.index, input.value); this._renaming = -1; this.renderLocal(); };
+          input.addEventListener("keydown", (e) => {
+            // Stop the global Escape/hotkey handler from also acting (Escape here
+            // only cancels the rename; Enter only commits it).
+            if (e.key === "Enter") { e.preventDefault(); if (e.stopPropagation) e.stopPropagation(); commit(); }
+            else if (e.key === "Escape") { e.preventDefault(); if (e.stopPropagation) e.stopPropagation(); this._renaming = -1; this.renderLocal(); }
+          });
+          info.appendChild(input);
+          row.appendChild(info);
+          const acts = document.createElement("div"); acts.className = "saves-actions";
+          acts.appendChild(this._btn(t("saves.renameSave"), "primary", commit));
+          acts.appendChild(this._btn(t("pause.confirmNo"), "secondary", () => { this._renaming = -1; this.renderLocal(); }));
+          row.appendChild(acts);
+          host.appendChild(row);
+          try { input.focus(); } catch (e) {}
+          continue;
+        }
+
+        const name = document.createElement("div"); name.className = "saves-name";
+        name.textContent = slot.used ? slot.name : defaultSlotName(slot.index);
+        info.appendChild(name);
+        const meta = document.createElement("div"); meta.className = "saves-meta";
+        meta.textContent = slot.used ? this._metaLine(slot.meta) : t("saves.emptySlot");
+        info.appendChild(meta);
+        row.appendChild(info);
+
+        const acts = document.createElement("div"); acts.className = "saves-actions";
+        if (slot.used) {
+          acts.appendChild(this._btn(t("saves.load"), "primary", () => SaveSlots.load(slot.index)));
+          acts.appendChild(this._btn(t("saves.overwrite"), "secondary", () => this._overwrite(slot.index, slot.name), !canSave));
+          acts.appendChild(this._btn(t("saves.rename"), "secondary", () => { this._renaming = slot.index; this.renderLocal(); }));
+          acts.appendChild(this._btn(t("saves.delete"), "danger", () => this._delete(slot.index, slot.name)));
+        } else {
+          acts.appendChild(this._btn(t("saves.newSave"), "primary", () => this._newInto(slot.index), !canSave));
+        }
+        row.appendChild(acts);
+        host.appendChild(row);
+      }
+    },
+
+    // The cloud section: status + a sign-in CTA (so it's never a dead no-op), and
+    // when signed in, the cloud slots with Restore (+ Delete where the API allows).
+    renderCloud() {
+      this.syncCloud();
+      const host = dom.savesCloudList;
+      if (!host) return;
+      host.innerHTML = "";
+      if (!CloudSave.signedIn) {
+        const p = document.createElement("p"); p.className = "cloud-empty";
+        p.textContent = CloudSave.available() ? t("saves.cloudSignInHint") : t(CloudSave.configured() ? "cloud.unavailable" : "cloud.notConfigured");
+        host.appendChild(p);
+        return;
+      }
+      const loading = document.createElement("p"); loading.className = "cloud-empty";
+      loading.textContent = t("cloud.loading");
+      host.appendChild(loading);
+      CloudSave.listSaves().then((saves) => {
+        if (!this.open) return;
+        host.innerHTML = "";
+        if (!saves || !saves.length) { const e = document.createElement("p"); e.className = "cloud-empty"; e.textContent = t("cloud.empty"); host.appendChild(e); return; }
+        for (const s of saves) {
+          const row = document.createElement("div"); row.className = "saves-row";
+          const info = document.createElement("div"); info.className = "saves-info";
+          const name = document.createElement("div"); name.className = "saves-name";
+          name.textContent = t(s.kind === "manual" ? "cloud.manual" : "cloud.autosave");
+          info.appendChild(name);
+          const meta = document.createElement("div"); meta.className = "saves-meta";
+          meta.textContent = cloudFmtTime(s.ts);
+          info.appendChild(meta);
+          row.appendChild(info);
+          const acts = document.createElement("div"); acts.className = "saves-actions";
+          acts.appendChild(this._btn(t("cloud.restore"), "primary", () => CloudSave.restore(s.id)));
+          acts.appendChild(this._btn(t("saves.delete"), "danger", () => this._deleteCloud(s, name.textContent)));
+          row.appendChild(acts);
+          host.appendChild(row);
+        }
+      }).catch(() => {
+        if (!this.open) return;
+        host.innerHTML = "";
+        const e = document.createElement("p"); e.className = "cloud-empty"; e.textContent = t("cloud.empty"); host.appendChild(e);
+      });
+    },
+
+    // Refresh just the cloud status line + the sign-in/save button labels/state.
+    syncCloud() {
+      const avail = CloudSave.available(), cfg = CloudSave.configured();
+      let st;
+      if (!avail) st = t(cfg ? "cloud.unavailable" : "cloud.notConfigured");
+      else st = t(CloudSave.signedIn ? "cloud.signedIn" : "cloud.signedOut");
+      if (dom.savesCloudStatus) dom.savesCloudStatus.textContent = st;
+      if (dom.savesCloudSignBtn) { dom.savesCloudSignBtn.textContent = t(CloudSave.signedIn ? "cloud.signOut" : "cloud.signIn"); dom.savesCloudSignBtn.disabled = !avail || CloudSave.busy; }
+      if (dom.savesCloudSaveBtn) { dom.savesCloudSaveBtn.textContent = t("cloud.save"); dom.savesCloudSaveBtn.disabled = !CloudSave.signedIn || CloudSave.busy; }
+    },
+
+    // ---- internals ----
+    _btn(label, kind, fn, disabled) {
+      const b = document.createElement("button");
+      b.className = "saves-btn" + (kind === "primary" ? " primary" : kind === "danger" ? " danger" : " secondary");
+      b.textContent = label;
+      if (disabled) b.disabled = true;
+      else b.addEventListener("click", fn);
+      return b;
+    },
+    _metaLine(meta) {
+      if (!meta) return "";
+      const where = tZoneName(ZONE_BY_ID[meta.zone]) || meta.zone || "";
+      const when = meta.savedAt ? cloudFmtTime(Date.parse(meta.savedAt)) : "";
+      return t("saves.metaLine", { level: meta.level, where, time: fmtPlaytime(meta.playSec), when });
+    },
+    _newInto(index) {
+      if (SaveSlots.saveTo(index) >= 0) { Sfx.play("ui_click"); toast(t("toast.slotSaved")); this.renderLocal(); }
+      else toast(t("toast.nothingToSave"));
+    },
+    _overwrite(index, name) {
+      Pause.askConfirm("saves-overwrite", t("saves.confirmOverwrite", { name }), () => {
+        if (SaveSlots.saveTo(index, name) >= 0) { Sfx.play("ui_click"); toast(t("toast.slotSaved")); this.renderLocal(); }
+      });
+    },
+    _delete(index, name) {
+      Pause.askConfirm("saves-delete", t("saves.confirmDelete", { name }), () => {
+        SaveSlots.remove(index); Sfx.play("ui_click"); toast(t("toast.slotDeleted")); this.renderLocal();
+      });
+    },
+    _deleteCloud(s, name) {
+      Pause.askConfirm("saves-delete-cloud", t("saves.confirmDelete", { name }), async () => {
+        const ok = await CloudSave.deleteSave(s.id);
+        if (ok) { Sfx.play("ui_click"); toast(t("toast.slotDeleted")); }
+        this.renderCloud();
+      });
+    },
   };
 
   // =========================================================================
@@ -8532,8 +8989,11 @@ import {
       const score = stateRef ? stateRef.score : 0;
       if (dom.pauseStats) dom.pauseStats.innerHTML = t("pause.stats", { wave, score });
       _syncGfxButtons();   // reflect the current graphics preference + detected tier
-      if (this.pendingAction && dom.confirmText)
-        dom.confirmText.textContent = t(this.pendingAction === "restart" ? "pause.confirmRestart" : "pause.confirmExit");
+      if (this.pendingAction && dom.confirmText) {
+        if (this.pendingAction === "restart") dom.confirmText.textContent = t("pause.confirmRestart");
+        else if (this.pendingAction === "exit") dom.confirmText.textContent = t("pause.confirmExit");
+        else dom.confirmText.textContent = this.pendingText;   // callback confirm keeps its message
+      }
     },
 
     // Change the graphics-quality preference. The tier is baked into meshes,
@@ -8566,18 +9026,32 @@ import {
     },
     toggle() { if (paused) this.close(); else this.open(); },
 
-    askConfirm(action, text) {
+    // Confirmation guard, reusable across the game (restart / exit, and the
+    // Task-18 save-slot delete / overwrite). The dialog is a screen-centred modal
+    // so it floats above ANY overlay — the pause menu OR the Saves screen opened
+    // from the start menu (where the sim isn't paused). `onYes` is an optional
+    // callback; the built-in "restart"/"exit" actions keep their reload behaviour
+    // and re-localize live. `pendingText` is remembered so a language switch can
+    // re-render a callback confirm's message too.
+    pendingConfirm: null,
+    pendingText: "",
+    askConfirm(action, text, onYes) {
       this.pendingAction = action;
-      if (dom.confirmText) dom.confirmText.textContent = text;
+      this.pendingConfirm = typeof onYes === "function" ? onYes : null;
+      this.pendingText = text || "";
+      if (dom.confirmText) dom.confirmText.textContent = this.pendingText;
       if (dom.confirmDialog) dom.confirmDialog.classList.remove("hidden");
     },
     hideConfirm() {
       this.pendingAction = null;
+      this.pendingConfirm = null;
+      this.pendingText = "";
       if (dom.confirmDialog) dom.confirmDialog.classList.add("hidden");
     },
     confirmYes() {
-      const action = this.pendingAction;
+      const action = this.pendingAction, cb = this.pendingConfirm;
       this.hideConfirm();
+      if (cb) { cb(); return; }
       if (action === "restart") {
         sessionSet(AUTOSTART_KEY, "1");
         sessionDel(PENDING_LOAD_KEY);
@@ -9404,6 +9878,10 @@ import {
       // toggle on the start screen and pause settings, plus the browse overlay.
       CloudUI.init();
 
+      // Save management (Task 18): the unified Saves screen (named local slots +
+      // cloud section + file export/import), reachable from start screen + pause.
+      SavesUI.init();
+
       // Start-screen "Load progress" -> pick a file -> reload into the save.
       if (dom.loadBtn && dom.loadFile) {
         dom.loadBtn.addEventListener("click", () => dom.loadFile.click());
@@ -9470,6 +9948,11 @@ import {
         if (e.code === "KeyN" && gameStarted && !paused && !typingInSearch) { WorldMap.toggleMinimap(); e.preventDefault(); return; }
         if (e.code === "KeyM" && !typingInSearch) { Music.toggle(); return; }
         if (e.code !== "Escape") return;
+        // A confirmation guard (restart / exit / save-slot delete-overwrite) backs
+        // out first, wherever it was raised (pause OR the Saves screen).
+        if (Pause.pendingAction) { Pause.hideConfirm(); return; }
+        if (SavesUI.open) { SavesUI.closeScreen(); return; }
+        if (CloudUI.overlay && CloudUI.overlay.classList && !CloudUI.overlay.classList.contains("hidden")) { CloudUI.closeList(); return; }
         if (Shop.open) { Shop.closeShop(); return; }
         if (Anvil.open) { Anvil.close(); return; }
         if (Inventory.open) { Inventory.close(); return; }
@@ -9479,7 +9962,6 @@ import {
         if (Crafting.open) { Crafting.close(); return; }
         if (CastleUI.open) { CastleUI.close(); return; }
         if (QuestLog.open) { QuestLog.close(); return; }
-        if (paused && Pause.pendingAction) { Pause.hideConfirm(); return; }
         Pause.toggle();
       });
 
@@ -9612,6 +10094,11 @@ import {
       CloudSave, CloudUI, makeGoogleDriveClient, CLOUD_KEY,
       CLOUD_AUTOSAVE_MS, CLOUD_HISTORY_MS, CLOUD_MAX_SLOTS, CLOUD_MANUAL_NAME, CLOUD_AUTO_PREFIX,
       cloudAutosaveDue, cloudPrune, cloudNewer, cloudAutoName, cloudParseAuto,
+      // ---- Save slots: multiple named manual saves + management (Task 18) ----
+      SAVE_VERSION,
+      SaveSlots, SavesUI, SLOTS_KEY, SLOTS_VERSION, SLOT_COUNT, SLOT_NAME_MAX,
+      sanitizeSlotName, defaultSlotName, slotMetaFromPayload, normalizeSlotStore,
+      listSlots, nextFreeSlot, putSlotRecord, renameSlotRecord, deleteSlotRecord, fmtPlaytime,
       // ---- Internationalization (Task 7) ----
       I18N, LOCALES, RU, t, plural, applyLocale, LOCALE_KEY, localGet,
       tItemName, tItemDesc, tZoneName, tQuestTitle, tQuestStory, tNpcName, tNpcIntro,
