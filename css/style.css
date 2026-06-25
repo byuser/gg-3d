@@ -30,6 +30,9 @@ html, body {
 .hidden { display: none !important; }
 
 /* ---------- Overlays (start / win) ---------- */
+/* Overlays fill the *safe* viewport (100dvh minus the device insets) and centre
+   their panel; the panel itself scrolls internally so menus never clip off-screen
+   on tall/narrow phones like the Galaxy S24 Ultra (Task 16). */
 .overlay {
   position: fixed;
   inset: 0;
@@ -37,7 +40,11 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding:
+    max(16px, env(safe-area-inset-top))
+    max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
   background:
     radial-gradient(1200px 700px at 50% -10%, rgba(108, 198, 255, 0.18), transparent 60%),
     linear-gradient(160deg, #0b0f1a 0%, #131a2e 100%);
@@ -53,6 +60,52 @@ html, body {
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(8px);
 }
+
+/* Auto-fitting menu panels (start screen + pause): a flex column capped at the
+   safe viewport height with internal scrolling, so every control stays reachable
+   at any resolution (progressive disclosure handles the rest). */
+.menu-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: min(100dvh - 32px, 100vh - 32px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.menu-panel .menu-actions { margin-top: 4px; }
+
+/* Collapsible secondary sub-panels (Controls / Language / Audio / Graphics /
+   Cloud saves). Native <details> so it works headless and is keyboard-accessible. */
+.sub-panel {
+  text-align: left;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.sub-panel > summary {
+  cursor: pointer; list-style: none;
+  padding: 12px 16px; font-size: 15px; font-weight: 700; color: var(--accent2);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: 44px; box-sizing: border-box;
+}
+.sub-panel > summary::-webkit-details-marker { display: none; }
+.sub-panel > summary::after {
+  content: "▸"; font-size: 13px; opacity: 0.7; transition: transform 0.15s ease;
+}
+.sub-panel[open] > summary::after { transform: rotate(90deg); }
+.sub-panel > summary:hover { background: rgba(255, 255, 255, 0.05); }
+.sub-panel > :not(summary) { margin-left: 14px; margin-right: 14px; }
+.sub-panel > .controls,
+.sub-panel > .lang-select,
+.sub-panel > .audio-settings,
+.sub-panel > .gfx-select,
+.sub-panel > .cloud-settings { margin-bottom: 14px; }
+.sub-panel .lang-select,
+.sub-panel .gfx-select { margin-top: 8px; }
+.sub-panel .audio-settings,
+.sub-panel .cloud-settings { margin-top: 4px; }
 
 .panel h1 {
   margin: 0 0 8px;
@@ -108,7 +161,6 @@ html, body {
 .stat #score { color: var(--accent); }
 .stat #coins { color: #ffd34e; }
 .stat #location { color: var(--accent2); }
-.stat #monsters { color: #ff8a8a; }
 /* The current-location chip stands out a touch from the other stats. */
 .loc-stat {
   background: rgba(20, 26, 44, 0.72);
@@ -529,17 +581,7 @@ html, body {
 }
 .cast-btn:active { transform: scale(0.92); }
 
-/* Inventory (bag) button on touch — sits above the action button. */
-.bag-btn {
-  position: absolute; right: max(26px, env(safe-area-inset-right)); bottom: 130px;
-  width: 64px; height: 64px; border-radius: 50%; border: 0;
-  background: linear-gradient(135deg, #5be0a0, #6cc6ff); color: #15233b;
-  font-size: 26px; pointer-events: auto; touch-action: none;
-  box-shadow: 0 8px 20px rgba(91, 224, 160, 0.4);
-}
-.bag-btn:active { transform: scale(0.92); }
-
-/* ---------- HUD icon buttons (inventory / music) ---------- */
+/* ---------- HUD icon buttons (inventory / craft / quest) ---------- */
 .icon-btn {
   position: absolute; top: max(12px, env(safe-area-inset-top));
   width: 44px; height: 44px; border-radius: 12px; cursor: pointer;
@@ -551,15 +593,14 @@ html, body {
 .icon-btn:hover { background: rgba(11, 15, 26, 0.85); }
 .icon-btn:active { transform: scale(0.92); }
 /* Row, right→left: fullscreen, pause(+52), inventory(+104), skills(+156),
-   craft(+208), quest(+260), map(+312), music(+364). */
+   craft(+208), quest(+260). The map (minimap-tap) and music (settings mute)
+   buttons were removed in Task 16. */
 .inv-btn    { right: calc(max(12px, env(safe-area-inset-right)) + 104px); }
 .skills-btn { right: calc(max(12px, env(safe-area-inset-right)) + 156px); }
 .craft-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 208px); }
 .quest-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 260px); }
-.map-btn    { right: calc(max(12px, env(safe-area-inset-right)) + 312px); }
-.music-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 364px); }
-/* On phones the row holds seven buttons; shrink + tighten them so the row keeps
-   the same footprint it had before the ✨ skills button (no crowding the chips). */
+/* On phones the row holds five buttons; shrink + tighten them so the row keeps a
+   compact footprint and never crowds the top status chips. */
 @media (pointer: coarse) {
   .fs-btn, .pause-btn, .icon-btn { width: 38px; height: 38px; font-size: 18px; }
   .pause-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 44px); }
@@ -567,8 +608,6 @@ html, body {
   .skills-btn { right: calc(max(12px, env(safe-area-inset-right)) + 132px); }
   .craft-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 176px); }
   .quest-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 220px); }
-  .map-btn    { right: calc(max(12px, env(safe-area-inset-right)) + 264px); }
-  .music-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 308px); }
 }
 
 /* ---------- Shop Buy/Sell tabs ---------- */
@@ -796,6 +835,43 @@ html, body {
   .skill-slot { width: 50px; height: 50px; }
 }
 
+/* ---------- One-thumb combat cluster (touch, landscape) — Task 16 ----------
+   In landscape the 3 skill quick-slots, the interact (E) button and the fire
+   (✨) button gather into an ergonomic arc in the bottom-right (right-thumb)
+   zone, all within a comfortable thumb sweep and clear of the left-thumb
+   joystick + the safe-area insets. Tap targets stay ≥ 48 px. */
+@media (pointer: coarse) and (orientation: landscape) {
+  /* Lower-arc primaries: fire (upper) and interact (lower), bottom-right. */
+  .action-btn {
+    right: max(28px, env(safe-area-inset-right)); bottom: max(28px, env(safe-area-inset-bottom));
+    width: 76px; height: 76px;
+  }
+  .cast-btn {
+    right: calc(max(28px, env(safe-area-inset-right)) + 86px);
+    bottom: calc(max(28px, env(safe-area-inset-bottom)) + 30px);
+    width: 80px; height: 80px;
+  }
+  /* The 3 skill slots curve along the upper arc, above the fire/E primaries,
+     each ≥ 48 px and reachable in the same thumb sweep. */
+  .skill-bar {
+    left: auto; transform: none;
+    right: max(28px, env(safe-area-inset-right));
+    bottom: calc(max(28px, env(safe-area-inset-bottom)) + 118px);
+    flex-direction: row-reverse; gap: 10px;
+  }
+  .skill-bar .skill-slot { width: 56px; height: 56px; }
+  /* Stagger the slots into an arc: the inner slot rides a touch higher. */
+  .skill-bar .skill-slot:nth-child(1) { transform: translateY(34px); }
+  .skill-bar .skill-slot:nth-child(2) { transform: translateY(6px); }
+  .skill-bar .skill-slot:nth-child(3) { transform: translateY(-14px); }
+  .skill-bar .skill-slot:nth-child(1):active { transform: translateY(34px) scale(0.92); }
+  .skill-bar .skill-slot:nth-child(2):active { transform: translateY(6px) scale(0.92); }
+  .skill-bar .skill-slot:nth-child(3):active { transform: translateY(-14px) scale(0.92); }
+  /* Keep the potion belt out of the joystick's bottom-left corner. */
+  .potion-bar { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 8px); left: 168px; }
+  .buff-bar { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 70px); left: 168px; }
+}
+
 /* ---------- Skills & fusion overlay ---------- */
 .skills-panel { max-width: 720px; }
 .skills-header {
@@ -858,6 +934,38 @@ html, body {
 .sk-mini.on { background: linear-gradient(135deg, var(--accent2), #8be0ff); color: #15233b; border-color: transparent; }
 .sk-mini.danger { color: #ff9a9a; }
 .sk-mini.fuse-pick.on { background: linear-gradient(135deg, #c77dff, #9f7dff); color: #fff; }
+
+/* ---------- Drag-and-drop skill slotting (Task 16) ----------
+   A roster card or a filled quick-bar slot is draggable onto a slot (pointer
+   events drive it); a tap picks it up as an accessible fallback. */
+.sk-slot-hint { font-size: 12px; opacity: 0.72; margin: 2px 0 8px; }
+.draggable { cursor: grab; touch-action: none; }
+.draggable:active { cursor: grabbing; }
+.sk-drag-grip { font-size: 13px; opacity: 0.4; letter-spacing: -2px; cursor: grab; }
+.skill-card.draggable .sk-card-head { user-select: none; }
+.skill-card.picked,
+.sk-slot-card.picked {
+  outline: 2px dashed var(--accent2); outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(108, 198, 255, 0.18);
+}
+.sk-slotted-tag {
+  font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 999px;
+  background: rgba(108, 198, 255, 0.18); color: #8fd0ff; white-space: nowrap;
+}
+/* The slot a drag is hovering over highlights as the drop destination. */
+.sk-slot-card.sk-droptarget { transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease; }
+.sk-slot-card.drop-hot {
+  border-color: var(--accent) !important;
+  background: rgba(255, 207, 92, 0.12);
+  box-shadow: 0 0 0 3px rgba(255, 207, 92, 0.2);
+}
+.skill-card.dragging, .sk-slot-card.dragging { opacity: 0.5; }
+/* The floating "ghost" that follows the pointer mid-drag. */
+.sk-drag-ghost {
+  position: fixed; z-index: 60; pointer-events: none;
+  transform: translate(-50%, -50%); font-size: 30px; line-height: 1;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.6));
+}
 
 /* ---------- Adventure HUD: materials, relics, quest tracker ---------- */
 .materials-bar {
@@ -966,8 +1074,12 @@ html, body {
 /* ============================================================================
    Minimap · compass · world map (Task 13)
    ============================================================================ */
-/* Corner minimap — top-right, under the icon-button row. North-up, tappable. */
+/* Corner minimap — top-right, under the icon-button row. North-up, tappable (it
+   is now the single entry point to the full map — Task 16 removed the 🗺️ button,
+   so an always-on hint label makes the tap target obvious). It is a real <button>
+   for accessibility; reset the native chrome. */
 .minimap {
+  appearance: none; padding: 0; margin: 0; color: var(--ink); text-align: center;
   position: absolute; top: max(64px, calc(env(safe-area-inset-top) + 56px));
   right: max(12px, env(safe-area-inset-right));
   width: 150px; height: 150px; border-radius: 14px; overflow: hidden;
@@ -976,11 +1088,19 @@ html, body {
   transition: transform 0.1s ease;
 }
 .minimap:active { transform: scale(0.97); }
+.minimap:hover { border-color: rgba(255, 207, 92, 0.5); }
 .minimap-canvas { display: block; width: 100%; height: 100%; }
 .minimap-n {
   position: absolute; top: 4px; left: 50%; transform: translateX(-50%);
   font-size: 11px; font-weight: 800; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.8);
   pointer-events: none;
+}
+.minimap-hint {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.2px; color: #eaf2ff;
+  padding: 3px 2px; background: linear-gradient(0deg, rgba(8, 11, 22, 0.82), transparent);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); pointer-events: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 /* Guided-waypoint compass — a pill just under the minimap. */

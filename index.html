@@ -22,53 +22,72 @@
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
-  <!-- Loading / start screen -->
+  <!-- Loading / start screen. Lays out as an auto-fitting column that never
+       clips: the primary actions (Start / Load) stay visible while secondary
+       settings collapse into labelled sub-panels, and the panel scrolls
+       internally when content exceeds the safe viewport (Task 16). -->
   <div id="overlay" class="overlay">
-    <div class="panel">
+    <div class="panel menu-panel">
       <h1>Good Game <span class="badge">3D</span></h1>
       <p class="tagline" data-i18n-html="start.tagline">Run with Lily across a living island of <b>separate lands</b> — meadow vale,
         whispering wood, salt shore, frostpeak trail and the boss lairs. <b>Roaming monsters</b>
         guard each place and <b>respawn</b> over time; <b>travel</b> between lands through paths,
         bridges and cave mouths. Follow the <b>chaptered main quest</b> (with optional <b>side quests</b>),
         <b>gather &amp; craft</b>, raise a <b>castle</b> from five relics, then slay the <b>dragon</b> to win!</p>
-      <ul class="controls">
-        <li><b data-i18n="ctrl.move">Move</b><span data-i18n="ctrl.moveKeys">WASD / Arrows · or the on-screen stick</span></li>
-        <li><b data-i18n="ctrl.attack">Attack</b><span data-i18n="ctrl.attackKeys">Space / F · or the ✨ button</span></li>
-        <li><b data-i18n="ctrl.skills">Skills</b><span data-i18n="ctrl.skillsKeys">1 / 2 / 3 · or tap a quick-bar slot</span></li>
-        <li><b data-i18n="ctrl.interact">Interact / talk / gather</b><span data-i18n="ctrl.interactKeys">E · or the action button</span></li>
-        <li><b data-i18n="ctrl.inventory">Inventory</b><span data-i18n="ctrl.inventoryKeys">I · or the 🎒 button</span></li>
-        <li><b data-i18n="ctrl.craft">Craft · Quests</b><span data-i18n="ctrl.craftKeys">C · J · or the 🛠️ 📜 buttons</span></li>
-        <li><b data-i18n="ctrl.map">Map</b><span data-i18n="ctrl.mapKeys">Tab · the 🗺️ button · N toggles the minimap</span></li>
-        <li><b data-i18n="ctrl.travel">Travel</b><span data-i18n="ctrl.travelKeys">walk into a path / bridge / cave portal</span></li>
-      </ul>
-      <button id="startBtn" class="start-btn" data-i18n="start.startBtn">Start Adventure</button>
-      <button id="loadBtn" class="start-btn secondary-btn" data-i18n="start.loadBtn">Load Progress</button>
+      <!-- Primary actions: always visible at the top of the menu. -->
+      <div class="menu-actions">
+        <button id="startBtn" class="start-btn" data-i18n="start.startBtn">Start Adventure</button>
+        <button id="loadBtn" class="start-btn secondary-btn" data-i18n="start.loadBtn">Load Progress</button>
+      </div>
       <input id="loadFile" type="file" accept="application/json,.json" hidden />
       <p class="hint" id="loadHint" data-i18n="hint.loading">Loading engine…</p>
-      <!-- Language selector (English / Russian) — also available in the pause menu. -->
-      <div class="lang-select" role="group" aria-label="Language">
-        <span class="lang-label" data-i18n="settings.language">Language</span>
-        <button id="langEn" class="lang-btn" lang="en">EN</button>
-        <button id="langRu" class="lang-btn" lang="ru">RU</button>
-      </div>
-      <!-- Audio mixer: volume sliders + mute (mirrored in the pause settings). -->
-      <div class="audio-settings" role="group" aria-label="Audio">
-        <span class="lang-label" data-i18n="settings.audio">Audio</span>
-        <div class="vol-row"><label for="vol_master" data-i18n="settings.volMaster">Master</label><input id="vol_master" class="vol-slider" type="range" min="0" max="100" value="90" aria-label="Master volume" /></div>
-        <div class="vol-row"><label for="vol_music" data-i18n="settings.volMusic">Music</label><input id="vol_music" class="vol-slider" type="range" min="0" max="100" value="70" aria-label="Music volume" /></div>
-        <div class="vol-row"><label for="vol_sfx" data-i18n="settings.volSfx">Effects</label><input id="vol_sfx" class="vol-slider" type="range" min="0" max="100" value="85" aria-label="Effects volume" /></div>
-        <div class="vol-row"><label for="vol_ambience" data-i18n="settings.volAmbience">Ambience</label><input id="vol_ambience" class="vol-slider" type="range" min="0" max="100" value="75" aria-label="Ambience volume" /></div>
-        <button id="muteToggle" class="lang-btn mute-btn" data-i18n="settings.mute">Mute all</button>
-      </div>
-      <!-- Cloud saves (opt-in Google Drive). Degrades cleanly when unconfigured. -->
-      <div class="cloud-settings" role="group" aria-label="Cloud saves">
-        <span class="lang-label" data-i18n="settings.cloud">Cloud Saves</span>
-        <p id="cloudStatus" class="cloud-status" data-i18n="cloud.notConfigured">Cloud saves need a Google client ID — see the README to enable.</p>
-        <div class="cloud-btn-row">
-          <button id="cloudSignBtn" class="lang-btn cloud-btn" data-i18n="cloud.signIn">Sign in with Google</button>
-          <button id="cloudListBtn" class="lang-btn cloud-btn" data-i18n="cloud.list">Cloud saves…</button>
+
+      <!-- Secondary content folded into labelled, on-demand sub-panels. -->
+      <details class="sub-panel">
+        <summary data-i18n="settings.controls">Controls</summary>
+        <ul class="controls">
+          <li><b data-i18n="ctrl.move">Move</b><span data-i18n="ctrl.moveKeys">WASD / Arrows · or the on-screen stick</span></li>
+          <li><b data-i18n="ctrl.attack">Attack</b><span data-i18n="ctrl.attackKeys">Space / F · or the ✨ button</span></li>
+          <li><b data-i18n="ctrl.skills">Skills</b><span data-i18n="ctrl.skillsKeys">1 / 2 / 3 · or tap a quick-bar slot</span></li>
+          <li><b data-i18n="ctrl.interact">Interact / talk / gather</b><span data-i18n="ctrl.interactKeys">E · or the action button</span></li>
+          <li><b data-i18n="ctrl.inventory">Inventory</b><span data-i18n="ctrl.inventoryKeys">I · or the 🎒 button</span></li>
+          <li><b data-i18n="ctrl.craft">Craft · Quests</b><span data-i18n="ctrl.craftKeys">C · J · or the 🛠️ 📜 buttons</span></li>
+          <li><b data-i18n="ctrl.map">Map</b><span data-i18n="ctrl.mapKeys">Tab · tap the minimap · N toggles the minimap</span></li>
+          <li><b data-i18n="ctrl.travel">Travel</b><span data-i18n="ctrl.travelKeys">walk into a path / bridge / cave portal</span></li>
+        </ul>
+      </details>
+
+      <details class="sub-panel">
+        <summary data-i18n="settings.language">Language</summary>
+        <div class="lang-select" role="group" aria-label="Language">
+          <button id="langEn" class="lang-btn" lang="en">EN</button>
+          <button id="langRu" class="lang-btn" lang="ru">RU</button>
         </div>
-      </div>
+      </details>
+
+      <details class="sub-panel">
+        <summary data-i18n="settings.audio">Audio</summary>
+        <!-- Audio mixer: volume sliders + mute (mirrored in the pause settings). -->
+        <div class="audio-settings" role="group" aria-label="Audio">
+          <div class="vol-row"><label for="vol_master" data-i18n="settings.volMaster">Master</label><input id="vol_master" class="vol-slider" type="range" min="0" max="100" value="90" aria-label="Master volume" /></div>
+          <div class="vol-row"><label for="vol_music" data-i18n="settings.volMusic">Music</label><input id="vol_music" class="vol-slider" type="range" min="0" max="100" value="70" aria-label="Music volume" /></div>
+          <div class="vol-row"><label for="vol_sfx" data-i18n="settings.volSfx">Effects</label><input id="vol_sfx" class="vol-slider" type="range" min="0" max="100" value="85" aria-label="Effects volume" /></div>
+          <div class="vol-row"><label for="vol_ambience" data-i18n="settings.volAmbience">Ambience</label><input id="vol_ambience" class="vol-slider" type="range" min="0" max="100" value="75" aria-label="Ambience volume" /></div>
+          <button id="muteToggle" class="lang-btn mute-btn" data-i18n="settings.mute">Mute all</button>
+        </div>
+      </details>
+
+      <details class="sub-panel">
+        <summary data-i18n="settings.cloud">Cloud Saves</summary>
+        <!-- Cloud saves (opt-in Google Drive). Degrades cleanly when unconfigured. -->
+        <div class="cloud-settings" role="group" aria-label="Cloud saves">
+          <p id="cloudStatus" class="cloud-status" data-i18n="cloud.notConfigured">Cloud saves need a Google client ID — see the README to enable.</p>
+          <div class="cloud-btn-row">
+            <button id="cloudSignBtn" class="lang-btn cloud-btn" data-i18n="cloud.signIn">Sign in with Google</button>
+            <button id="cloudListBtn" class="lang-btn cloud-btn" data-i18n="cloud.list">Cloud saves…</button>
+          </div>
+        </div>
+      </details>
     </div>
   </div>
 
@@ -80,7 +99,6 @@
         <span class="xp-track"><span id="xpFill" class="xp-fill"></span></span></div>
       <div class="stat">⭐ <span id="score">0</span></div>
       <div class="stat">🪙 <span id="coins">0</span></div>
-      <div class="stat">👹 <span id="monsters">0</span></div>
       <div class="stat" id="clock">☀️ 07:00</div>
       <div class="stat" id="weather">☀️ Clear</div>
       <div id="prompt" class="prompt hidden" data-i18n-html="prompt.pressE">Press <b>E</b></div>
@@ -117,10 +135,11 @@
 
     <!-- Corner minimap: the current land, north-up, with the player, portals,
          NPCs, resources and the active waypoint. Tap it to open the full map. -->
-    <div id="minimap" class="minimap" data-i18n-title="map.openTitle" title="Open map (Tab)">
+    <button id="minimap" class="minimap" data-i18n-title="map.openTitle" data-i18n-aria="map.openTitle" title="Open map (Tab)" aria-label="Open map">
       <canvas id="minimapCanvas" class="minimap-canvas" width="150" height="150"></canvas>
       <span class="minimap-n">N</span>
-    </div>
+      <span class="minimap-hint" data-i18n="map.tapHint">Tap to open map</span>
+    </button>
 
     <!-- Skill quick bar: up to 3 active skills (cast with 1/2/3 or a tap). -->
     <div id="skillBar" class="skill-bar"></div>
@@ -136,17 +155,19 @@
     <button id="skillsBtn" class="icon-btn skills-btn" data-i18n-title="btnTitle.skills" data-i18n-aria="btnAria.skills" title="Skills (K)" aria-label="Open skills">✨</button>
     <button id="craftBtn" class="icon-btn craft-btn" data-i18n-title="btnTitle.crafting" data-i18n-aria="btnAria.crafting" title="Crafting (C)" aria-label="Open crafting">🛠️</button>
     <button id="questBtn" class="icon-btn quest-btn" data-i18n-title="btnTitle.questLog" data-i18n-aria="btnAria.questLog" title="Quest log (J)" aria-label="Open quest log">📜</button>
-    <button id="mapBtn" class="icon-btn map-btn" data-i18n-title="btnTitle.map" data-i18n-aria="btnAria.map" title="World map (Tab)" aria-label="Open world map">🗺️</button>
-    <button id="musicBtn" class="icon-btn music-btn" data-i18n-title="btnTitle.muteMusic" data-i18n-aria="btnAria.music" title="Mute music (M)" aria-label="Toggle music">🔊</button>
     <div id="toast" class="toast"></div>
   </div>
 
-  <!-- Touch controls (shown only on touch devices) -->
+  <!-- Touch controls (shown only on touch devices). The right-thumb action
+       cluster — the 3 skill quick-slots, the interact (E) button and the fire
+       (✨) button — forms a one-thumb arc in the bottom-right in landscape; the
+       left-thumb joystick stays clear (Task 16). -->
   <div id="touch" class="touch hidden">
     <div id="joystick" class="joystick"><div id="stick" class="stick"></div></div>
-    <button id="castBtn" class="cast-btn">✨</button>
-    <button id="actionBtn" class="action-btn">E</button>
-    <button id="bagBtn" class="bag-btn" data-i18n-title="btnAria.inventory" data-i18n-aria="btnAria.inventory" title="Inventory" aria-label="Open inventory">🎒</button>
+    <div class="action-cluster">
+      <button id="castBtn" class="cast-btn">✨</button>
+      <button id="actionBtn" class="action-btn">E</button>
+    </div>
   </div>
 
   <!-- Game over screen -->
@@ -168,9 +189,11 @@
     </div>
   </div>
 
-  <!-- In-game pause menu: opens with ☰ / Esc and freezes the game. -->
+  <!-- In-game pause menu: opens with ☰ / Esc and freezes the game. Auto-fits at
+       any resolution — primary actions stay visible, settings fold into labelled
+       sub-panels, and the panel scrolls internally so nothing clips (Task 16). -->
   <div id="pauseMenu" class="overlay hidden">
-    <div class="panel">
+    <div class="panel menu-panel">
       <h1 data-i18n="pause.title">Paused</h1>
       <p class="tagline" id="pauseStats">Wave <b>0</b> · Score <b>0</b></p>
       <div class="menu-actions">
@@ -180,48 +203,56 @@
         <button id="exitBtn" class="start-btn danger-btn" data-i18n="pause.exit">Exit to Menu</button>
       </div>
 
-      <!-- Language selector inside the pause settings (applies live). -->
-      <div class="lang-select" role="group" aria-label="Language">
-        <span class="lang-label" data-i18n="settings.language">Language</span>
-        <button id="langEnPause" class="lang-btn" lang="en">EN</button>
-        <button id="langRuPause" class="lang-btn" lang="ru">RU</button>
-      </div>
-
-      <!-- Graphics-quality selector: Auto-detect (default) or force a tier.
-           Applies via a quick reload that keeps your progress. -->
-      <div class="gfx-select" role="group" aria-label="Graphics quality">
-        <span class="lang-label" data-i18n="settings.graphics">Graphics</span>
-        <button id="gfxAuto" class="lang-btn gfx-btn" data-i18n="settings.gfxAuto">Auto</button>
-        <button id="gfxHigh" class="lang-btn gfx-btn" data-i18n="settings.gfxHigh">High</button>
-        <button id="gfxMedium" class="lang-btn gfx-btn" data-i18n="settings.gfxMedium">Medium</button>
-        <button id="gfxLow" class="lang-btn gfx-btn" data-i18n="settings.gfxLow">Low</button>
-      </div>
-      <p id="gfxHint" class="gfx-hint" data-i18n="settings.gfxReload">Reloads to apply · progress is kept</p>
-
-      <!-- Audio mixer: volume sliders + mute (applies live; mirrors the start screen). -->
-      <div class="audio-settings" role="group" aria-label="Audio">
-        <span class="lang-label" data-i18n="settings.audio">Audio</span>
-        <div class="vol-row"><label for="vol_masterP" data-i18n="settings.volMaster">Master</label><input id="vol_masterP" class="vol-slider" type="range" min="0" max="100" value="90" aria-label="Master volume" /></div>
-        <div class="vol-row"><label for="vol_musicP" data-i18n="settings.volMusic">Music</label><input id="vol_musicP" class="vol-slider" type="range" min="0" max="100" value="70" aria-label="Music volume" /></div>
-        <div class="vol-row"><label for="vol_sfxP" data-i18n="settings.volSfx">Effects</label><input id="vol_sfxP" class="vol-slider" type="range" min="0" max="100" value="85" aria-label="Effects volume" /></div>
-        <div class="vol-row"><label for="vol_ambienceP" data-i18n="settings.volAmbience">Ambience</label><input id="vol_ambienceP" class="vol-slider" type="range" min="0" max="100" value="75" aria-label="Ambience volume" /></div>
-        <button id="muteToggleP" class="lang-btn mute-btn" data-i18n="settings.mute">Mute all</button>
-      </div>
-
-      <!-- Cloud saves (opt-in Google Drive): sign-in, manual save, autosave toggle,
-           and the browse overlay. Disabled cleanly when not configured/ signed in. -->
-      <div class="cloud-settings" role="group" aria-label="Cloud saves">
-        <span class="lang-label" data-i18n="settings.cloud">Cloud Saves</span>
-        <p id="cloudStatusP" class="cloud-status" data-i18n="cloud.notConfigured">Cloud saves need a Google client ID — see the README to enable.</p>
-        <div class="cloud-btn-row">
-          <button id="cloudSignBtnP" class="lang-btn cloud-btn" data-i18n="cloud.signIn">Sign in with Google</button>
-          <button id="cloudAutoBtnP" class="lang-btn cloud-btn" data-i18n="cloud.autosaveOff">Autosave: Off</button>
+      <details class="sub-panel">
+        <summary data-i18n="settings.language">Language</summary>
+        <!-- Language selector inside the pause settings (applies live). -->
+        <div class="lang-select" role="group" aria-label="Language">
+          <button id="langEnPause" class="lang-btn" lang="en">EN</button>
+          <button id="langRuPause" class="lang-btn" lang="ru">RU</button>
         </div>
-        <div class="cloud-btn-row">
-          <button id="cloudSaveBtnP" class="lang-btn cloud-btn" data-i18n="cloud.save">Save to Drive</button>
-          <button id="cloudListBtnP" class="lang-btn cloud-btn" data-i18n="cloud.list">Cloud saves…</button>
+      </details>
+
+      <details class="sub-panel">
+        <summary data-i18n="settings.graphics">Graphics</summary>
+        <!-- Graphics-quality selector: Auto-detect (default) or force a tier.
+             Applies via a quick reload that keeps your progress. -->
+        <div class="gfx-select" role="group" aria-label="Graphics quality">
+          <button id="gfxAuto" class="lang-btn gfx-btn" data-i18n="settings.gfxAuto">Auto</button>
+          <button id="gfxHigh" class="lang-btn gfx-btn" data-i18n="settings.gfxHigh">High</button>
+          <button id="gfxMedium" class="lang-btn gfx-btn" data-i18n="settings.gfxMedium">Medium</button>
+          <button id="gfxLow" class="lang-btn gfx-btn" data-i18n="settings.gfxLow">Low</button>
         </div>
-      </div>
+        <p id="gfxHint" class="gfx-hint" data-i18n="settings.gfxReload">Reloads to apply · progress is kept</p>
+      </details>
+
+      <details class="sub-panel">
+        <summary data-i18n="settings.audio">Audio</summary>
+        <!-- Audio mixer: volume sliders + mute (applies live; mirrors the start screen). -->
+        <div class="audio-settings" role="group" aria-label="Audio">
+          <div class="vol-row"><label for="vol_masterP" data-i18n="settings.volMaster">Master</label><input id="vol_masterP" class="vol-slider" type="range" min="0" max="100" value="90" aria-label="Master volume" /></div>
+          <div class="vol-row"><label for="vol_musicP" data-i18n="settings.volMusic">Music</label><input id="vol_musicP" class="vol-slider" type="range" min="0" max="100" value="70" aria-label="Music volume" /></div>
+          <div class="vol-row"><label for="vol_sfxP" data-i18n="settings.volSfx">Effects</label><input id="vol_sfxP" class="vol-slider" type="range" min="0" max="100" value="85" aria-label="Effects volume" /></div>
+          <div class="vol-row"><label for="vol_ambienceP" data-i18n="settings.volAmbience">Ambience</label><input id="vol_ambienceP" class="vol-slider" type="range" min="0" max="100" value="75" aria-label="Ambience volume" /></div>
+          <button id="muteToggleP" class="lang-btn mute-btn" data-i18n="settings.mute">Mute all</button>
+        </div>
+      </details>
+
+      <details class="sub-panel">
+        <summary data-i18n="settings.cloud">Cloud Saves</summary>
+        <!-- Cloud saves (opt-in Google Drive): sign-in, manual save, autosave toggle,
+             and the browse overlay. Disabled cleanly when not configured/ signed in. -->
+        <div class="cloud-settings" role="group" aria-label="Cloud saves">
+          <p id="cloudStatusP" class="cloud-status" data-i18n="cloud.notConfigured">Cloud saves need a Google client ID — see the README to enable.</p>
+          <div class="cloud-btn-row">
+            <button id="cloudSignBtnP" class="lang-btn cloud-btn" data-i18n="cloud.signIn">Sign in with Google</button>
+            <button id="cloudAutoBtnP" class="lang-btn cloud-btn" data-i18n="cloud.autosaveOff">Autosave: Off</button>
+          </div>
+          <div class="cloud-btn-row">
+            <button id="cloudSaveBtnP" class="lang-btn cloud-btn" data-i18n="cloud.save">Save to Drive</button>
+            <button id="cloudListBtnP" class="lang-btn cloud-btn" data-i18n="cloud.list">Cloud saves…</button>
+          </div>
+        </div>
+      </details>
 
       <!-- Confirmation guard for the destructive Restart / Exit actions. -->
       <div id="confirmDialog" class="confirm-dialog hidden">
