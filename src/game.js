@@ -136,7 +136,6 @@ import {
     if (typeof WorldMap !== "undefined" && WorldMap.state) WorldMap.update(0);
     if (typeof Dialogue !== "undefined" && Dialogue.open && Dialogue.npc) Dialogue.render();
     if (typeof Pause !== "undefined" && typeof paused !== "undefined" && paused) Pause.refreshTexts();
-    if (typeof Music !== "undefined" && dom.musicBtn) dom.musicBtn.title = t(Music.on ? "btnTitle.muteMusic" : "btnTitle.playMusic");
     if (typeof AudioUI !== "undefined" && AudioUI.sync) AudioUI.sync();
     if (typeof CloudUI !== "undefined" && CloudUI.sync) CloudUI.sync();
     if (typeof Fullscreen !== "undefined" && Fullscreen.sync) Fullscreen.sync();
@@ -496,7 +495,6 @@ import {
     hud: document.getElementById("hud"),
     score: document.getElementById("score"),
     coins: document.getElementById("coins"),
-    monsters: document.getElementById("monsters"),
     shop: document.getElementById("shop"),
     shopClose: document.getElementById("shopClose"),
     shopDone: document.getElementById("shopDone"),
@@ -527,8 +525,6 @@ import {
     invTabMaterials: document.getElementById("invTabMaterials"),
     invTabPotions: document.getElementById("invTabPotions"),
     invBtn: document.getElementById("invBtn"),
-    bagBtn: document.getElementById("bagBtn"),
-    musicBtn: document.getElementById("musicBtn"),
     healthFill: document.getElementById("healthFill"),
     bossBar: document.getElementById("bossBar"),
     bossName: document.getElementById("bossName"),
@@ -628,7 +624,6 @@ import {
     skillsFusion: document.getElementById("skillsFusion"),
     skillsList: document.getElementById("skillsList"),
     // ---- Minimap, compass + full world map (Task 13) ----
-    mapBtn: document.getElementById("mapBtn"),
     minimap: document.getElementById("minimap"),
     minimapCanvas: document.getElementById("minimapCanvas"),
     compass: document.getElementById("compass"),
@@ -4816,14 +4811,91 @@ import {
   };
 
   // =========================================================================
+  // Drag-to-slot reducer (Task 16) — the PURE model behind drag-and-drop skill
+  // slotting. A drag is described by a `source` (where the pointer went down) and
+  // a `target` (where it came up); this maps the gesture onto the existing pure
+  // slot ops (assignSlot / clearSlot) and returns the list of (op, slot, id)
+  // commands to apply. Kept DOM-free so it unit-tests in isolation.
+  //
+  //   source: { kind: "roster", id }            — a skill card in the roster
+  //         | { kind: "slot",   slot, id }       — a filled quick-bar slot
+  //   target: { kind: "slot",   slot }           — a quick-bar slot (filled/empty)
+  //         | { kind: "void" }                   — empty space / off any slot
+  //         | null                               — no valid drop (cancel)
+  //
+  // Rules (mirroring the behaviour the task describes):
+  //  - roster → slot      : assign that skill to the slot.
+  //  - slot   → other slot: move/swap (assignSlot dedupes; if the target held a
+  //                         skill we put it back into the source slot to swap).
+  //  - slot   → void       : clear the source slot.
+  //  - any    → same slot  : no-op.
+  //  - roster → void       : no-op (nothing to clear).
+  function dragSlotReducer(source, target, slotCount) {
+    const n = slotCount || 0;
+    const out = [];
+    if (!source) return out;
+    const inRange = (s) => typeof s === "number" && s >= 0 && s < n;
+
+    if (source.kind === "roster") {
+      if (target && target.kind === "slot" && inRange(target.slot) && source.id) {
+        out.push({ op: "assign", slot: target.slot, id: source.id });
+      }
+      return out; // roster → void / nothing: no-op
+    }
+
+    if (source.kind === "slot" && inRange(source.slot)) {
+      if (!target || target.kind === "void") {
+        out.push({ op: "clear", slot: source.slot });
+        return out;
+      }
+      if (target.kind === "slot" && inRange(target.slot)) {
+        if (target.slot === source.slot) return out; // dropped on itself: no-op
+        // Swap: the target's current occupant (if any) goes to the source slot.
+        if (target.occupantId) out.push({ op: "assign", slot: source.slot, id: target.occupantId });
+        else out.push({ op: "clear", slot: source.slot });
+        if (source.id) out.push({ op: "assign", slot: target.slot, id: source.id });
+      }
+    }
+    return out;
+  }
+
+  // Pointer-based drag controller (Task 16) — ONE reusable utility for touch +
+  // mouse from a single code path (Pointer Events + setPointerCapture). Feature-
+  // detected: if Pointer Events are unavailable (old browsers / the headless DOM
+  // stub) it stays inert and the accessible tap-to-pick fallback drives slotting.
+  // It is intentionally thin: it only reports drag start/end with the source &
+  // target descriptors the pure reducer consumes — no game logic lives here.
+  function pointerDragSupported() {
+    return typeof window !== "undefined" && typeof window.PointerEvent !== "undefined";
+  }
+  // Resolve which drop target (a registered element) the pointer is over.
+  function dropTargetAt(x, y, targets) {
+    if (typeof document === "undefined" || !document.elementFromPoint) return null;
+    let el = null;
+    try { el = document.elementFromPoint(x, y); } catch (e) { el = null; }
+    while (el) {
+      for (const tgt of targets) if (tgt.el === el) return tgt;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  // =========================================================================
   // Skills overlay (Task 14) — manage the skill roster, FUSE up to three owned
   // skills into a new one, and assign skills to the 3-slot quick bar. Opens with
   // the ✨ button or the "K" key. Mirrors the Inventory overlay's open/close/
   // render contract; freezes gameplay (uiPaused) while open.
+  //
+  // Slotting (Task 16): drag a roster skill onto a quick-bar slot to assign it,
+  // drag a slotted skill onto another slot to move/swap, or drag it onto empty
+  // space to clear it (Pointer Events, touch + mouse). A tap-to-pick → tap-slot
+  // fallback stays available for keyboard / headless / no-Pointer-Events.
   // =========================================================================
   const SkillsUI = {
     state: null, player: null, open: false,
     sel: [],   // skill ids selected for fusion (up to MAX_FUSE_INPUTS)
+    picked: null,  // accessible tap-to-pick: a pending {kind,id|slot} awaiting a slot tap
+    _drag: null,   // live pointer-drag bookkeeping (the floating ghost + source)
 
     init(state, player) { this.state = state; this.player = player; },
 
@@ -4841,6 +4913,7 @@ import {
     close() {
       if (!this.open) return;
       this.open = false; uiPaused = false;
+      this.picked = null;
       if (dom.skills) dom.skills.classList.add("hidden");
     },
 
@@ -4854,6 +4927,96 @@ import {
     },
     assign(slot, id) { Skills.assignSlot(this.player, slot, id); Sfx.play("ui_click"); this.render(); },
     clear(slot) { Skills.clearSlot(this.player, slot); Sfx.play("ui_click"); this.render(); },
+
+    // Run the pure reducer's commands against the (pure) slot model, then redraw.
+    applyDrag(source, target) {
+      const cmds = dragSlotReducer(source, target, SKILL_SLOTS);
+      if (!cmds.length) { this.render(); return false; }
+      for (const c of cmds) {
+        if (c.op === "assign") Skills.assignSlot(this.player, c.slot, c.id);
+        else if (c.op === "clear") Skills.clearSlot(this.player, c.slot);
+      }
+      Sfx.play("ui_click");
+      this.picked = null;
+      this.render();
+      return true;
+    },
+
+    // Accessible (non-drag) fallback: tap a roster skill or a slot to "pick" it,
+    // then tap a slot (or the same item again to cancel) to complete the move.
+    tapPick(source) {
+      const same = this.picked && this.picked.kind === source.kind &&
+        this.picked.id === source.id && this.picked.slot === source.slot;
+      this.picked = same ? null : source;
+      Sfx.play("ui_click");
+      this.render();
+    },
+    tapSlot(slot, occupantId) {
+      if (!this.picked) {
+        // Nothing picked yet: tapping a filled slot picks it up for a move/clear.
+        if (occupantId != null) this.tapPick({ kind: "slot", slot, id: occupantId });
+        return;
+      }
+      this.applyDrag(this.picked, { kind: "slot", slot, occupantId: occupantId ?? null });
+    },
+
+    // Wire a Pointer-Events drag on a roster card or a quick-bar slot. `source`
+    // is the descriptor handed to the reducer; drop targets are resolved live
+    // from the rendered slot cards. Falls back to tap-to-pick where Pointer
+    // Events aren't available (the listener is simply never attached).
+    _wireDrag(el, source) {
+      if (!el || !pointerDragSupported() || !el.addEventListener) return;
+      el.addEventListener("pointerdown", (e) => {
+        if (e.button != null && e.button !== 0) return;  // primary button / touch only
+        if (typeof e.preventDefault === "function") e.preventDefault();
+        const startX = e.clientX || 0, startY = e.clientY || 0;
+        let dragging = false, ghost = null;
+        try { if (el.setPointerCapture && e.pointerId != null) el.setPointerCapture(e.pointerId); } catch (err) {}
+
+        const beginGhost = () => {
+          dragging = true;
+          el.classList && el.classList.add("dragging");
+          try {
+            ghost = document.createElement("div");
+            ghost.className = "sk-drag-ghost";
+            ghost.textContent = source.icon || "✨";
+            ghost.style.left = startX + "px"; ghost.style.top = startY + "px";
+            (document.body || document.documentElement).appendChild(ghost);
+          } catch (err) { ghost = null; }
+        };
+        const moveGhost = (x, y) => { if (ghost) { ghost.style.left = x + "px"; ghost.style.top = y + "px"; } };
+
+        const onMove = (ev) => {
+          const x = ev.clientX || 0, y = ev.clientY || 0;
+          if (!dragging && (Math.abs(x - startX) > 6 || Math.abs(y - startY) > 6)) beginGhost();
+          if (dragging) {
+            moveGhost(x, y);
+            const tgt = dropTargetAt(x, y, this._dropTargets || []);
+            for (const t2 of (this._dropTargets || [])) t2.el.classList && t2.el.classList.toggle("drop-hot", !!(tgt && tgt.el === t2.el));
+          }
+        };
+        const cleanup = () => {
+          el.removeEventListener("pointermove", onMove);
+          el.removeEventListener("pointerup", onUp);
+          el.removeEventListener("pointercancel", onCancel);
+          el.classList && el.classList.remove("dragging");
+          if (ghost) { try { ghost.remove(); } catch (err) {} ghost = null; }
+          for (const t2 of (this._dropTargets || [])) t2.el.classList && t2.el.classList.remove("drop-hot");
+        };
+        const onUp = (ev) => {
+          const x = ev.clientX || startX, y = ev.clientY || startY;
+          cleanup();
+          if (!dragging) { this.tapPick(source); return; }   // a tap, not a drag
+          const tgt = dropTargetAt(x, y, this._dropTargets || []);
+          const target = tgt ? { kind: "slot", slot: tgt.slot, occupantId: tgt.occupantId } : { kind: "void" };
+          this.applyDrag(source, target);
+        };
+        const onCancel = () => { const was = dragging; cleanup(); if (!was) this.tapPick(source); };
+        el.addEventListener("pointermove", onMove);
+        el.addEventListener("pointerup", onUp);
+        el.addEventListener("pointercancel", onCancel);
+      });
+    },
     doFuse() {
       const made = Skills.fuse(this.state, this.player, this.sel);
       if (made) { this.sel = []; updateSkillsHud(this.player); this.render(); }
@@ -4906,20 +5069,35 @@ import {
       if (!dom.skillsToolbar) return;
       const pr = this.player.progress;
       dom.skillsToolbar.innerHTML = "";
+      this._dropTargets = [];   // rebuilt every render so drops resolve to live cards
       const title = document.createElement("div");
       title.className = "sk-section-title"; title.textContent = t("skills.toolbar");
       dom.skillsToolbar.appendChild(title);
+      const hint = document.createElement("p");
+      hint.className = "sk-fuse-hint"; hint.textContent = t("skills.slotHint");
+      dom.skillsToolbar.appendChild(hint);
       const row = document.createElement("div");
       row.className = "sk-slots";
       for (let i = 0; i < SKILL_SLOTS; i++) {
-        const def = Skills.def(this.player, pr.slots[i]);
+        const id = pr.slots[i];
+        const def = Skills.def(this.player, id);
         const card = document.createElement("div");
-        card.className = "sk-slot-card" + (def ? " filled" : "");
+        card.className = "sk-slot-card sk-droptarget" + (def ? " filled" : "");
+        const pickedHere = this.picked && this.picked.kind === "slot" && this.picked.slot === i;
+        if (pickedHere) card.classList.add("picked");
         if (def) card.style.borderColor = (ELEMENTS[def.element] || {}).color || "#888";
         card.innerHTML = `<div class="sk-slot-key">${i + 1}</div>` +
           (def ? `<div class="sk-slot-icon">${def.icon}</div><div class="sk-slot-name">${tSkillName(def)}</div>`
                : `<div class="sk-slot-empty">${t("skills.slotEmpty")}</div>`);
-        if (def) card.appendChild(this._btn("sk-mini danger", t("skills.clear"), () => this.clear(i)));
+        // Register as a drop target for the drag controller.
+        this._dropTargets.push({ el: card, slot: i, occupantId: id || null });
+        // Tap to complete a pending pick, or (on a filled slot) to pick it up.
+        card.addEventListener("click", () => this.tapSlot(i, id || null));
+        // A filled slot is itself draggable (move/swap/clear).
+        if (def) {
+          card.classList.add("draggable");
+          this._wireDrag(card, { kind: "slot", slot: i, id, icon: def.icon });
+        }
         row.appendChild(card);
       }
       dom.skillsToolbar.appendChild(row);
@@ -4974,13 +5152,17 @@ import {
       for (const def of defs) {
         const id = def.id;
         const selected = this.sel.includes(id);
+        const slotted = pr.slots.indexOf(id);
+        const pickedHere = this.picked && this.picked.kind === "roster" && this.picked.id === id;
         const card = document.createElement("div");
-        card.className = "skill-card" + (selected ? " selected" : "");
+        card.className = "skill-card draggable" + (selected ? " selected" : "") + (pickedHere ? " picked" : "");
         card.style.borderLeftColor = (ELEMENTS[def.element] || {}).color || "#888";
         const top = document.createElement("div");
         top.innerHTML =
-          `<div class="sk-card-head"><span class="sk-card-icon">${def.icon}</span>` +
-          `<span class="sk-card-name">${tSkillName(def)}</span>${this._srcTag(def)}</div>` +
+          `<div class="sk-card-head"><span class="sk-drag-grip" aria-hidden="true">⣿</span>` +
+          `<span class="sk-card-icon">${def.icon}</span>` +
+          `<span class="sk-card-name">${tSkillName(def)}</span>${this._srcTag(def)}` +
+          (slotted >= 0 ? `<span class="sk-slotted-tag">${t("skills.slottedTag", { n: slotted + 1 })}</span>` : "") + `</div>` +
           `<div class="sk-chips">${this._chips(def)}</div>` +
           `<div class="sk-card-desc">${tSkillDesc(def)}</div>`;
         card.appendChild(top);
@@ -4988,13 +5170,11 @@ import {
         actions.className = "sk-card-actions";
         actions.appendChild(this._btn("sk-mini fuse-pick" + (selected ? " on" : ""),
           (selected ? "✓ " : "+ ") + t("skills.fuseTag"), () => this.pick(id)));
-        const assignWrap = document.createElement("span");
-        assignWrap.className = "sk-assign";
-        for (let i = 0; i < SKILL_SLOTS; i++)
-          assignWrap.appendChild(this._btn("sk-mini" + (pr.slots[i] === id ? " on" : ""),
-            t("skills.assignSlot", { n: i + 1 }), () => this.assign(i, id)));
-        actions.appendChild(assignWrap);
         card.appendChild(actions);
+        // Drag the whole card onto a quick-bar slot to assign it; a plain tap
+        // (the accessible fallback) picks it up to drop on the next slot tapped.
+        this._wireDrag(top, { kind: "roster", id, icon: def.icon });
+        top.addEventListener("click", () => { if (!pointerDragSupported()) this.tapPick({ kind: "roster", id }); });
         dom.skillsList.appendChild(card);
       }
     },
@@ -6100,7 +6280,6 @@ import {
       this.state.waveTotal = this.target;
       for (let i = 0; i < this.target; i++) this._spawn(this.points[i % this.points.length]);
       if (this.zone.boss && !this.bossDefeated) this._spawnBoss();
-      updateMonsterCounter(this.state);
       this._banner();
     }
 
@@ -6165,7 +6344,6 @@ import {
       } else {
         this.respawnTimer = this.respawnDelay;
       }
-      updateMonsterCounter(this.state);
     }
 
     // A brief "you have entered <zone>" banner (reuses the old wave banner).
@@ -6252,7 +6430,6 @@ import {
       // 6) Fire reach-objectives + refresh the HUD.
       Quests.onReach(toId);
       updateLocationHud(target);
-      updateMonsterCounter(state);
       updateHealthBar(player.health);
     }
   }
@@ -6353,7 +6530,6 @@ import {
     player.setupStartingLoadout();
 
     updateHealthBar(player.health);
-    updateMonsterCounter(state);
     updateCoins(state);
 
     // One-time UI system inits (independent of the active zone).
@@ -6470,7 +6646,6 @@ import {
       updateMonsters(state, player, dt);
       updateItemDrops(state, player, dt);
       updateCoinDrops(state, player, dt);
-      updateMonsterCounter(state);
 
       // Adventure layer: NPCs, harvest nodes, castle, location-reach objectives.
       for (const n of state.npcs) n.update(dt);
@@ -7092,15 +7267,6 @@ import {
     if (dom.shopCoins) dom.shopCoins.textContent = state.coins;
   }
 
-  // Show how many monsters are roaming the current zone (alive, excluding the
-  // pop-on-death animation).
-  function updateMonsterCounter(state) {
-    if (!dom.monsters) return;
-    let left = 0;
-    for (const m of state.monsters) if (m.alive && m.dying <= 0) left++;
-    dom.monsters.textContent = `${left}`;
-  }
-
   // The HUD "current location" chip (set on load + every zone transition).
   function updateLocationHud(zone) {
     if (dom.location && zone) dom.location.textContent = `${zone.icon} ${tZoneName(zone)}`;
@@ -7561,7 +7727,6 @@ import {
     addScore(state, 0);
     updateCoins(state);
     updateLocationHud(ZONE_BY_ID[state.zoneId]);
-    updateMonsterCounter(state);
     WorldMap.update(0);                 // redraw the minimap + restored compass
     if (WorldMapUI.open) WorldMapUI.render();
   }
@@ -8471,10 +8636,6 @@ import {
       this.on = !this.on;
       if (this.on) { this.start(); } else if (this.timer != null) { clearInterval(this.timer); this.timer = null; }
       this._applyVolume();
-      if (dom.musicBtn) {
-        dom.musicBtn.textContent = this.on ? "🔊" : "🔇";
-        dom.musicBtn.title = t(this.on ? "btnTitle.muteMusic" : "btnTitle.playMusic");
-      }
       return this.on;
     },
   };
@@ -8752,6 +8913,11 @@ import {
   };
 
   // ---- Fullscreen (whole page, so the HUD/joystick stay visible) ----------
+  // On a touch device, entering fullscreen also requests LANDSCAPE via the Screen
+  // Orientation API (the one-thumb action arc is laid out for landscape), and the
+  // lock is released on exit. Both the lock and fullscreen are feature-detected
+  // and degrade gracefully — the lock returns a promise that can reject (e.g. on
+  // iOS Safari, where it is unsupported), so we always swallow that and carry on.
   const Fullscreen = {
     el: document.documentElement,
     supported() {
@@ -8761,13 +8927,36 @@ import {
     active() {
       return !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
     },
+    orientationLockSupported() {
+      try {
+        return !!(typeof screen !== "undefined" && screen.orientation &&
+          typeof screen.orientation.lock === "function");
+      } catch (e) { return false; }
+    },
+    lockLandscape() {
+      if (!isTouch || !this.orientationLockSupported()) return;
+      try {
+        const p = screen.orientation.lock("landscape");
+        // The lock rejects (rather than throws) when unsupported/denied — never let
+        // that surface as an unhandled rejection or block the game.
+        if (p && typeof p.catch === "function") p.catch(() => {});
+      } catch (e) { /* unsupported — ignore */ }
+    },
+    unlockOrientation() {
+      try {
+        if (typeof screen !== "undefined" && screen.orientation &&
+            typeof screen.orientation.unlock === "function") screen.orientation.unlock();
+      } catch (e) { /* ignore */ }
+    },
     toggle() {
       try {
         if (!this.active()) {
           const e = this.el;
           (e.requestFullscreen || e.webkitRequestFullscreen || e.msRequestFullscreen).call(e);
+          this.lockLandscape();
         } else {
           (document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen).call(document);
+          this.unlockOrientation();
         }
       } catch (err) { console.warn("Fullscreen failed:", err); }
     },
@@ -8778,6 +8967,8 @@ import {
         const on = this.active();
         dom.fsBtn.textContent = on ? "✕" : "⛶";
         dom.fsBtn.title = t(on ? "btnTitle.exitFullscreen" : "btnTitle.fullscreen");
+        // If the user left fullscreen by any means (Esc, gesture), drop the lock.
+        if (!on) this.unlockOrientation();
         engine.resize();
       };
       this.sync = sync;   // let applyLocale refresh the title on a language switch
@@ -8848,7 +9039,6 @@ import {
 
       // Inventory overlay: open via the 🎒 buttons or the "I" key.
       if (dom.invBtn) dom.invBtn.addEventListener("click", () => { Sfx.play("ui_click"); Inventory.toggle(); });
-      if (dom.bagBtn) dom.bagBtn.addEventListener("click", () => { Sfx.play("ui_click"); Inventory.toggle(); });
       if (dom.invClose) dom.invClose.addEventListener("click", () => Inventory.close());
       if (dom.invDone) dom.invDone.addEventListener("click", () => Inventory.close());
       if (dom.invTabGear) dom.invTabGear.addEventListener("click", () => { Sfx.play("ui_click"); Inventory.setTab("gear"); });
@@ -8872,7 +9062,8 @@ import {
 
       // World-map overlay (🗺️ / Tab): tabs, search, zoom, guide + the minimap.
       WorldMapUI.init();
-      if (dom.mapBtn) dom.mapBtn.addEventListener("click", () => { Sfx.play("ui_click"); WorldMapUI.toggle(); });
+      // The minimap is the single entry point to the full map (Task 16 removed the
+      // duplicate 🗺️ button); tapping it opens the world map.
       if (dom.minimap) dom.minimap.addEventListener("click", () => { Sfx.play("ui_click"); WorldMapUI.openMap(); });
       if (dom.mapClose) dom.mapClose.addEventListener("click", () => WorldMapUI.close());
       if (dom.mapDone) dom.mapDone.addEventListener("click", () => WorldMapUI.close());
@@ -8885,9 +9076,6 @@ import {
       if (dom.mapClearBtn) dom.mapClearBtn.addEventListener("click", () => { WorldMap.clearWaypoint(false); WorldMapUI.render(); });
 
       if (dom.winReplayBtn) dom.winReplayBtn.addEventListener("click", () => window.location.reload());
-
-      // Music toggle (🔊 / 🔇).
-      if (dom.musicBtn) dom.musicBtn.addEventListener("click", () => Music.toggle());
 
       // Audio mixer controls (volume sliders + mute) on the start screen + pause.
       AudioUI.init();
@@ -9074,6 +9262,8 @@ import {
       // ---- Items & equipment depth (Task 12): affixes, sets, derived stats ----
       AFFIXES, SETS, rollAffixes, affixStats, setBonusStats, activeSets, itemCategory,
       deriveStats, equippedAfter, equipDelta, wornDetailFor, isGear,
+      // ---- Responsive HUD / drag-to-slot / fullscreen (Task 16) ----
+      dragSlotReducer, pointerDragSupported, Fullscreen,
       // ---- Skills, leveling & fusion (Task 14) ----
       Skills, SkillsUI, SKILL_DB, getSkill, ELEMENTS, EFFECTS,
       BASE_SKILL_IDS, BOSS_SKILL_IDS, STARTER_SKILL_IDS, SKILL_SLOTS, MAX_FUSE_INPUTS,
