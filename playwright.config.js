@@ -97,6 +97,24 @@ export default defineConfig({
       testMatch: /session\.spec\.js/,
       use: s24Landscape,
     },
+    // Save management (Task 18): the Saves screen (open from start + pause, save →
+    // rename → reload → load a named slot), run at desktop AND the S24 Ultra
+    // portrait + landscape profiles so the screen is verified on the phone too.
+    {
+      name: "saves-desktop",
+      testMatch: /saves\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "saves-s24-portrait",
+      testMatch: /saves\.spec\.js/,
+      use: s24Portrait,
+    },
+    {
+      name: "saves-s24-landscape",
+      testMatch: /saves\.spec\.js/,
+      use: s24Landscape,
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",

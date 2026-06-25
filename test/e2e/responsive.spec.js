@@ -149,7 +149,7 @@ test("pause menu: every primary control + the cloud panel is reachable", async (
       }
       return bad;
     },
-    ["resumeBtn", "saveBtn", "restartBtn", "exitBtn", "cloudListBtnP"],
+    ["resumeBtn", "savesBtnP", "restartBtn", "exitBtn", "cloudListBtnP"],
   );
   expect(unreachable, `controls not reachable in viewport: ${unreachable.join(", ")}`).toEqual([]);
 

@@ -198,7 +198,7 @@ describe("Task 13 — runtime waypoint, discovery & persistence", () => {
     state.discovered = { meadow: true, forest: true, shore: true };
     T.WorldMap.setWaypoint("zone", "caverns");
     const save = T.serializeGame();
-    expect(save.v).toBe(9);
+    expect(save.v).toBe(T.SAVE_VERSION); // v10 (Task 18 added playSec)
     expect(save.discovered).toEqual(expect.arrayContaining(["meadow", "forest", "shore"]));
     expect(save.waypoint).toEqual({ kind: "zone", id: "caverns" });
 
