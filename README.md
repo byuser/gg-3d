@@ -98,8 +98,8 @@ runs in English without a browser.
 - **Gathering & crafting:** the world is dotted with **resource nodes** — chop **trees** for
   wood, mine **rock** and **crystal**, gather **herbs**, cut **fibers** and collect **water** at
   the shore (walk up + **E**; nodes respawn after a cooldown). Open the **crafting bench**
-  (`C` / 🛠️) to turn materials into **potions** (straight to your belt) and **gear** (to your
-  bag). Your materials pouch is shown top-left.
+  (`C` / 🛠️) to turn materials into **potions** and **gear**, both into your bag. Materials are
+  **stackable bag items** now (no on-HUD pouch) — see them in the inventory's **Materials** tab.
 - **The castle:** on **Castle Hill** stands the build site (walk up + **E**). Spend a matching
   **relic** + **coins** to raise each of the five parts in order — **Foundation → Walls →
   Towers → Gatehouse → Keep** — and watch it grow in the world. Finish the **Keep** and the
@@ -170,11 +170,13 @@ runs in English without a browser.
   the **story NPCs**, the **resource nodes** and the **castle build site** live — they're
   always there to visit between expeditions. The wild lands are pure **hunting grounds** (plus
   a few themed resource nodes), so head out to fight and gather, then return to spend and build.
-- **Potions & the belt:** buy **health potions** (minor / standard / **greater**) and
-  **elixirs** (Might, Swiftness) from the merchant. They go onto a **3-slot potion belt**
-  in the **bottom-left corner** — each slot **stacks** one kind. Quaff one with `1`/`2`/`3`
-  (or a tap): health potions heal instantly; elixirs grant a **timed buff** shown as a
-  countdown pill above the belt.
+- **Potions & quick-slots:** buy **health potions** (minor / standard / **greater**) and
+  **elixirs** (Might, Swiftness) from the **apothecary**, or craft them. Potions live in your
+  **bag** (stacked) like everything else; the 3 combat **quick-slots** in the bottom corner
+  are an **assignment** over them. Open the inventory's **Potions** tab and **drag** any bag
+  potion onto a slot to make it quick-drinkable (drag between slots to reorder/swap, or off to
+  clear — there's a tap-to-pick fallback too). Quaff a slot with `4`/`5`/`6` or a tap: health
+  potions heal instantly; elixirs grant a **timed buff** shown as a countdown pill.
 - **The blacksmith:** a burly **🔨 smith** sets up at the plaza between waves beside the
   merchant. Walk up + press **E** to open the **anvil** and spend coins to **enhance**
   your weapons and equipment (`+1`, `+2`, …). Rarer gear (**common → rare → epic →
@@ -208,10 +210,14 @@ runs in English without a browser.
   currency you spend at the merchant's shop.
 - **The merchant:** the **travelling merchant** 🧙 keeps a permanent stall in the home
   **vale**. Walk up and press **E** (or the action button) to open the **shop**. Three tabs:
-  **Buy** normal weapons, armour, accessories and **potions**; **✨ Rare** — a **rotating
-  selection of rare/epic/legendary wares** (a premium, but no need to wait for a boss); or
-  **Sell** any spare gear from your bag (enhanced gear sells for more). Bosses still **drop**
-  guaranteed rare loot too.
+  **Buy** normal weapons, armour and accessories; **✨ Rare** — a **rotating selection of
+  rare/epic/legendary wares** (a premium, but no need to wait for a boss); or **Sell** any
+  item from your bag (enhanced gear sells for more; potions + materials sell too). Bosses
+  still **drop** guaranteed rare loot too.
+- **The apothecary:** a dedicated **⚗️ apothecary** tends a bubbling cauldron in the hub.
+  Walk up + **E** to buy **potions** and **basic ingredients** (the wizard no longer stocks
+  consumables — vendors are specialised now), or **sell** your spare potions, materials and
+  gear back for coins.
 - **Solid world:** trees, rocks, bushes, toadstools, crystals, cave pillars, lampposts and
   the vale's river are **solid** — you bump and slide around them instead of walking through.
   A winding **river** with **wooden bridges** crosses the home vale.
@@ -247,7 +253,8 @@ runs in English without a browser.
 - **Save slots & management:** the **Manage Saves** screen (reachable from the **start screen**
   *and* the **pause menu**) gives you **six named save slots** on this device, like a shipped RPG.
   Each slot stores *everything* needed to resume — the procedural environment (via its world seed),
-  the **land you're in**, your **XP & level**, money, **gear & inventory**, health, **materials & relics**,
+  the **land you're in**, your **XP & level**, money, the **unified bag** (gear, potions &
+  materials) + **equipped gear** + **potion quick-slots**, health, castle **relics**,
   **story progress** (current chapter, completed missions, reach/talk objectives, side-quest
   tallies), the **castle build state**, cleared **lair bosses**, the **time/weather**, and your
   **playtime** — plus a label (name, when it was saved, your level/zone). You can **Load**,
@@ -509,7 +516,18 @@ retuned level pacing stays sane under those sources (a pure simulated run), a v1
 `score`-bearing save still **migrates** (the field is dropped, XP/level/relicsFound
 default sanely), the v11 schema round-trips, the end/pause **recap** renders
 level + XP + tallies, and a **grep guard** fails on any lingering `score` identifier
-in the player-facing source. On top of that, a
+in the player-facing source.
+The **unified inventory** suite (`test/inventory21.test.js`) locks in Task 21: the
+**30-slot** bag, the legacy → unified-bag **migration** (`migrateLegacyBag`: a
+pre-v12 `materials` map + `potions` belt fold into bag stacks + quick-slot refs,
+v12+ passes through) plus a real pre-v12 save loading, **bag stacking** (add /
+count / spend, stack-max, slot cap), the **potion-slot drag reducer**
+(assign / move / swap / clear, any order) + `Inventory.applyPotionDrag` + the
+tap-to-pick fallback, **drinking** a quick-slot consuming the bag stack + auto-clear,
+`Shop.sell` of **potions + materials** at their `ITEM_DB` value (+ the buyer adding
+stackables), the **alchemist** stock (potions + basic ingredients) vs. the
+merchant's gear-only stock, the **v12 round-trip** of the bag + quick-slots, and a
+UI smoke. On top of that, a
 **functional** suite (`test/functional.test.js`) boots the assembled game in
 isolation and drives whole flows (start → zone travel → save/reload round-trip),
 and **Playwright** suites load the built bundle in real headless Chromium: the
@@ -521,7 +539,10 @@ device profile (portrait + landscape) to assert every menu control is reachable
 overlap, and the one-thumb action arc sits bottom-right in landscape, and the
 **saves** suite (`test/e2e/saves.spec.js`, same profiles) opens the Saves screen
 from the start menu + pause, saves into a named slot, **renames** it, **reloads**,
-and **loads** the slot back into play:
+and **loads** the slot back into play, and the **inventory** suite
+(`test/e2e/inventory.spec.js`, same profiles) opens the inventory's Potions tab,
+**drag-assigns** a bag potion to a combat quick-slot, and asserts the on-HUD
+materials strip is gone:
 
 ```bash
 npm ci          # once
@@ -549,7 +570,13 @@ additive, not a rewrite (pure content tables live in `src/data/`, foundations in
   player from what's equipped. See the **item & equipment model** below.
 - **`Inventory` / `Shop`** — the **tabbed** bag-and-paper-doll inventory UI (Gear / Materials /
   Potions; equip/unequip, filter/sort, **compare-vs-equipped** deltas, drink potions, live
-  stats + set bonuses) and the merchant's **Buy/Sell** shop (normal stock only; rare gear is boss-only).
+  stats + set bonuses) over the **unified 30-slot bag** (gear + stackable potions/materials,
+  Task 21) with **drag-and-drop potion quick-slots**, and the two specialised vendors'
+  **Buy/Sell** shop (`Shop.openShop(vendor)`): the **merchant** sells gear + a rare rotation,
+  the **alchemist** sells potions + ingredients; **Sell** buys back any item.
+- **`Alchemist`** — the dedicated apothecary vendor (Task 21): a procedural NPC at the hub's
+  `apothecary` landmark that opens the alchemist shop; stocks potions + basic ingredients
+  (`ALCHEMIST_STOCK`), built/animated/**disposed on teardown** like the merchant + blacksmith.
 
 #### Item & equipment model (Task 12)
 
@@ -682,13 +709,15 @@ is fully testable headless:
 - **`setupZoneContent`** — lays the per-zone content on a freshly built world: the hub gets
   the merchant, blacksmith, NPCs, resource nodes, castle and artifacts; the wild lands get
   themed resource nodes.
-- **Save/load (`serializeGame` / `applySave`)** — snapshots the run to JSON (schema **v11**;
+- **Save/load (`serializeGame` / `applySave`)** — snapshots the run to JSON (schema **v12**;
   Task 18 added **playtime**, Task 19 dropped the legacy `score` and added the lifetime
-  `relicsFound` tally) and rebuilds it: re-seed, restore the player (pose + **inventory &
-  equipment**, materials, relics, **XP/level**), money, quests, castle, cleared lairs and
-  time/weather, then **stream to the saved zone** (its monsters regenerate from the spawn
-  table). Stats are recomputed from the restored gear. Older saves still load (missing fields
-  default; a pre-v11 `score` is ignored).
+  `relicsFound` tally, Task 21 unified the bag + added **potion quick-slots**) and rebuilds it:
+  re-seed, restore the player (pose + the **unified bag** (gear + potion/material stacks) +
+  **equipped gear** + **potion quick-slots**, relics, **XP/level**), money, quests, castle,
+  cleared lairs and time/weather, then **stream to the saved zone** (its monsters regenerate
+  from the spawn table). Stats are recomputed from the restored gear. Older saves still load
+  (missing fields default; a pre-v11 `score` is ignored; a pre-v12 `materials` map + `potions`
+  belt **migrate** into bag stacks + quick-slot refs via `migrateLegacyBag`).
 - **`SaveSlots` / `SavesUI`** — **multiple named manual save slots** (Task 18). `SaveSlots` is a
   **pure** store over `localStorage` (six slots, each holding the full `serializeGame()` payload +
   metadata; create / list / rename / delete / overwrite / next-free, with the prior single-slot run
@@ -803,7 +832,7 @@ Source: GitHub Actions**.
 - [x] Live monster counter (now "monsters roaming this land")
 - [x] Coins dropped by monsters, collected like artifacts, used as shop currency
 - [x] Boss fights — six archetypes (charger/caster/summoner/stomper/bomber/splitter) with telegraphs + per-attack sound (now placed in **lairs** + backing the dragon)
-- [x] Potions + a 3-slot stacking potion belt (health potions & timed-buff elixirs)
+- [x] Potions (health potions & timed-buff elixirs) — stackable **bag items** with 3 **drag-assigned** combat quick-slots
 - [x] Blacksmith NPC — enhance gear for coins, scaling by rarity (common→rare→epic→legendary)
 - [x] Rotating "Featured" rare shop tab
 - [x] Procedural background music **and sound effects** (Web Audio, no assets) with a mute toggle
@@ -923,4 +952,14 @@ Source: GitHub Actions**.
       (it opens with a clear state + sign-in CTA). File export/import stays as an extra. The prior
       single-slot run **migrates** in; older saves still load. Pure slot store (`SaveSlots`) + a thin
       `SavesUI` in `src/game.js`, covered by `test/saveslots.test.js` + a Playwright saves suite.
+- [x] **Unified inventory for potions & ingredients** — materials + potions moved out of their ad-hoc
+      side stores into the **30-slot bag** (`invCap` 24 → 30) as stackable items, so one code path
+      (`bagAdd`/`bagCount`/`bagSpend`) serves everything and crafting reads/writes the bag; the on-HUD
+      materials chip strip is gone. The 3 combat **quick-slots** became a **drag-and-drop assignment**
+      over bag potions (reusing the Task 16 pointer-drag utility + pure reducer, with a tap fallback);
+      potions **and** materials are **sellable**; and a dedicated **alchemist** vendor sells potions +
+      basic ingredients (removed from the merchant, so vendors are specialised), EN/RU localised. The
+      unified bag + quick-slots **round-trip through save/load** (**v12**), and a pure `migrateLegacyBag`
+      folds pre-v12 `materials`+`potions` belt saves in — `test/inventory21.test.js` + a Playwright
+      inventory suite.
 - [ ] Puzzles (levers, plates, gated doors)

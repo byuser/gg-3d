@@ -35,6 +35,80 @@ delta it shipped with, since later tasks reference those.
   `session-s24-landscape` Playwright E2E (resume-via-Continue → open pause → open
   Cloud Saves), which previously timed out on `master`.
 
+## [2026-06-25] — Task 21 — Unified inventory for potions & ingredients (30 slots, drag-and-drop potion slotting, sellable items, dedicated alchemist NPC)
+
+Potions and crafting ingredients lived in ad-hoc side stores (a `player.potions`
+belt + a `player.materials` dictionary) separate from the 24-slot equipment bag,
+with on-HUD ingredient widgets, no drag-and-drop and no way to sell them — and the
+wizard sold everything. Task 21 reworks the economy so **everything shares one
+bag** like shipped RPGs: ingredients and potions occupy inventory slots, the bag
+grows to **30**, potions are **drag-slotted** into the 3 combat quick-slots in any
+order, items are **sellable**, and a **dedicated alchemist NPC** sells potions +
+basic ingredients.
+
+### Added
+
+- **A dedicated Apothecary vendor.** A new `Alchemist` class (a procedural
+  apothecary at a bubbling cauldron) stands at a new `apothecary` hub landmark and
+  opens a shop selling **potions + basic ingredients** (`ALCHEMIST_STOCK` =
+  `POTION_STOCK` + `INGREDIENT_STOCK`). Added as `alchemist` in `NPC_DATA`
+  (a `vendor` NPC, skipped by the quest-giver placement) so it's searchable on the
+  world map; localised EN + RU (name, intro, shop title/tagline, the `apothecary`
+  location). The vendor builds + animates + **disposes on zone teardown**.
+- **Drag-and-drop potion quick-slots.** The inventory's **Potions** tab now shows
+  the 3 combat quick-slots as drop targets above the bag's potion stacks. Drag a
+  bag potion onto a slot to assign it, drag between slots to reorder/swap, or drag
+  onto empty space to clear — reusing Task 16's pointer-drag controller + the pure
+  `dragSlotReducer` over a pure assignment model (`player.potionSlots` = potion
+  ids), with an accessible tap-to-pick fallback. Drinking a quick-slot (4/5/6 or a
+  tap) consumes from the bag stack; an emptied stack auto-clears its slot.
+- **Crafting materials as first-class items.** The six materials (wood/stone/water/
+  herb/fiber/crystal) are now `ITEM_DB` reagents (`type: "material"`) with buy/sell
+  values, so one stacking code path (`bagAdd`/`bagCount`/`bagSpend`, `STACK_MAX`
+  99) serves potions + materials, and they're sellable + buyable like any item.
+
+### Changed
+
+- **The bag is unified and grew to 30 slots** (`invCap` 24 → 30). Gear instances
+  live alongside stackable `{ id, uid, count }` potion/material stacks; the tabbed
+  inventory (Gear / Materials / Potions) reads them all from `player.inventory`.
+  Crafting (`hasMaterials` / `spendMaterials`), quest `gather` progress and skill
+  **fusion** (the crystal cost) all read/write the bag instead of `player.materials`.
+- **Both vendors are specialised.** The travelling **merchant** sells gear + its
+  rare/featured rotation only (**no potions or ingredients** anymore); the
+  **alchemist** owns consumables + reagents. `Shop.openShop(vendor)` swaps the
+  dialog chrome per vendor and hides the gear-only "Rare" tab for the alchemist.
+- **Everything is sellable.** `Shop.sell()` now accepts potions + materials (peels
+  one unit off a stack) at each item's `ITEM_DB` value, alongside gear.
+
+### Removed
+
+- **The on-HUD materials chip strip** (`#materialsBar` + `updateMaterialsHud()` +
+  the `.materials-bar` CSS). Ingredient counts are seen only in the inventory's
+  Materials tab now (declutters the HUD). `.mat-chip` is kept — the crafting bench
+  still uses it for its owned-materials readout.
+
+### Save format
+
+- **`SAVE_VERSION` 11 → 12.** The save now serialises the unified bag (gear +
+  potion/material stacks) + the 3 `potionSlots` assignments. A pure, tested
+  `migrateLegacyBag()` folds a **pre-v12** save's `materials` map + `potions` belt
+  into bag stacks + quick-slot refs (gated on the save version so it runs exactly
+  once); older saves load with all their stuff intact.
+
+### Tests
+
+- New `test/inventory21.test.js` (**26** cases; Vitest **208 → 234**): the legacy →
+  unified-bag migration (pure + a full save round-trip), bag stacking (add/count/
+  spend, stack-max, cap), the potion-slot drag reducer (assign/move/swap/clear, any
+  order) + `Inventory.applyPotionDrag`, `Shop.sell` of potions/materials at the
+  expected prices + the buyer adding stackables, the alchemist's stock vs. the
+  merchant's (no potions), the v12 round-trip, and a tap-fallback UI smoke. Existing
+  suites migrated off `player.materials`/`player.potions`. A new Playwright
+  `inventory.spec.js` drives the potions-tab quick-slot drag-assign + asserts the
+  HUD materials strip is gone, at desktop + the S24 Ultra portrait/landscape
+  profiles.
+
 ## [2026-06-25] — Task 19 — Replace the arcade score with the experience (XP) system
 
 The game carried a legacy arcade **score** in parallel with the real RPG

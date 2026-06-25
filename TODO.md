@@ -1428,7 +1428,24 @@ A task is **done** only when **all** of these are true:
   reusable canvas/CSS primitive shared by the minimap edge marker and the compass.
 
 ### Task 21 — Unified inventory for potions & ingredients (30 slots, drag‑and‑drop potion slotting, sellable items, dedicated alchemist NPC)
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-25 · Folded materials (`player.materials`) and the potion belt
+  (`player.potions`) into the **unified 30‑slot bag** (`invCap` 24 → 30) as stackable
+  `{ id, uid, count }` items: materials are now first‑class `ITEM_DB` reagents and one bag
+  code path (`bagAdd`/`bagCount`/`bagSpend`, `STACK_MAX` 99) serves potions + materials, so
+  crafting (`hasMaterials`/`spendMaterials`), quest gathers and skill fusion all read/write
+  the bag. The 3 combat quick‑slots became a pure **assignment** over bag potions
+  (`player.potionSlots` = ids) with **drag‑and‑drop slotting** reusing Task 16's pointer‑drag
+  utility + the pure `dragSlotReducer` (assign/move/swap/clear) and an accessible tap‑to‑pick
+  fallback; drinking a slot consumes from the bag stack and auto‑clears when empty. Removed the
+  on‑HUD materials chip strip (`#materialsBar`/`updateMaterialsHud`). Potions **and** materials
+  are now **sellable** (`Shop.sell` peels one off a stack at the item's `ITEM_DB` value) and a
+  dedicated **Apothecary** vendor (`Alchemist` class + `alchemist` NPC at a new `apothecary`
+  hub landmark) sells potions + basic ingredients — **removed** from the merchant's stock so
+  vendors are specialised (EN+RU localised). `SAVE_VERSION` **11 → 12**: the bag + quick‑slots
+  serialize, and a pure tested `migrateLegacyBag` folds pre‑v12 `materials`+`potions` belt into
+  bag stacks + quick‑slot refs (runs exactly once; older saves keep all their stuff). New
+  `test/inventory21.test.js` (26 cases; Vitest 208 → 234) + a Playwright `inventory.spec.js`
+  (potions‑tab quick‑slot drag‑assign, no HUD strip) at desktop + S24 Ultra portrait/landscape.
 - **Depends on:** the item/inventory system (Task 12: `Inventory`/`invAdd`/`invCap`/
   the tabbed bag), the potion belt + materials (`POTION_SLOTS`, `player.potions`,
   `player.materials`), the Shop (Task 12/`POTION_STOCK`), and the drag utility from
