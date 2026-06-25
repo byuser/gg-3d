@@ -81,6 +81,18 @@
     // once. Spawning + respawn both honour it, so the world can never accumulate
     // an unbounded supply across zone re-entry or save/load (Task 10).
     maxResourceNodes: 90,
+    // Per-resource-type cap, PER ZONE (Task 22). The deterministic planner +
+    // every regrow path enforce this so no single kind can ever pile up. A kind
+    // not listed here falls back to `resourceCapDefault`. These bound the
+    // *initial* scatter too, so leaving + returning never adds a fresh batch.
+    resourceCaps: { tree: 18, rock: 14, herb: 16, fiber: 12, crystal: 8, water: 10 },
+    resourceCapDefault: 12,
+    // Regrowth cadence: a NEW node sprouts only after this many seconds of
+    // *in-game* time have passed in a zone (the clock is dt-driven, so it pauses
+    // with the game), and only for a kind that is still under its per-zone cap.
+    // This replaces the old "re-scatter a whole batch on every entry" behaviour
+    // with a believable, slow ecology.
+    resourceRegrowSec: 45,
 
     // Day / night cycle — one full day every `dayLength` seconds.
     dayLength: 180,           // seconds for a full dawn→dusk→night→dawn cycle

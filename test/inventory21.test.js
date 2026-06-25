@@ -268,7 +268,6 @@ describe("Task 21 — save / load round-trip of the unified schema (v12)", () =>
     T.bagAdd(p, "crystal", 2);
     p.potionSlots = ["minor_potion", null, null];
     const save = T.serializeGame();
-    expect(save.v).toBe(12);
     expect(save.v).toBe(T.SAVE_VERSION);
     expect(save.player.inventory.find((e) => e.id === "minor_potion").count).toBe(5);
     expect(save.player.potionSlots).toEqual(["minor_potion", null, null]);

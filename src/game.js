@@ -2579,10 +2579,14 @@ import {
   // materials feed the crafting bench. Reuses the Interactable contract.
   // =========================================================================
   class ResourceNode {
-    constructor(scene, shadow, interaction, pos, kind, player, state) {
+    constructor(scene, shadow, interaction, pos, kind, player, state, data) {
       this.kind = kind; this.def = RESOURCE_KINDS[kind];
-      this.respawn = 0; this.bob = rng() * Math.PI * 2;
-      this.player = player; this.state = state;
+      // The persistent record this node mirrors (Task 22): positions + depletion
+      // live there so re-entry rebuilds the same node still on its cooldown.
+      this.data = data || { kind, x: pos.x, z: pos.z, respawn: 0 };
+      this.respawn = Math.max(0, +this.data.respawn || 0);
+      this.bob = rng() * Math.PI * 2;
+      this.player = player; this.state = state; this.interaction = interaction;
       const root = new BABYLON.TransformNode("res_" + kind, scene);
       root.position.copyFrom(pos); this.root = root;
       this._build(scene, shadow);
@@ -2590,7 +2594,19 @@ import {
         label: tResourceLabel(this.kind), range: CONFIG.gatherRange,
         onInteract: () => this.harvest(),
       });
+      // A node restored mid-cooldown starts hidden + non-interactable.
+      if (this.respawn > 0) { this.body.setEnabled(false); this.it.enabled = false; }
       interaction.register(this.it);
+    }
+
+    // Tear down EVERYTHING this node owns (Task 22): its meshes (parented to
+    // root) AND its interaction registration. Resource meshes are created AFTER
+    // buildWorld returns, so they are NOT captured by world.dispose()'s snapshot
+    // — without this they leaked across travel as visible, unharvestable
+    // "phantom" nodes. teardownZone calls this for every live node.
+    dispose() {
+      try { if (this.interaction && this.it) this.interaction.remove(this.it); } catch (e) {}
+      try { this.root.dispose(); } catch (e) {}
     }
 
     _build(scene, shadow) {
@@ -2636,6 +2652,7 @@ import {
       Sfx.play((this.def.mat === "stone" || this.def.mat === "crystal") ? "mine" : "gather");
       toast(t("toast.gathered", { icon: MATERIALS[this.def.mat].icon, n, label: tMaterialLabel(this.def.mat) }));
       this.respawn = this.def.respawn;
+      if (this.data) this.data.respawn = this.respawn;   // persist depletion (Task 22)
       this.body.setEnabled(false);
       this.it.enabled = false;
     }
@@ -2643,6 +2660,7 @@ import {
     update(dt) {
       if (this.respawn > 0) {
         this.respawn -= dt;
+        if (this.data) this.data.respawn = Math.max(0, this.respawn);  // keep the record in step
         if (this.respawn <= 0) { this.body.setEnabled(true); this.it.enabled = true; }
         return;
       }
@@ -3525,6 +3543,15 @@ import {
     const FAR = RADIUS - 6;
     let baseWaterY = 0;
     const animated = []; // {orb, y} markers bobbed by the per-frame observable
+    // Set in the hub block to a (x,z,dir)->bool that drops a bridge where an exit
+    // road crosses the river (Task 22). Null in the wild (no river), so the
+    // portal block skips it. Returns true if a crossing existed (bridge built).
+    let bridgeExitRoad = null;
+    // The hub's road ray-ends (each crossroads lane is a full diameter → two
+    // outward directions). The portal block snaps each hub exit to the nearest
+    // FREE ray so a land's exits ride the existing, bridge-aware crossroads
+    // rather than cutting new radial roads across the river (Task 22 hint).
+    let exitRayDirs = null;
 
     // =====================================================================
     // HOME HUB (Meadowgate Vale): the village river + bridges, the crossroads
@@ -3556,6 +3583,13 @@ import {
         ang, dir: { x: Math.sin(ang), z: Math.cos(ang) },
       }));
       const roads = roadLanes;
+      // Each lane is a full diameter, so it offers TWO outward ray-ends; collect
+      // all 4 as the candidate directions a portal exit can ride (Task 22).
+      exitRayDirs = [];
+      for (const r of roadLanes) {
+        exitRayDirs.push({ x: r.dir.x, z: r.dir.z });
+        exitRayDirs.push({ x: -r.dir.x, z: -r.dir.z });
+      }
 
       // Bridge-aware crossings: for every road that actually reaches the river
       // WITHIN the fence, drop a bridge gap centred on its crossing and sized to
@@ -3617,7 +3651,7 @@ import {
       // Bridges — a wooden plank deck + rails spanning the water at each crossing.
       const plankMat = mat(scene, "plank", "#9a6a3a");
       const railMat = mat(scene, "rail", "#7a5230");
-      for (const b of bridges) {
+      const buildBridgeMesh = (b) => {
         const cx = riverCenter.x + alongT.x * b.t;
         const cz = riverCenter.z + alongT.z * b.t;
         const deck = box(scene, "bridge", riverHalf * 2 + 5, 0.25, b.half * 2, plankMat);
@@ -3629,7 +3663,27 @@ import {
           rail.position.set(cx + alongT.x * (b.half - 0.2) * side, 0.5, cz + alongT.z * (b.half - 0.2) * side);
           shadow.addShadowCaster(rail);
         }
-      }
+      };
+      for (const b of bridges) buildBridgeMesh(b);
+
+      // Task 22: let the PORTAL block (which runs later, laying radial exit roads)
+      // request a bridge where its road crosses the river — so a road heading off
+      // the map to a neighbour never spills into open water. Mirrors the main
+      // crossroads' bridge maths for a road of half-width `half` along `dir`.
+      bridgeExitRoad = (dir, half) => {
+        const dN = dir.x * crossN.x + dir.z * crossN.z;       // dir · N
+        if (Math.abs(dN) < 1e-3) return false;                // parallel to flow → never crosses
+        const along = riverPerp / dN;                         // signed distance along the road to the water
+        // The exit road is a full diameter line (its ground mesh + onRoad both
+        // span ±dir), so the crossing counts on either side — bridge it as long
+        // as it falls within the fence.
+        if (Math.abs(along) > RADIUS) return false;
+        const dT = dir.x * alongT.x + dir.z * alongT.z;       // dir · T
+        const b = { t: along * dT, half: (Math.abs(dT) * riverHalf + half) / Math.abs(dN) + 1.5 };
+        bridges.push(b);          // onBridge closes over `bridges` → sees it immediately
+        buildBridgeMesh(b);       // and build its deck + rails
+        return true;
+      };
 
       // ---- Roads: grey strips along each centreline, with sandy edge lines. ----
       const roadMat = mat(scene, "road", "#6b6f78");
@@ -3922,57 +3976,128 @@ import {
     }
 
     // =====================================================================
-    // PORTALS — a path / bridge / cave-mouth at the zone edge that streams you
-    // to the connected zone. Each is a walk-through trigger (no collision) with
-    // a glowing marker. The ZoneManager reads `portals` to detect crossings.
+    // PORTALS as ROAD-EDGE TELEPORTERS (Task 22) — instead of a floating orb on
+    // a ground circle, each connection lays a ROAD running from the zone centre
+    // out to the map edge in the portal's direction, ending in a themed gateway
+    // (trail-head arch / plank jetty / cave mouth) right at the fence. Walking
+    // down that road to its end-of-map segment triggers travel, so moving between
+    // lands reads as walking a road to the next place. The trigger is a band
+    // across the road's full width at the fence — you can't skirt it because the
+    // fence stops you before you could go around. Bidirectional: the return road
+    // in the target zone places you on the incoming road (placePlayerAtArrival).
+    //
+    // The trigger geometry stored in `portals` is a road-edge spec:
+    //   { to, kind, dir:{x,z}, ang, exitR, half, x, z, name, icon }
+    // `dir` is the outward unit vector, `exitR` the radial threshold near the
+    // fence, `half` the road half-width; `x,z` is the gateway point (used by the
+    // map + arrival). ZoneManager.check tests (radial projection ≥ exitR) ∧
+    // (lateral distance to the road ≤ half).
     // =====================================================================
+    const PORTAL_ROAD_HALF = 3.6;   // half-width of an exit road / its trigger band
+    const exitLanes = [];           // NEW radial roads (wild zones) → folded into onRoad
+    const roadEdgeMat = mat(scene, "peRoad", "#6b6f78");
+    const roadEdgeLine = mat(scene, "peEdge", "#d9c47a");
+    // Pick the outward direction for a portal. In the hub, SNAP to the nearest
+    // still-free crossroads ray-end so exits ride the existing, bridge-aware
+    // roads (Task 22) instead of cutting new ones across the river. In the wild
+    // (no roadLanes), use the zone-data angle and lay a fresh radial road.
+    const freeRays = exitRayDirs ? exitRayDirs.slice() : null;
+    const chooseExitDir = (angle) => {
+      const want = { x: Math.cos(angle), z: Math.sin(angle) };
+      if (!freeRays || !freeRays.length) return { dir: want, ridesRoad: false };
+      let best = 0, bestDot = -Infinity;
+      for (let i = 0; i < freeRays.length; i++) {
+        const d = want.x * freeRays[i].x + want.z * freeRays[i].z;
+        if (d > bestDot) { bestDot = d; best = i; }
+      }
+      const dir = freeRays.splice(best, 1)[0];
+      return { dir, ridesRoad: true };
+    };
     for (const def of zone.portals || []) {
-      const pr = RADIUS - 5;
-      const px = Math.cos(def.angle) * pr, pz = Math.sin(def.angle) * pr;
+      const pick = chooseExitDir(def.angle);
+      const dir = pick.dir;                                            // outward
+      const nd = { x: dir.z, z: -dir.x };                              // road normal
+      const gateR = RADIUS - 3;                                         // gateway sits just inside the fence
+      const gx = dir.x * gateR, gz = dir.z * gateR;
+      const portAng = Math.atan2(dir.z, dir.x);                        // the chosen angle
+      const roadAng = Math.atan2(dir.x, dir.z);                        // ground-mesh rotation for `dir`
       const tgt = ZONE_BY_ID[def.to];
-      const col = tgt ? tgt.theme.ground : "#ffd98a";
-      const glow = emat(scene, "portGlow" + def.to, col, 0.85);
 
-      const plat = disc(scene, "portPlat" + def.to, 3.6, mat(scene, "portPlatM" + def.to, "#d8c79a"));
-      plat.rotation.x = Math.PI / 2; plat.position.set(px, 0.07, pz); plat.receiveShadows = true; plat.isPickable = false;
+      if (!pick.ridesRoad) {
+        // Wild zone: lay a fresh radial road from the centre to the edge along
+        // `dir`, fold it into onRoad, and (defensively) bridge any river crossing.
+        exitLanes.push({ dir });
+        if (bridgeExitRoad) bridgeExitRoad(dir, PORTAL_ROAD_HALF);
+        const road = BABYLON.MeshBuilder.CreateGround("peRoadM" + def.to, { width: PORTAL_ROAD_HALF * 2, height: GROUND }, scene);
+        road.rotation.y = roadAng; road.position.set(dir.x * (RADIUS * 0.5), 0.02, dir.z * (RADIUS * 0.5));
+        road.material = roadEdgeMat; road.receiveShadows = true; road.isPickable = false;
+        for (const s of [-1, 1]) {
+          const edge = BABYLON.MeshBuilder.CreateGround("peEdgeM" + def.to + s, { width: 0.35, height: GROUND }, scene);
+          edge.rotation.y = roadAng;
+          edge.position.set(dir.x * (RADIUS * 0.5) + nd.x * (PORTAL_ROAD_HALF - 0.3) * s,
+                            0.03, dir.z * (RADIUS * 0.5) + nd.z * (PORTAL_ROAD_HALF - 0.3) * s);
+          edge.material = roadEdgeLine; edge.isPickable = false;
+        }
+      }
 
-      // Face the gateway inward (toward the zone centre).
-      const face = Math.atan2(-px, -pz);
+      // The themed gateway AT the edge (faces inward toward the zone centre).
+      const face = Math.atan2(-gx, -gz);
       if (def.kind === "cave") {
-        // A dark cave mouth: a flattened dark dome flanked by boulders.
         const mouth = sphere(scene, "caveMouth" + def.to, 6, mat(scene, "caveDark" + def.to, "#0c0a14"));
-        mouth.position.set(px, 0.2, pz); mouth.scaling.set(1, 1.1, 0.5); mouth.isPickable = false;
+        mouth.position.set(gx, 0.2, gz); mouth.scaling.set(1, 1.1, 0.5); mouth.isPickable = false;
         for (const s of [-1, 1]) {
           const bo = BABYLON.MeshBuilder.CreateIcoSphere("caveRock" + def.to + s, { radius: 1.6, subdivisions: 1 }, scene);
           bo.material = mat(scene, "caveRockM", "#5a5466");
-          bo.position.set(px + Math.cos(face) * 2.6 * s, 1.2, pz + Math.sin(face) * 2.6 * s);
+          bo.position.set(gx + Math.cos(face) * 2.6 * s, 1.2, gz + Math.sin(face) * 2.6 * s);
           shadow.addShadowCaster(bo);
         }
       } else if (def.kind === "bridge") {
-        // A short plank jetty leading off toward the next shore.
-        const deck = box(scene, "portBridge" + def.to, 3, 0.25, 6, mat(scene, "portPlank" + def.to, "#9a6a3a"));
-        deck.rotation.y = face;
-        deck.position.set(px + Math.sin(face) * 2.5, 0.16, pz + Math.cos(face) * 2.5);
+        // A plank jetty running off-map down the road toward the next shore.
+        const deck = box(scene, "portBridge" + def.to, PORTAL_ROAD_HALF * 2, 0.25, 7, mat(scene, "portPlank" + def.to, "#9a6a3a"));
+        deck.rotation.y = roadAng;
+        deck.position.set(gx + dir.x * 2.5, 0.16, gz + dir.z * 2.5);
         deck.receiveShadows = true; shadow.addShadowCaster(deck);
+        for (const s of [-1, 1]) {
+          const rail = box(scene, "portRail" + def.to + s, 0.18, 0.7, 8, mat(scene, "portRailM" + def.to, "#7a5230"));
+          rail.rotation.y = roadAng;
+          rail.position.set(gx + dir.x * 2.5 + nd.x * (PORTAL_ROAD_HALF - 0.2) * s, 0.5, gz + dir.z * 2.5 + nd.z * (PORTAL_ROAD_HALF - 0.2) * s);
+          shadow.addShadowCaster(rail);
+        }
       } else {
-        // A path gateway: two posts + a lintel beam, like a trail-head arch.
+        // A trail-head arch straddling the road: two posts + a lintel beam.
         const postMat = mat(scene, "portPost" + def.to, "#7a5230");
         for (const s of [-1, 1]) {
           const post = cyl(scene, "portPostM" + def.to + s, 0.3, 0.34, 4, postMat);
-          post.position.set(px + Math.cos(face) * 2.4 * s, 2, pz + Math.sin(face) * 2.4 * s);
+          post.position.set(gx + nd.x * (PORTAL_ROAD_HALF + 0.2) * s, 2, gz + nd.z * (PORTAL_ROAD_HALF + 0.2) * s);
           shadow.addShadowCaster(post);
         }
-        const beam = box(scene, "portBeam" + def.to, 5.4, 0.4, 0.4, postMat);
-        beam.rotation.y = face; beam.position.set(px, 4, pz); shadow.addShadowCaster(beam);
+        const beam = box(scene, "portBeam" + def.to, (PORTAL_ROAD_HALF + 0.2) * 2 + 0.6, 0.4, 0.4, postMat);
+        beam.rotation.y = roadAng; beam.position.set(gx, 4, gz); shadow.addShadowCaster(beam);
+        // A small carved signpost so the exit reads as "the road to <place>".
+        const sign = box(scene, "portSign" + def.to, 1.4, 0.5, 0.12, emat(scene, "portSignM" + def.to, tgt ? tgt.theme.ground : "#ffd98a", 0.35));
+        sign.rotation.y = face; sign.position.set(gx + nd.x * (PORTAL_ROAD_HALF + 0.2), 2.4, gz + nd.z * (PORTAL_ROAD_HALF + 0.2));
+        sign.isPickable = false;
       }
 
-      // A floating glow orb marks the gateway and is bobbed by the animator.
-      const orb = sphere(scene, "portOrb" + def.to, 1.0, glow);
-      orb.position.set(px, 3.2, pz); orb.isPickable = false;
-      animated.push({ orb, y: 3.2 });
-
-      portals.push({ to: def.to, kind: def.kind, x: px, z: pz, r: 3.6,
-                     name: tgt ? tgt.name : def.to, icon: tgt ? tgt.icon : "➡️" });
+      // The road-edge trigger spec (no orb). exitR is set a touch inside the
+      // gateway so the player reliably crosses it; placePlayerAtArrival arrives
+      // BELOW it (stepped inward) so they don't instantly bounce back. `ang` is
+      // the CHOSEN (possibly road-snapped) outward angle.
+      portals.push({
+        to: def.to, kind: def.kind, dir, ang: portAng,
+        exitR: RADIUS - 4.5, half: PORTAL_ROAD_HALF,
+        x: gx, z: gz, name: tgt ? tgt.name : def.to, icon: tgt ? tgt.icon : "➡️",
+      });
+    }
+    // Fold the WILD zones' fresh radial exit roads into onRoad so resources never
+    // spawn on them (the hub exits ride the crossroads, already covered by onRoad).
+    if (exitLanes.length) {
+      const prevOnRoad = onRoad;
+      onRoad = (x, z) => {
+        if (prevOnRoad(x, z)) return true;
+        for (const r of exitLanes) if (Math.abs(x * r.dir.z - z * r.dir.x) < PORTAL_ROAD_HALF) return true;
+        return false;
+      };
     }
 
     // Resolve a desired move against the fence, solid scenery, and the river.
@@ -4463,37 +4588,217 @@ import {
   }
 
   // =========================================================================
+  // RESOURCE ECOLOGY (Task 22) — a zone's harvestable resource nodes are now a
+  // DETERMINISTIC, PERSISTENT set keyed by zone id, not a fresh batch scattered
+  // on every entry. The persistent record per node is the plain data
+  //   { kind, x, z, respawn }            (respawn = remaining cooldown seconds)
+  // stored in `state.zoneRes[zoneId] = { nodes:[…], regrowAcc, sprouts }`. Live
+  // ResourceNode meshes are rebuilt FROM that data on entry (so re-entering a
+  // zone reuses the exact same set), depletion is written back on harvest (so a
+  // node you mined is still on cooldown when you return), and a NEW node sprouts
+  // only after `CONFIG.resourceRegrowSec` of in-game time has passed — never on
+  // entry. Every spawn/regrow path enforces a per-kind, per-zone cap.
+  //
+  // Determinism: the initial scatter + each regrow draw from a per-zone seeded
+  // sub-stream (mulberry32 keyed on worldSeed⊕zoneId⊕salt), so population is a
+  // pure function of (zone, worldSeed, elapsed in-game time) and never disturbs
+  // the global rng() stream that the rest of world-building shares.
+  // =========================================================================
+
+  // The per-zone resource MIX (kind → desired count) and its placement bands.
+  // Counts are clamped to CONFIG.resourceCaps below, so the mix can never exceed
+  // a kind's cap. The hub is richer (it's home); the wild zones are themed.
+  function resourceMixFor(zone) {
+    const FAR = (zone.radius || 60) - 6;
+    if (zone.home) {
+      return [
+        { kind: "tree",    n: 16, band: [12, FAR] },
+        { kind: "rock",    n: 12, band: [12, FAR] },
+        { kind: "herb",    n: 14, band: [10, FAR] },
+        { kind: "fiber",   n: 10, band: [10, FAR] },
+        { kind: "crystal", n: 7,  band: [Math.min(50, FAR - 4), FAR] },
+        { kind: "water",   n: 8,  band: [FAR - 8, FAR] },
+      ];
+    }
+    const byZone = {
+      forest:  [["tree", 6], ["herb", 6], ["fiber", 4]],
+      shore:   [["water", 6], ["fiber", 5], ["rock", 3]],
+      peaks:   [["crystal", 5], ["rock", 6], ["herb", 2]],
+      caverns: [["crystal", 6], ["rock", 5]],
+      thicket: [["herb", 5], ["fiber", 5], ["tree", 4]],
+    };
+    const spec = byZone[zone.id] || [["herb", 4], ["rock", 4]];
+    return spec.map(([kind, n]) => ({ kind, n, band: [10, FAR] }));
+  }
+
+  // The per-zone cap for one resource kind (Task 22).
+  function resourceCap(kind) {
+    const caps = CONFIG.resourceCaps || {};
+    return caps[kind] != null ? caps[kind] : (CONFIG.resourceCapDefault || 12);
+  }
+
+  // A tiny self-contained mulberry32 so the planner is reproducible from a key
+  // WITHOUT consuming the shared rng() stream (whose call count varies with how
+  // much scenery a zone built). Returns a function in [0,1).
+  function seededStream(key) {
+    let a = key >>> 0;
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  // Stable 32-bit key from the world seed, a zone id and a salt (so each zone +
+  // purpose gets its own deterministic sub-stream).
+  function zoneKey(zoneId, salt) {
+    let h = (getSeed() >>> 0) ^ ((salt | 0) * 0x9e3779b1);
+    for (let i = 0; i < zoneId.length; i++) h = Math.imul(h ^ zoneId.charCodeAt(i), 0x01000193);
+    return h >>> 0;
+  }
+
+  // Pick a valid {x,z} inside a band that avoids roads + river (so nodes never
+  // sit on a path or in the water). `rand` is the per-zone stream; `okAt` the
+  // world's placement guard. Returns null after a few tries.
+  function pickResourceSpot(rand, world, band, tries) {
+    const minR = band[0], maxR = Math.max(band[0] + 1, band[1]);
+    for (let i = 0; i < (tries || 24); i++) {
+      const a = rand() * Math.PI * 2, r = minR + rand() * (maxR - minR);
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      if (r <= 8) continue;
+      if (world.onRoad && world.onRoad(x, z)) continue;
+      if (world.inRiver && world.inRiver(x, z)) continue;
+      return { x, z };
+    }
+    return null;
+  }
+
+  // PURE: build the INITIAL deterministic node set for a zone (positions +
+  // kinds), honouring each kind's per-zone cap and the global cap. Driven by the
+  // per-zone seeded stream so it is identical every time the zone is generated.
+  function planInitialResources(zone, world) {
+    const rand = seededStream(zoneKey(zone.id, 1));
+    const mix = resourceMixFor(zone);
+    const nodes = [];
+    for (const s of mix) {
+      const cap = resourceCap(s.kind);
+      const want = Math.min(s.n, cap);
+      for (let i = 0; i < want; i++) {
+        if (nodes.length >= CONFIG.maxResourceNodes) break;
+        const p = pickResourceSpot(rand, world, s.band, 24);
+        if (!p) continue;
+        nodes.push({ kind: s.kind, x: round3(p.x), z: round3(p.z), respawn: 0 });
+      }
+    }
+    return nodes;
+  }
+
+  // Count live nodes of one kind in a record list.
+  function countKind(nodes, kind) {
+    let n = 0; for (const r of nodes) if (r.kind === kind) n++; return n;
+  }
+
+  // Advance a zone's regrowth clock by `dt` seconds of in-game time and sprout a
+  // single new node each time the cadence elapses (only for a kind still under
+  // its per-zone cap, and never past the global cap). Deterministic: the Nth
+  // sprout draws from a seeded stream keyed on (seed, zone, sproutIndex). Returns
+  // the list of newly-added node records (so the caller can build their meshes).
+  function regrowZoneResources(rec, zone, world, dt) {
+    const added = [];
+    if (!world) return added;
+    rec.regrowAcc = (rec.regrowAcc || 0) + Math.max(0, dt);
+    const cadence = CONFIG.resourceRegrowSec || 45;
+    let guard = 6; // cap sprouts per tick so a huge dt can't flood the zone
+    while (rec.regrowAcc >= cadence && guard-- > 0) {
+      rec.regrowAcc -= cadence;
+      if (rec.nodes.length >= CONFIG.maxResourceNodes) continue;
+      const idx = (rec.sprouts | 0);
+      const rand = seededStream(zoneKey(zone.id, 1000 + idx));
+      // Choose, from this zone's mix, a kind that is still under its cap.
+      const mix = resourceMixFor(zone);
+      const under = [];
+      for (const s of mix) if (countKind(rec.nodes, s.kind) < resourceCap(s.kind)) under.push(s);
+      rec.sprouts = idx + 1;
+      if (!under.length) continue; // every kind is at cap → nothing to add
+      const s = under[(rand() * under.length) | 0];
+      const p = pickResourceSpot(rand, world, s.band, 24);
+      if (!p) continue;
+      const node = { kind: s.kind, x: round3(p.x), z: round3(p.z), respawn: 0 };
+      rec.nodes.push(node);
+      added.push(node);
+    }
+    return added;
+  }
+
+  function round3(n) { return Math.round(n * 1000) / 1000; }
+
+  // Get (creating on first touch) a zone's persistent resource record. On first
+  // entry the deterministic initial set is planned; on re-entry the stored set is
+  // returned untouched (so no fresh batch piles up).
+  function zoneResourceRecord(state, zone, world) {
+    if (!state.zoneRes) state.zoneRes = {};
+    let rec = state.zoneRes[zone.id];
+    if (!rec) {
+      rec = { nodes: planInitialResources(zone, world), regrowAcc: 0, sprouts: 0 };
+      state.zoneRes[zone.id] = rec;
+    }
+    return rec;
+  }
+
+  // Build the live ResourceNode meshes for a zone from its persistent records,
+  // wiring each node back to its record so harvest/respawn write through (so the
+  // depletion state survives travel + reload). Honours the global live cap.
+  function buildResourceNodes(scene, world, interaction, player, state) {
+    const rec = zoneResourceRecord(state, world.zone, world);
+    for (const data of rec.nodes) {
+      if (state.resources.length >= CONFIG.maxResourceNodes) break;
+      state.resources.push(new ResourceNode(
+        scene, world.shadow, interaction,
+        new BABYLON.Vector3(data.x, 0, data.z), data.kind, player, state, data));
+    }
+  }
+
+  // Dispose the active zone's live resource meshes and rebuild them from its
+  // (possibly just-restored) persistent record (Task 22). Used by applySave when
+  // a run is restored INTO the zone already on screen, so the live set matches
+  // the saved set exactly. No-op without a world.
+  function rebuildZoneResources(state) {
+    const world = state.world; if (!world) return;
+    const interaction = interactionRef;
+    for (const r of state.resources) { try { r.dispose(); } catch (e) {} }
+    state.resources.length = 0;
+    buildResourceNodes(state.scene, world, interaction, playerRef, state);
+  }
+
+  // Per-frame regrow tick for the ACTIVE zone (Task 22). Advances its in-game
+  // regrow clock and materialises any sprouted node, so new resources appear
+  // gradually over time rather than in a fresh batch on every entry. Headless-
+  // safe (guards on world/interaction); pause-correct (dt is the play-loop dt).
+  function growZoneResources(state, dt) {
+    const world = state.world; if (!world) return;
+    if (!state.zoneRes) return;            // nothing planned yet (pre-content)
+    const rec = state.zoneRes[world.zone.id]; if (!rec) return;
+    const added = regrowZoneResources(rec, world.zone, world, dt);
+    if (!added.length) return;
+    const interaction = interactionRef;
+    for (const data of added) {
+      if (state.resources.length >= CONFIG.maxResourceNodes) break;
+      state.resources.push(new ResourceNode(
+        state.scene, world.shadow, interaction,
+        new BABYLON.Vector3(data.x, 0, data.z), data.kind, playerRef, state, data));
+    }
+  }
+
+  // =========================================================================
   // populateAdventure — scatter the story layer across the world: harvestable
   // resource nodes, the story NPCs at their landmarks, and the castle build
   // site on Castle Hill. Called once after the world is built.
   // =========================================================================
   function populateAdventure(scene, world, interaction, player, state) {
-    const FAR = CONFIG.worldRadius - 6;
-    const scatter = (minR, maxR) => {
-      for (let tries = 0; tries < 26; tries++) {
-        const a = rng() * Math.PI * 2, r = minR + rng() * (maxR - minR);
-        const x = Math.cos(a) * r, z = Math.sin(a) * r;
-        if (r > 8 && !world.onRoad(x, z) && !world.inRiver(x, z)) return { x, z };
-      }
-      return null;
-    };
-    // Resource nodes: thematic radius bands (crystal high + outer, water near the
-    // shore, the rest scattered through the meadow).
-    const spec = [
-      { kind: "tree", n: 16, band: [12, FAR] },
-      { kind: "rock", n: 12, band: [12, FAR] },
-      { kind: "herb", n: 14, band: [10, FAR] },
-      { kind: "fiber", n: 10, band: [10, FAR] },
-      { kind: "crystal", n: 7, band: [50, FAR] },
-      { kind: "water", n: 8, band: [FAR - 8, FAR] },
-    ];
-    for (const s of spec) {
-      for (let i = 0; i < s.n; i++) {
-        if (state.resources.length >= CONFIG.maxResourceNodes) break; // global live-node cap
-        const p = scatter(s.band[0], s.band[1]); if (!p) continue;
-        state.resources.push(new ResourceNode(scene, world.shadow, interaction, new BABYLON.Vector3(p.x, 0, p.z), s.kind, player, state));
-      }
-    }
+    // Resource nodes: built from the zone's DETERMINISTIC, PERSISTENT record
+    // (Task 22) so re-entering the hub reuses the same set instead of scattering
+    // a fresh batch. Per-kind caps + the time-gated regrow are enforced there.
+    buildResourceNodes(scene, world, interaction, player, state);
     // Story NPCs at their landmarks (vendor NPCs like the alchemist are placed
     // separately as dedicated shop vendors — they don't give quests).
     for (const data of NPC_DATA) {
@@ -4530,38 +4835,10 @@ import {
       for (let i = 0; i < 3; i++) spawnArtifact(scene, world, interaction, player, state);
     } else {
       state.merchant = null; state.blacksmith = null; state.alchemist = null; state.castle = null;
-      populateWildResources(scene, world, interaction, player, state);
-    }
-  }
-
-  // A few themed resource nodes for the wild zones so gather quests progress
-  // while exploring (forest = wood/herb, peaks = crystal/rock, shore =
-  // water/fiber, caverns = crystal/rock, thicket = herb/fiber).
-  function populateWildResources(scene, world, interaction, player, state) {
-    const zone = world.zone;
-    const FAR = world.radius - 6;
-    const byZone = {
-      forest:  [["tree", 6], ["herb", 6], ["fiber", 4]],
-      shore:   [["water", 6], ["fiber", 5], ["rock", 3]],
-      peaks:   [["crystal", 5], ["rock", 6], ["herb", 2]],
-      caverns: [["crystal", 6], ["rock", 5]],
-      thicket: [["herb", 5], ["fiber", 5], ["tree", 4]],
-    };
-    const spec = byZone[zone.id] || [["herb", 4], ["rock", 4]];
-    const scatter = () => {
-      for (let t = 0; t < 20; t++) {
-        const a = rng() * Math.PI * 2, r = 10 + rng() * (FAR - 12);
-        const x = Math.cos(a) * r, z = Math.sin(a) * r;
-        if (!world.onRoad(x, z)) return { x, z };
-      }
-      return null;
-    };
-    for (const pair of spec) {
-      for (let i = 0; i < pair[1]; i++) {
-        if (state.resources.length >= CONFIG.maxResourceNodes) break; // global live-node cap
-        const p = scatter(); if (!p) continue;
-        state.resources.push(new ResourceNode(scene, world.shadow, interaction, new BABYLON.Vector3(p.x, 0, p.z), pair[0], player, state));
-      }
+      // Wild zones get their themed resource set from the same DETERMINISTIC,
+      // PERSISTENT planner (Task 22) — so gathering still works out in the world,
+      // counts stay stable across travel, and per-kind caps hold everywhere.
+      buildResourceNodes(scene, world, interaction, player, state);
     }
   }
 
@@ -6131,13 +6408,23 @@ import {
     // Boss / dragon.
     const liveBoss = state.dragon || state.boss;
     if (liveBoss && liveBoss.alive && liveBoss.position) glyph(liveBoss.position.x, liveBoss.position.z, "#ff3bd0");
-    // Portals (coloured by kind). The name is queued for the post-clip label pass.
+    // Road-edge exits (Task 22): draw each as a short ROAD stub running to the
+    // rim with a gateway marker at its end, replacing the old portal-orb square,
+    // so the map reads "a road leads off here" rather than "a magic circle".
     for (const portal of world.portals || []) {
+      const col = PORTAL_COL[portal.kind] || "#ffd98a";
       const s = proj(portal.x, portal.z);
       ctx.save();
-      ctx.fillStyle = PORTAL_COL[portal.kind] || "#ffd98a";
-      ctx.strokeStyle = "#1a1a1a"; ctx.lineWidth = 1;
-      ctx.fillRect(s.x - 3.5, s.y - 3.5, 7, 7); ctx.strokeRect(s.x - 3.5, s.y - 3.5, 7, 7);
+      if (portal.dir) {
+        // The road stub: centre → the exit point.
+        const a = proj(portal.dir.x * (world.radius * 0.55), portal.dir.z * (world.radius * 0.55));
+        ctx.strokeStyle = "rgba(225,210,150,0.85)"; ctx.lineWidth = labels ? 3 : 2;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(s.x, s.y); ctx.stroke();
+      }
+      // The gateway marker at the rim.
+      ctx.fillStyle = col; ctx.strokeStyle = "#1a1a1a"; ctx.lineWidth = 1;
+      const hw = 3.5;
+      ctx.fillRect(s.x - hw, s.y - hw, hw * 2, hw * 2); ctx.strokeRect(s.x - hw, s.y - hw, hw * 2, hw * 2);
       ctx.restore();
       if (labels) labelReqs.push({ x: s.x, y: s.y, text: (portal.icon || "") + " " + tZoneName(ZONE_BY_ID[portal.to]), priority: 2 });
     }
@@ -6887,15 +7174,25 @@ import {
       this.cooldown = 0;   // brief immunity after arrival so we don't bounce back
     }
 
-    // Per-frame: has the player stepped onto a portal? If so, begin travel.
+    // Per-frame: has the player WALKED A ROAD to the map edge? (Task 22) Each
+    // portal is a road-edge band: travel fires when the player's radial position
+    // along the road direction reaches the exit threshold AND they're within the
+    // road's half-width laterally. The fence keeps them from going around it, so
+    // the trigger can't be skirted. A legacy circular portal (r) still works.
     check(dt) {
       if (this.transitioning) return;
       if (this.cooldown > 0) { this.cooldown -= dt; return; }
       const world = this.state.world; if (!world) return;
       const p = this.player.position;
       for (const portal of world.portals || []) {
-        const dx = p.x - portal.x, dz = p.z - portal.z;
-        if (dx * dx + dz * dz <= portal.r * portal.r) { this.travel(portal.to); return; }
+        if (portal.dir) {
+          const along = p.x * portal.dir.x + p.z * portal.dir.z;        // outward projection
+          const lateral = Math.abs(p.x * portal.dir.z - p.z * portal.dir.x); // dist to road centre
+          if (along >= portal.exitR && lateral <= portal.half) { this.travel(portal.to); return; }
+        } else if (portal.r != null) {
+          const dx = p.x - portal.x, dz = p.z - portal.z;
+          if (dx * dx + dz * dz <= portal.r * portal.r) { this.travel(portal.to); return; }
+        }
       }
     }
 
@@ -6982,10 +7279,20 @@ import {
     if (!portal && world.portals && world.portals.length) portal = world.portals[0];
     let x = 0, z = (world.radius || 60) - 14;
     if (portal) {
-      const len = Math.hypot(portal.x, portal.z) || 1;
-      const inward = (len - 9) / len;           // 9m toward the centre
-      x = portal.x * inward; z = portal.z * inward;
-      player.facing = Math.atan2(-portal.x, -portal.z); // look into the zone
+      if (portal.dir) {
+        // Road-edge arrival (Task 22): land ON the incoming road, stepped well
+        // inside the exit threshold so the player walks INTO the zone and can't
+        // instantly re-trigger the gateway. Facing follows the road inward.
+        const R = world.radius || 60;
+        const ar = Math.max(8, R - 13);           // safely below exitR (R-4.5)
+        x = portal.dir.x * ar; z = portal.dir.z * ar;
+        player.facing = Math.atan2(-portal.dir.x, -portal.dir.z);
+      } else {
+        const len = Math.hypot(portal.x, portal.z) || 1;
+        const inward = (len - 9) / len;           // 9m toward the centre (legacy)
+        x = portal.x * inward; z = portal.z * inward;
+        player.facing = Math.atan2(-portal.x, -portal.z);
+      }
     }
     if (player.root) player.root.position.set(x, 0, z);
   }
@@ -7175,6 +7482,11 @@ import {
       // Adventure layer: NPCs, harvest nodes, castle, location-reach objectives.
       for (const n of state.npcs) n.update(dt);
       for (const r of state.resources) r.update(dt);
+      // Time-gated regrowth (Task 22): advance THIS zone's regrow clock by the
+      // in-game dt (so it pauses with the game) and build any newly-sprouted
+      // node's meshes. New nodes appear only after the cadence elapses, never on
+      // entry, and never past a kind's per-zone cap or the global live cap.
+      growZoneResources(state, dt);
       if (state.castle) state.castle.update(dt);
       checkLocations(state, player);
 
@@ -8051,7 +8363,7 @@ import {
   // monsters, the boss, artifacts and dropped coins, plus the wave clock) is
   // serialized explicitly so the run resumes exactly where it left off.
   // =========================================================================
-  const SAVE_VERSION = 12;
+  const SAVE_VERSION = 13;
   const PENDING_LOAD_KEY = "gg3d_pending_load"; // sessionStorage hand-off across reload
   const AUTOSTART_KEY = "gg3d_autostart";       // restart -> skip the start screen
 
@@ -8092,6 +8404,10 @@ import {
       // waypoint ({ kind, id }) so the player's chosen destination survives reload.
       discovered: Object.keys(state.discovered || {}),
       waypoint: state.waypoint || null,
+      // Per-zone resource ecology (v13, Task 22): each visited zone's node set
+      // (positions + kinds + remaining respawn) + its regrow clock, so the live
+      // count + depletion stay STABLE across reload (no fresh batch on entry).
+      zoneRes: serializeZoneRes(state.zoneRes),
       money: state.coins,
       player: {
         health: round(player.health),
@@ -8140,6 +8456,48 @@ import {
     if (inst && inst.count != null && isStackable(inst.id)) return { id: inst.id, count: inst.count | 0 };
     const out = { id: inst.id, lvl: instLevel(inst) };
     if (inst.affixes && inst.affixes.length) out.aff = inst.affixes.slice();
+    return out;
+  }
+
+  // Per-zone resource ecology → a compact save map (Task 22, v13). Each zone id
+  // maps to its node list (kind + rounded x/z + remaining respawn) plus the
+  // regrow clock state. Empty/absent → omitted so the field is small.
+  function serializeZoneRes(zoneRes) {
+    const out = {};
+    if (!zoneRes) return out;
+    const round = (n) => Math.round(n * 1000) / 1000;
+    for (const id in zoneRes) {
+      const rec = zoneRes[id]; if (!rec || !ZONE_BY_ID[id]) continue;
+      out[id] = {
+        nodes: (rec.nodes || []).map((nd) => ({
+          k: nd.kind, x: round(nd.x), z: round(nd.z),
+          r: Math.max(0, round(nd.respawn || 0)),
+        })),
+        acc: round(rec.regrowAcc || 0),
+        s: rec.sprouts | 0,
+      };
+    }
+    return out;
+  }
+
+  // Rebuild the per-zone resource map from a save (Task 22). Drops unknown zones
+  // and unknown resource kinds; clamps each zone to the global node cap. A v<13
+  // save has no field → returns {} so each zone re-plans its deterministic set on
+  // first entry (the seed is the same, so the world is reproduced cleanly).
+  function deserializeZoneRes(saved) {
+    const out = {};
+    if (!saved || typeof saved !== "object") return out;
+    for (const id in saved) {
+      if (!ZONE_BY_ID[id]) continue;
+      const rec = saved[id] || {};
+      const nodes = [];
+      for (const nd of (Array.isArray(rec.nodes) ? rec.nodes : [])) {
+        if (nodes.length >= CONFIG.maxResourceNodes) break;
+        if (!nd || !RESOURCE_KINDS[nd.k]) continue;
+        nodes.push({ kind: nd.k, x: +nd.x || 0, z: +nd.z || 0, respawn: Math.max(0, +nd.r || 0) });
+      }
+      out[id] = { nodes, regrowAcc: Math.max(0, +rec.acc || 0), sprouts: rec.s | 0 };
+    }
     return out;
   }
 
@@ -8262,6 +8620,13 @@ import {
     for (const id of (Array.isArray(d.discovered) ? d.discovered : [])) if (ZONE_BY_ID[id]) state.discovered[id] = true;
     state.waypoint = validWaypoint(d.waypoint) ? { kind: d.waypoint.kind, id: d.waypoint.id } : null;
 
+    // Per-zone resource ecology (v13, Task 22). Restored BEFORE the zone swap so
+    // the target zone rebuilds its exact saved node set + cooldowns instead of
+    // scattering a fresh batch. A pre-v13 save has no field → {}; each zone then
+    // plans its deterministic set from the (restored) seed on first entry, so the
+    // world is still reproduced cleanly and counts stay stable thereafter.
+    state.zoneRes = deserializeZoneRes(d.zoneRes);
+
     // Player gear (zone-independent). Rebuild the UNIFIED bag + equipped slots,
     // then recompute the whole derived stat block. Pre-v12 saves carried a
     // separate `potions` belt + `materials` map; fold them into the bag here
@@ -8317,9 +8682,13 @@ import {
     state.discovered[targetZone] = true;   // you're always standing in a known zone
     if (state.zoneId !== targetZone && zoneManager) {
       zoneManager._swap(state.zoneId, targetZone, ZONE_BY_ID[targetZone]);
-    } else if (state.castle) {
-      state.castle.restore(state.castleBuilt);
-      state.castle.resummon();
+    } else {
+      // Restoring INTO the current zone (the hub on boot): the live resources
+      // were built from a freshly-planned record at boot. Replace them with the
+      // SAVED set (Task 22) so depletion/positions match the snapshot, then
+      // restore the castle build + re-wake the dragon if it was complete.
+      rebuildZoneResources(state);
+      if (state.castle) { state.castle.restore(state.castleBuilt); state.castle.resummon(); }
     }
 
     // Day/night + weather (after the swap so the zone's handles are current).
@@ -10676,6 +11045,10 @@ import {
       Quests, Dialogue, Crafting, CastleUI, QuestLog, DayNight, Weather,
       ResourceNode, QuestGiver, CastleSite, castleCollisionCircles, Dragon, Burst,
       meleeSweep,
+      // ---- Resource ecology: deterministic, time-gated, per-kind capped (Task 22) ----
+      resourceMixFor, resourceCap, planInitialResources, regrowZoneResources,
+      zoneResourceRecord, buildResourceNodes, growZoneResources, rebuildZoneResources,
+      countKind, seededStream, zoneKey, serializeZoneRes, deserializeZoneRes,
       // ---- Main story campaign (Task 2) ----
       Story, STORY, MISSIONS, SIDE_QUESTS, MAIN_IDS, SIDE_IDS, CHAPTER_BY_ID, missionsOfChapter,
       // ---- RPG world / zones ----
