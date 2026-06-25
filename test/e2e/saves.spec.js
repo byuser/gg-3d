@@ -74,19 +74,26 @@ test("save → rename → reload → load a named slot round-trips the run", asy
   await safeClick(page.locator("#savesBtnP"));
   await expect(page.locator("#savesOverlay")).not.toHaveClass(/hidden/);
 
-  // Slot 0 is empty → its "New save" writes the live run into it.
-  const slot0 = page.locator('#savesList .saves-row[data-slot="0"]');
-  await safeClick(slot0.locator('[data-act="new"]'));
-  // The slot is now "used" (Load / Rename / Delete appear).
-  await expect(page.locator('#savesList .saves-row[data-slot="0"][data-used="1"]')).toHaveCount(1);
+  // Use a slot that is reliably EMPTY. (Slot 0 may already hold the auto-migrated
+  // in-progress run — the Task-17 session snapshot is imported into the first free
+  // slot on first read — so target slot 1, which is always empty here.)
+  const SLOT = 1;
+  const row = (act) => page.locator(`#savesList .saves-row[data-slot="${SLOT}"] [data-act="${act}"]`);
+  await expect(page.locator(`#savesList .saves-row[data-slot="${SLOT}"][data-used="0"]`)).toHaveCount(1);
 
-  // Rename it inline via the stable hooks.
-  await safeClick(page.locator('#savesList .saves-row[data-slot="0"] [data-act="rename"]'));
-  const input = page.locator('#savesList .saves-row[data-slot="0"] [data-act="rename-input"]');
+  // "New save" writes the live run into the empty slot.
+  await safeClick(row("new"));
+  await expect(page.locator(`#savesList .saves-row[data-slot="${SLOT}"][data-used="1"]`)).toHaveCount(1);
+
+  // Rename it inline via the stable hooks. Click the explicit "Save" button rather
+  // than pressing Enter (the input is removed mid-keydown, which can confound the
+  // keyup dispatch).
+  await safeClick(row("rename"));
+  const input = row("rename-input");
   await expect(input).toBeVisible();
   await input.fill("My Checkpoint");
-  await input.press("Enter");
-  await expect(page.locator('#savesList .saves-row[data-slot="0"] [data-act="name"]')).toHaveText("My Checkpoint");
+  await safeClick(row("rename-commit"));
+  await expect(row("name")).toHaveText("My Checkpoint");
 
   await safeClick(page.locator("#savesDone"));
 
@@ -97,10 +104,10 @@ test("save → rename → reload → load a named slot round-trips the run", asy
   // Open the Saves screen from the START menu and confirm the slot survived.
   await safeClick(page.locator("#savesBtn"));
   await expect(page.locator("#savesOverlay")).not.toHaveClass(/hidden/);
-  await expect(page.locator('#savesList .saves-row[data-slot="0"] [data-act="name"]')).toHaveText("My Checkpoint");
+  await expect(row("name")).toHaveText("My Checkpoint");
 
   // Load it — the boot reload path re-seeds + applies the save, returning to play.
-  await safeClick(page.locator('#savesList .saves-row[data-slot="0"] [data-act="load"]'));
+  await safeClick(row("load"));
   await expect(page.locator("#hud")).not.toHaveClass(/hidden/, { timeout: 30_000 });
   await expect(page.locator("#minimap")).toBeVisible();
 
