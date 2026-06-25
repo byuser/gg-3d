@@ -146,6 +146,24 @@ export default defineConfig({
       testMatch: /inventory\.spec\.js/,
       use: s24Landscape,
     },
+    // Map subsystem (Task 20): the full-map overlay fits one screen (no page
+    // scroll) while the results list scrolls — verified at desktop AND the S24
+    // Ultra portrait + landscape profiles (both orientations are in scope).
+    {
+      name: "map-desktop",
+      testMatch: /map\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "map-s24-portrait",
+      testMatch: /map\.spec\.js/,
+      use: s24Portrait,
+    },
+    {
+      name: "map-s24-landscape",
+      testMatch: /map\.spec\.js/,
+      use: s24Landscape,
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",
