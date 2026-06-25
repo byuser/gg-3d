@@ -5072,6 +5072,8 @@ import {
         const have = id ? bagCount(p, id) : 0;
         const card = document.createElement("div");
         card.className = "pot-slot-card pot-droptarget" + (def ? " filled" : "");
+        // Stable, locale-independent test hooks (mirrors the Saves screen rows).
+        if (card.dataset) { card.dataset.potSlot = String(i); card.dataset.filled = def ? "1" : "0"; }
         const pickedHere = this.picked && this.picked.kind === "slot" && this.picked.slot === i;
         if (pickedHere) card.classList.add("picked");
         card.innerHTML = `<div class="pot-slot-key">${i + 4}</div>` +
@@ -5105,17 +5107,28 @@ import {
         const def = getDef(inst.id);
         const below = `<div class="stack-count inline">×${inst.count}</div>`;
         const slotted = p.potionSlots.includes(inst.id);
+        const picked = this.picked && this.picked.kind === "roster" && this.picked.id === inst.id;
         const card = itemCard(def, t("inv.drinkOne"), "buy-btn potion-buy-btn", false,
           () => this.drinkBag(inst.id), slotted ? t("inv.slottedTag") : "", 0, null, below);
         card.classList.add("draggable", "pot-bag-card");
+        if (picked) card.classList.add("picked");
+        if (card.dataset) card.dataset.potBag = inst.id;   // stable test hook
         // A bag potion is the drag SOURCE (roster → slot assigns it).
         this._wirePotionDrag(card, { kind: "roster", id: inst.id, icon: def.icon });
-        // Tap-to-pick a bag potion (accessible fallback).
+        // Tap-to-pick a bag potion (accessible fallback) — tapping the card body
+        // (anywhere but the Drink button) picks it up to drop on a quick-slot.
         card.addEventListener("click", (e) => {
-          // Don't double-fire when the Drink button was the target.
-          if (e && e.target && e.target.tagName === "BUTTON") return;
+          if (e && e.target && e.target.tagName === "BUTTON") return; // the Drink button
           this.tapPick({ kind: "roster", id: inst.id });
         });
+        // An explicit, unambiguous "Assign" button (accessible + a clean test
+        // hook): picks this potion so the next quick-slot tap assigns it.
+        const pickBtn = document.createElement("button");
+        pickBtn.className = "buy-btn pot-pick-btn" + (picked ? " active" : "");
+        pickBtn.textContent = picked ? t("inv.picked") : t("inv.assign");
+        if (pickBtn.dataset) pickBtn.dataset.potPick = inst.id;
+        pickBtn.addEventListener("click", (e) => { if (e && e.stopPropagation) e.stopPropagation(); this.tapPick({ kind: "roster", id: inst.id }); });
+        card.appendChild(pickBtn);
         dom.invBag.appendChild(card);
       }
     },

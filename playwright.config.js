@@ -1,4 +1,16 @@
 import { defineConfig, devices } from "@playwright/test";
+import { existsSync } from "node:fs";
+
+// Some sandboxed dev environments ship a PRE-INSTALLED Chromium at a fixed path
+// (PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers) whose build can differ from the one
+// the pinned @playwright/test version would auto-download. When that fixed binary
+// is present, point the launcher at it so local E2E runs work without a download.
+// On CI / public runners the path doesn't exist, so this is inert and Playwright
+// uses its own installed browser as normal.
+const SANDBOX_CHROMIUM = "/opt/pw-browsers/chromium";
+const sandboxLaunch = existsSync(SANDBOX_CHROMIUM)
+  ? { launchOptions: { executablePath: SANDBOX_CHROMIUM } }
+  : {};
 
 // The Galaxy S24 Ultra device profile (1440 × 3120, DPR ≈ 3.5) — the mobile
 // reference target every Task 16–22 UI/responsive test must pass, in BOTH
@@ -37,6 +49,7 @@ export default defineConfig({
   use: {
     baseURL: "http://localhost:4173",
     trace: "on-first-retry",
+    ...sandboxLaunch,
     // Babylon is fetched from its public CDN at runtime. Some CI / sandbox
     // networks proxy HTTPS with their own cert; tolerate that so the engine
     // loads. (Public Pages serves over a valid cert regardless.)
