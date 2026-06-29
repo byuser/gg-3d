@@ -1643,17 +1643,19 @@ A task is **done** only when **all** of these are true:
 
 ---
 
-## 4d. The backlog (Tasks 23–30) — player-reported polish from real device play
+## 4d. The backlog (Tasks 23–39) — player-reported polish from real device play
 
-> Tasks 23–30 come from a player testing the shipped game on a real phone. They
-> keep the Google sign-in alive across reloads, deepen the Russian localization to
-> real grammar, make equipment actually *look* like gear, let players lay out their
-> own controls, and finish the mobile HUD so nothing overlaps and every NPC is
-> reachable. They hold to the same end-to-end, **release-ready, tested** bar as
-> Tasks 2–22 (one run completes exactly one task). Like Tasks 16–22, every
-> UI/responsive change must pass on the **Galaxy S24 Ultra** device profile
-> (1440 × 3120, DPR ≈ 3.5, portrait + landscape) added in Task 16, alongside the
-> existing desktop coverage. Recommended ordering is in [§ 5](#5-recommended-order).
+> Tasks 23–39 come from a player testing the shipped game on a real phone. They keep
+> the Google sign-in alive across reloads, deepen the Russian localization to real
+> grammar, **rework how every equipment category looks worn on the character and
+> rewrite the combat animations from scratch** (Tasks 25–35, split one task per gear
+> category), let players lay out their own controls, and finish the mobile HUD so
+> nothing overlaps and every NPC is reachable. They hold to the same end-to-end,
+> **release-ready, tested** bar as Tasks 2–22 (one run completes exactly one task).
+> Like Tasks 16–22, every UI/responsive change must pass on the **Galaxy S24 Ultra**
+> device profile (1440 × 3120, DPR ≈ 3.5, portrait + landscape) added in Task 16,
+> alongside the existing desktop coverage. Recommended ordering is in
+> [§ 5](#5-recommended-order).
 
 ### Task 23 — Persist Google Drive sign-in across reloads (true silent re-auth; no unprompted dialog)
 - **Status:** `[ ]`
@@ -1815,140 +1817,402 @@ A task is **done** only when **all** of these are true:
   identity so the shared templates stay simple; extend the existing `plural()` rather
   than replacing it.
 
-### Task 25 — Composite, multicoloured, real-looking equipment icons (procedural/SVG sprites, not flat emoji)
-- **Status:** `[ ]`
-- **Depends on:** Task 12 (`ITEM_DB`, the 12 equip slots, rarity tiers, the
-  inventory/shop/anvil UI cards) and Task 3 (the model/material fidelity pass). None
-  else.
-- **Goal.** Every item is drawn as a **single emoji + a rarity-coloured name**
-  (`ITEM_DB[*].icon` is one emoji, rendered as `<div class="icon">…</div>` at 26 px
-  via `itemCard()`; rarity shows only as the name's text colour). All helmets share
-  🧢/⛑️, all swords ⚔️, all rings 💍 — they don't read as distinct, real-looking gear
-  and don't show rarity at a glance. Replace the flat emoji with **composite,
-  multicoloured item icons** that look like real-world equipment — the layered,
-  rarity-framed inventory icons well-reviewed RPGs (Diablo, WoW, Path of Exile) use
-  — while honouring the **static-site / no-large-binaries** budget (so: **procedurally
-  drawn vector/SVG sprites**, not photographed PNGs).
-- **Scope (build this):**
-  - **A procedural composite-icon system.** Build each item's icon from **multiple
-    coloured layers/shapes** that reflect its real form — e.g. a sword = blade +
-    crossguard + grip + pommel; a helmet = dome + brim + band + visor; a ring = band
-    + gemstone; a potion = bottle + liquid + cork + highlight; a bow = limb + string
-    + grip. Author them as **inline SVG (vector)** or canvas-drawn sprites generated
-    from a small declarative spec per item *type*, tinted per item by a **material
-    palette** (iron / steel / leather / gold / crystal / wood) so two swords can look
-    different. SVG keeps it crisp at any DPI (incl. the S24 Ultra), multicolour, and
-    **zero binary weight** — aligned with the procedural-first Golden Rule.
-  - **Rarity made visible on the icon.** Frame each icon by rarity
-    (common → legendary) with a coloured border/backplate + a subtle gloss/glow on
-    epic/legendary (matching the worn-gear rarity sheen from Task 12), so rarity
-    reads from the icon itself, not just the name colour.
-  - **Wire it through every item surface.** Render the composite icon in the
-    inventory bag, equipment slots, shop, anvil, alchemist, quest rewards, loot
-    toasts and the potion quick-slots — replacing the `def.icon` emoji `<div>` (keep
-    a graceful **emoji/colour fallback** for headless and any item without a spec).
-    Reuse the colours already in `RARITY`.
-  - **Budget + perf.** Icons are lightweight vector/CSS, generated once and cached;
-    no per-frame work, no large assets, no layout jank on mobile. Any committed asset
-    (if SVG sprites are stored as files) stays small + lazy-loaded with a fallback.
-- **Acceptance criteria:**
-  - Items render as **composite, multicoloured, real-looking** icons (distinct
-    silhouettes per weapon/armour/jewelry/consumable kind, varied by material), not
-    single emoji; rarity is visible **on the icon**.
-  - Every `ITEM_DB` entry maps to a composite icon (or the documented fallback);
-    icons are crisp at phone DPI and on desktop; no perf regression or layout jank.
-  - Headless-safe (no canvas/SVG in Node ⇒ fallback path, no throw); full pipeline
-    green; repo stays lightweight (no large binaries).
-- **Tests to add:** the **icon-spec generator** is a pure, tested function (every
-  item type yields a layered spec; every `ITEM_DB` id resolves to an icon or
-  fallback); rarity-frame selection is unit-tested; a UI smoke that the
-  inventory/shop render the composite icon nodes (not the emoji `<div>`); the
-  headless fallback verified.
-- **Files:** `src/data/items.js` (per-type icon specs / material-palette metadata)
-  or a new `src/data/itemicons.js`, `src/game.js` (`itemCard()` + every
-  item-rendering surface, the icon builder + cache), `css/style.css` (icon sizing /
-  frames; rarity borders), `test/items.test.js` (+ a UI smoke), `README.md`. No
-  `SAVE_VERSION` change (visual only).
-- **Out of scope:** importing a photo-real texture/icon pack or large PNG atlases
-  (violates the asset budget — keep it vector/procedural); redesigning the 3D
-  worn-gear meshes (that's Task 26); rebalancing items.
-- **Hints:** drive icons from a **small declarative spec keyed by item type +
-  material**, not one hand-drawn asset per item, so 60+ items reuse a dozen shape
-  recipes; SVG is the sweet spot (vector, multicolour, tiny, crisp, headless-
-  fallbackable); reuse `RARITY[*].color` for frames so it matches the worn-gear sheen.
+**Worn-equipment appearance + combat-animation overhaul (Tasks 25–35) — the
+per-category breakdown.** Today equipped gear shows on Lily as **single-colour
+primitive blobs**: every helmet is the same dome + brim, every chest the same
+cylinder, every part tinted only by rarity colour (`_buildWornGear` /
+`refreshWornGear`, `src/game.js` ~1175-1275 — flat `mat` / `emat` materials, **no
+per-item shape**), and combat is the **one `Swing` arc** from Task 5. This family
+reworks **how each equipment category looks when worn on the character** and
+**rewrites the weapon firing + attack animations from scratch**, to the readability
+of a real MMORPG. Per the request it is split **one task per equipment category** so
+each ships + merges independently. **Shared bar for every worn-gear task (25–33):**
+build the part **procedurally** (no large binaries — the published site stays static,
+Golden Rules 1 & 6) but give **each item def a distinct silhouette** (shape varies by
+item type / material / set, not just a rarity tint); recolour + sheen by **rarity**
+(reuse the Task 12 `paint()` rule) and add a **set** motif (Ironguard / Dragonscale);
+**tier-gate** detail via `wornDetailFor`; attach to the correct body segment and
+**animate with the character** (and the Task 34 attacks); **dispose on teardown /
+re-equip** (no leaks); stay **headless-safe** (feature-detect Babylon); and **clip
+cleanly** for that part (no poke-through of the body or neighbours — the full-loadout
+integration is **Task 35**). Each task adds a **real-browser screenshot** for its
+category + a unit test for its pure shape/spec helper, and needs **no save-schema
+change** (visuals/animation are transient).
 
-### Task 26 — Worn-gear clipping audit: every visible clothing part fits cleanly (no stray/poke-through meshes)
+### Task 25 — Worn helmets: a distinct, real-looking helm per item (not one rarity-tinted dome)
 - **Status:** `[ ]`
-- **Depends on:** Task 12 (the visible worn gear on Lily — `_buildWornGear` /
-  `refreshWornGear` / `_animateCloak`, `WORN_SLOTS`, `wornDetailFor`) and Task 5 (the
-  `Swing` / flinch animation the parts move with). None else.
-- **Goal.** The equipped gear rendered on Lily — helmet (dome + brim), breastplate,
-  belt, pauldrons (L/R), gloves (L/R), boots (L/R) and a billowing cloak — is built
-  from hard-coded primitive offsets (`_buildWornGear`, `src/game.js` ~1175-1245), and
-  several parts **poke through the body or each other** in motion: the **pauldrons**
-  can clip inward into the torso/chest, the **cloak** can swing through the legs on
-  sharp turns (pivot rotates ±0.5 rad in `_animateCloak`), the **boots** can intersect
-  the leg meshes during stride, and the **belt** overlaps the chest band. Do a
-  thorough **clipping/fit audit** of **every visible worn part**, across **all equip
-  combinations, all animation states (idle / walk / `Swing` / flinch) and all quality
-  tiers**, and fix the geometry so nothing sticks out or punches through — the
-  layered-armour cleanliness well-reviewed RPGs (Skyrim, Monster Hunter, Guild Wars 2)
-  hold their character models to.
+- **Depends on:** Task 12 (the worn-gear system + the `helmet` slot), Task 3
+  (models/materials), Task 4 (lighting). Honours the shared bar above (Tasks 25–35).
+- **Goal.** Every helmet renders as the **same dome + brim** (`_buildWornGear`
+  ~1183-1189), recoloured only by rarity, so a leather cap, an iron helm and a dragon
+  helm look identical on the character. Give **each helmet item** a distinct,
+  real-looking head piece — the readable, per-item headgear an MMORPG shows.
 - **Scope (build this):**
-  - **Audit each part against the body + neighbours.** Review the offsets / scales /
-    parenting in `_buildWornGear` for helmet, breastplate, belt, pauldrons, gloves,
-    boots and cloak: confirm each sits **on** its body segment (head / torso / arms /
-    legs) without intersecting it or an adjacent part at rest, and re-tune the
-    hard-coded positions/scales so seams are clean.
-  - **Fix the motion cases.** Drive the audit through the real animation: bind the
-    cloak's billow (`_animateCloak`) and the limb-parented parts (pauldrons on
-    `armL`/`armR`, gloves on the hands, boots on `legL`/`legR`) through the full
-    `Swing` arc + walk stride + flinch and ensure **no part penetrates the body or
-    another part** at any frame. Clamp the cloak pivot / reshape it so it drapes
-    behind the legs instead of scything through them; seat the pauldrons on the
-    shoulder without diving into the chest; keep boots hugging the shins through the
-    stride.
-  - **All tiers + all loadouts.** Verify both `wornDetailFor` tiers (low drops
-    pauldrons / belt + cloak sway; high builds everything) and a representative matrix
-    of equipped/empty slot combinations — a part must never appear when its slot is
-    empty, nor leave a stray mesh after unequip (`refreshWornGear` toggles), and must
-    dispose cleanly on teardown (no leaks).
-  - **Make fit data reviewable.** Pull the per-part transforms into a small, named
-    **fit table** (offset / scale / parent per part) so placement is auditable +
-    testable rather than buried in magic numbers, and document the body-segment anchor
-    each part rides.
+  - **Per-item helmet archetypes.** Replace the single dome+brim with a small set of
+    **procedural helmet shapes** chosen by the item def (soft cap, open iron helm with
+    nasal/cheek guards, full great-helm with visor slit, horned/winged dragon helm),
+    built from layered primitives, **varied by material** (leather/iron/steel/gold/
+    dragonscale) and **set** motif. Map each `helmet` item in `ITEM_DB` to an archetype.
+  - **Finish + fit.** Keep the rarity recolour/emissive sheen (`paint()`); add the set
+    motif where the item belongs to a set. Seat it on the head anchor so it never
+    floats or sinks into the face, and the brim/visor never clips the eyes or ponytail
+    in idle/walk/attack. Tier-gate (a simpler shell on low tier).
 - **Acceptance criteria:**
-  - With any mix of gear equipped, **no worn part clips through Lily's body or
-    another part** in idle, walking, attacking (`Swing`) or flinching, on every
-    quality tier — the cloak drapes behind the legs, pauldrons sit on the shoulders,
-    boots hug the legs, belt/chest don't intersect.
-  - Empty slots show **no** mesh; unequip leaves **no** stray mesh; parts dispose on
-    zone teardown (no leaks); low tier still omits its parts cleanly.
-  - Headless-safe; full pipeline green; a real-browser screenshot pass confirms clean
-    fit from the gameplay camera.
-- **Tests to add:** the per-part **fit table** is a pure, tested data structure (each
-  part has a valid parent + bounded offset/scale); an invariant test that built part
-  bounding regions stay within their body segment's envelope (no inward/outward
-  penetration beyond a tolerance) at sampled animation phases; `refreshWornGear` shows
-  / hides exactly the equipped parts (no stray on unequip); teardown disposes all
-  worn meshes; a Playwright screenshot of a fully-geared Lily mid-`Swing` for visual
-  regression.
-- **Files:** `src/game.js` (`_buildWornGear` / `refreshWornGear` / `_animateCloak`
-  offsets → named fit table, `wornDetailFor`, teardown/dispose), `test/items.test.js`
-  (or a new `test/worngear.test.js`) + a Playwright screenshot spec, `README.md`. No
-  `SAVE_VERSION` change (visual only).
-- **Out of scope:** new worn-gear *kinds* or full skeletal skinning/rigging (keep the
-  procedural primitive parts — just make them fit); redesigning the item icons
-  (Task 25); per-item unique mesh shapes (rarity recolour stays).
-- **Hints:** lift the magic offsets into a named table so fit becomes data you can
-  assert; test penetration at a few sampled `Swing` / stride phases rather than every
-  frame; the cloak and pauldrons are the known offenders — start there.
+  - Helmets read differently on the character by type/material/set; rarity + set
+    finish is visible; the helm sits correctly with no face/ponytail clipping.
+  - Disposed on teardown/unequip (no leaks); headless-safe; tier-gated; full pipeline
+    green; a real-browser screenshot confirms three distinct helmets worn.
+- **Tests to add:** the **helmet archetype selector** is a pure, tested function
+  (every `helmet` def → a valid archetype + material); a build/dispose-no-leak test; a
+  Playwright screenshot of three worn helmets.
+- **Files:** `src/game.js` (`_buildWornGear` helmet builder → per-archetype,
+  `refreshWornGear`), `src/data/items.js` (helmet archetype/material metadata),
+  `test/items.test.js` (+ a screenshot spec), `README.md`. No `SAVE_VERSION` change.
+- **Out of scope:** the item *icons* (unchanged — this is the worn 3D mesh); other
+  slots (own tasks); the attack animation (Task 34); cross-part clipping (Task 35).
+- **Hints:** drive the shape from a **small archetype table keyed by item + material**;
+  reuse the rarity `paint()` + `wornDetailFor` gates from Task 12.
 
-### Task 27 — Customizable on-screen control layout (drag any control anywhere; saved + restored)
+### Task 26 — Worn chest pieces: layered breastplates & robes per item
+- **Status:** `[ ]`
+- **Depends on:** Task 12 (the `breastplate` slot), Task 3, Task 4. Shared bar above.
+- **Goal.** Every chest is the **same z-scaled cylinder** (`_buildWornGear`
+  ~1191-1195) tinted by rarity. Make each chest item a distinct, layered torso piece —
+  the centrepiece an MMORPG armour set reads from.
+- **Scope (build this):**
+  - **Per-item chest archetypes.** Leather vest, segmented iron cuirass, ornate plate
+    (aegis), dragonscale, cloth robe — built from layered primitives (chest shell +
+    straps/trim/lames), varied by material + **set** (Ironguard/Dragonscale carry their
+    motif). Map each `breastplate` item to an archetype.
+  - **Finish + fit.** Rarity recolour/sheen + set motif; seat on the torso (`lean`)
+    without intersecting the **belt** (Task 29), the **pauldrons** (Task 27), the neck
+    or the arms; tier-gate the layering.
+- **Acceptance criteria:**
+  - Chest pieces read distinctly by type/material/set with visible rarity/set finish;
+    no intersection with belt/pauldrons/arms/neck in idle/walk/attack.
+  - Disposed on teardown/unequip; headless-safe; tier-gated; pipeline green; screenshot
+    of two distinct chests worn.
+- **Tests to add:** the **chest archetype selector** is pure + tested; build/dispose
+  no-leak; a Playwright screenshot.
+- **Files:** `src/game.js` (`_buildWornGear` chest builder), `src/data/items.js`
+  (archetype/material metadata), `test/items.test.js` (+ screenshot), `README.md`. No
+  `SAVE_VERSION` change.
+- **Out of scope:** icons; other slots; animation (Task 34); cross-part integration
+  (Task 35).
+- **Hints:** the chest is the visual anchor of a set — coordinate its motif with the
+  helmet/pauldrons so a full set reads as one suit.
+
+### Task 27 — Worn pauldrons: shoulder armour that sits on the shoulder (not in the chest)
+- **Status:** `[ ]`
+- **Depends on:** Task 12 (the `pauldrons` slot), Task 3, Task 4. Shared bar above.
+- **Goal.** Pauldrons are **plain spheres on `armL`/`armR`** (`_buildWornGear`
+  ~1205-1214, scale 1.05/0.7/1.05) that **clip inward into the torso/chest**. Make them
+  real shoulder pieces seated **on** the shoulder.
+- **Scope (build this):**
+  - **Per-item shoulder shapes.** Rounded caps, layered lames, spiked/trimmed by set —
+    built from layered primitives, varied by material + set; map each `pauldrons` item
+    to an archetype.
+  - **Finish + fit.** Rarity/set finish; re-anchor so each pauldron sits on the
+    shoulder joint and rotates with `armL`/`armR` through the attack **without diving
+    into the chest** or the neck. Tier-gate (currently high-only — keep a clean
+    low-tier omission).
+- **Acceptance criteria:**
+  - Pauldrons sit on the shoulders (no inward clip into torso/chest) through idle/walk/
+    attack; distinct by type/material/set; rarity/set finish visible.
+  - Disposed on teardown/unequip; headless-safe; tier-gated; pipeline green; screenshot
+    mid-attack confirms no chest penetration.
+- **Tests to add:** the **pauldron archetype selector** pure + tested; an invariant that
+  the shoulder mesh stays outside the torso envelope at sampled attack phases;
+  build/dispose no-leak; a screenshot.
+- **Files:** `src/game.js` (`_buildWornGear` pauldron builders + anchors,
+  `wornDetailFor`), `src/data/items.js` (metadata), `test/items.test.js` (+ screenshot),
+  `README.md`. No `SAVE_VERSION` change.
+- **Out of scope:** icons; other slots; animation (Task 34); full-loadout integration
+  (Task 35).
+- **Hints:** the inward clip is the known offender — fix the anchor + scale at the
+  source; reuse the chest's set motif so shoulders match the cuirass.
+
+### Task 28 — Worn gloves & gauntlets
+- **Status:** `[ ]`
+- **Depends on:** Task 12 (the `gloves` slot), Task 3, Task 4. Shared bar above.
+- **Goal.** Gloves are **plain spheres on the hands** (`_buildWornGear` ~1216-1223).
+  Make them read as gloves/gauntlets — the hand piece you see wrapped around the weapon
+  grip in an MMORPG.
+- **Scope (build this):**
+  - **Per-item hand shapes.** Cloth glove, leather bracer, plated gauntlet with a cuff
+    — layered primitives (cuff + back-of-hand + finger hint), varied by material + set.
+  - **Finish + fit.** Rarity/set finish; follow the hands through the new attacks
+    **without engulfing the weapon grip** or detaching from the wrist; tier-gate.
+- **Acceptance criteria:**
+  - Gloves read as hand armour distinct by type/material/set; track the hands through
+    the attack; don't swallow the weapon grip; rarity/set finish visible.
+  - Disposed on teardown/unequip; headless-safe; tier-gated; pipeline green; screenshot.
+- **Tests to add:** the **glove archetype selector** pure + tested; build/dispose
+  no-leak; a screenshot.
+- **Files:** `src/game.js` (`_buildWornGear` glove builders), `src/data/items.js`
+  (metadata), `test/items.test.js` (+ screenshot), `README.md`. No `SAVE_VERSION` change.
+- **Out of scope:** icons; other slots; animation (Task 34); integration (Task 35).
+- **Hints:** keep the finger hint subtle so it reads at gameplay distance; coordinate
+  the cuff with the chest's sleeve.
+
+### Task 29 — Worn belts
+- **Status:** `[ ]`
+- **Depends on:** Task 12 (the `belt` slot), Task 3, Task 4. Shared bar above.
+- **Goal.** The belt is a **plain cylinder at the waist** (`_buildWornGear`
+  ~1197-1203, high-tier only) that **overlaps the chest band**. Make it a real belt.
+- **Scope (build this):**
+  - **Per-item belt shapes.** Strap + buckle (+ pouches/plates by set/material), built
+    from layered primitives, varied by material + set.
+  - **Finish + fit.** Rarity/set finish; sit at the waist **below** the chest piece
+    (Task 26) without intersecting it or the legs through the stride; keep the clean
+    low-tier omission (`wornDetailFor`).
+- **Acceptance criteria:**
+  - The belt reads as a belt (strap + buckle) distinct by material/set; no overlap with
+    the chest or legs; rarity/set finish visible.
+  - Disposed on teardown/unequip; headless-safe; tier-gated; pipeline green; screenshot.
+- **Tests to add:** the **belt archetype selector** pure + tested; an invariant that the
+  belt band sits below the chest envelope; build/dispose no-leak; a screenshot.
+- **Files:** `src/game.js` (`_buildWornGear` belt builder, `wornDetailFor`),
+  `src/data/items.js` (metadata), `test/items.test.js` (+ screenshot), `README.md`. No
+  `SAVE_VERSION` change.
+- **Out of scope:** icons; other slots; animation (Task 34); integration (Task 35).
+- **Hints:** coordinate the waist height with the chest piece so the two never z-fight.
+
+### Task 30 — Worn boots
+- **Status:** `[ ]`
+- **Depends on:** Task 12 (the `boots` slot), Task 3, Task 4. Shared bar above.
+- **Goal.** Boots are **plain cylinders on the legs** (`_buildWornGear` ~1225-1232,
+  over the existing feet at y ≈ -0.62) that can intersect the legs/ground in the
+  stride. Make them real boots.
+- **Scope (build this):**
+  - **Per-item boot shapes.** Soft shoe, leather boot with a cuff, plated greave +
+    sabaton — layered primitives (shaft + foot + sole/cuff), varied by material + set.
+  - **Finish + fit.** Rarity/set finish; hug the shins and sit on the existing feet so
+    they **move with the stride without clipping the leg or punching through the
+    ground**; tier-gate.
+- **Acceptance criteria:**
+  - Boots read distinctly by type/material/set; hug the legs through the full stride
+    with no leg/ground penetration; rarity/set finish visible.
+  - Disposed on teardown/unequip; headless-safe; tier-gated; pipeline green; screenshot
+    mid-stride.
+- **Tests to add:** the **boot archetype selector** pure + tested; an invariant that the
+  boot stays on the leg envelope (no ground clip) at sampled stride phases;
+  build/dispose no-leak; a screenshot.
+- **Files:** `src/game.js` (`_buildWornGear` boot builders + leg anchors),
+  `src/data/items.js` (metadata), `test/items.test.js` (+ screenshot), `README.md`. No
+  `SAVE_VERSION` change.
+- **Out of scope:** icons; other slots; animation (Task 34); integration (Task 35).
+- **Hints:** anchor to the foot, not the shin midpoint, so the boot tracks the leg's
+  bottom through the stride.
+
+### Task 31 — Worn cloaks
+- **Status:** `[ ]`
+- **Depends on:** Task 12 (the `cloak` slot), Task 3, Task 4, Task 5 (`_animateCloak`).
+  Shared bar above.
+- **Goal.** The cloak is a **flat box on a pivot** (`_buildWornGear` ~1234-1242) that
+  **swings through the legs** on sharp turns (`_animateCloak` ~1279-1286 rotates the
+  pivot ±0.5 rad). Make it a real draping cloak that billows believably.
+- **Scope (build this):**
+  - **Per-item cloak shapes.** Tapered drape with a neck clasp, optionally **segmented**
+    (a few panels) so it reads as cloth, varied by material + set (Dragonscale gets its
+    motif). Build from layered primitives; tier-gate the sway/segments (`wornDetailFor`).
+  - **Finish + believable billow.** Rarity/set finish; reshape + clamp the pivot/billow
+    so the cloak **drapes behind the legs** and reacts to movement/turns **without
+    scything through the body or legs** at any frame.
+- **Acceptance criteria:**
+  - The cloak drapes behind the body and billows with motion **without clipping the
+    legs/body** in idle/walk/turn/attack; distinct by material/set; rarity/set finish.
+  - Disposed on teardown/unequip; headless-safe; tier-gated (low omits sway); pipeline
+    green; screenshot of the cloak mid-turn.
+- **Tests to add:** the **billow updater** is pure + `dt`-driven + pause-correct
+  (frame-rate independent), and an invariant that the cloak stays behind the leg
+  envelope across the sway range; build/dispose no-leak; a screenshot.
+- **Files:** `src/game.js` (`_buildWornGear` cloak builder, `_animateCloak`,
+  `wornDetailFor`), `src/data/items.js` (metadata), `test/items.test.js` (+ screenshot),
+  `README.md`. No `SAVE_VERSION` change.
+- **Out of scope:** full cloth simulation (keep a cheap, clamped procedural billow);
+  icons; other slots; integration (Task 35).
+- **Hints:** the leg-clipping swing is the known offender — clamp the pivot and seat the
+  drape behind the hips; keep the billow time-based so it pauses with the game.
+
+### Task 32 — Held weapons: real wand / bow / staff / sword / axe / dagger in hand
+- **Status:** `[ ]`
+- **Depends on:** Task 12 (weapon items + the two hand slots), Task 3, Task 4, and
+  Task 34 (the attacks the weapon moves with — pair them). Shared bar above.
+- **Goal.** The held-weapon mesh in Lily's hand should look like the **actual weapon
+  class** (and vary by material/rarity), be held correctly, and read clearly through the
+  new attacks — the believable weapon-in-hand of an MMORPG, not a tinted stick.
+- **Scope (build this):**
+  - **Per-class weapon meshes.** Distinct, layered procedural meshes per weapon type:
+    sword = blade + crossguard + grip + pommel; axe = haft + head; dagger = short blade +
+    guard; bow = upper/lower limbs + string + grip; staff = shaft + head/orb; wand =
+    shaft + tip. Vary by **material/rarity** (steel vs gold vs dragonscale) and add a
+    hookable point for a **weapon trail** (used by Task 34).
+  - **Correct grip + handedness.** Anchor one-handed weapons in the main hand (offhand
+    weapon when dual-wielding), and seat **two-handed** weapons across the body / both
+    hands per the existing slot rules; the weapon follows the hand through the attack and
+    is sheathed/hidden sensibly at rest if appropriate. Tier-gate detail.
+- **Acceptance criteria:**
+  - Each weapon class reads as itself in hand, varied by material/rarity; held in the
+    correct hand(s); two-handed weapons positioned correctly; the weapon tracks the hand
+    through the new attacks with no detachment/clipping.
+  - Disposed on teardown/swap (no leaks); headless-safe; tier-gated; pipeline green; a
+    screenshot per weapon class held.
+- **Tests to add:** the **weapon-class mesh selector** is pure + tested (every weapon def
+  → a valid class mesh + grip anchor + handedness); build/dispose no-leak; a screenshot
+  per class.
+- **Files:** `src/game.js` (the held-weapon builder in `Player._build`/`refreshWornGear`,
+  grip anchors, two-handed handling), `src/data/items.js` (weapon-class/material
+  metadata + trail hook), `test/items.test.js` (+ screenshots), `README.md`. No
+  `SAVE_VERSION` change.
+- **Out of scope:** the attack *motion* (Task 34 — this is the *mesh*); icons; armour
+  slots; integration (Task 35).
+- **Hints:** build the weapon meshes and the Task 34 animations **together** so the grip
+  anchor + trail line up; one class table keyed by weapon type + material keeps it tiny.
+
+### Task 33 — Visible jewelry: necklace + rings on the character (additive)
+- **Status:** `[ ]`
+- **Depends on:** Task 12 (the `necklace` + `ring1`/`ring2` slots), Task 3, Task 4.
+  Shared bar above. **Net-new scope** (jewelry currently renders no worn mesh).
+- **Goal.** Necklaces and rings are equipped but **invisible on the character** (no
+  worn mesh, unlike the other 7 slots). Optionally add **subtle visible jewelry** — a
+  pendant at the neck and ring(s) on the hands — so accessories read on the model too.
+  Lower priority / additive (the model is correct today, just bare).
+- **Scope (build this):**
+  - **Subtle jewelry meshes.** A small pendant/chain at the neck for `necklace`; a thin
+    band (+ a tiny gem) on the hand for rings — tiny, tasteful, tier-gated (likely
+    high-tier only so phones skip it), varied by material/rarity.
+  - **Fit + finish.** Anchor the pendant to the neck/upper chest (clear of the chest
+    piece) and the ring to a hand; rarity/gem colour finish; dispose on teardown/unequip.
+- **Acceptance criteria:**
+  - Equipped necklace/rings show a subtle, correctly-anchored mesh that doesn't clip the
+    chest/gloves; rarity/gem finish visible; cleanly **omitted on low tier** and when the
+    slot is empty.
+  - Disposed on teardown/unequip; headless-safe; pipeline green; a screenshot with
+    jewelry equipped.
+- **Tests to add:** the jewelry **spec selector** pure + tested; build/dispose no-leak;
+  tier-gating verified; a screenshot.
+- **Files:** `src/game.js` (`_buildWornGear` + `WORN_SLOTS` extended for jewelry,
+  `refreshWornGear`, `wornDetailFor`), `src/data/items.js` (jewelry metadata),
+  `test/items.test.js` (+ screenshot), `README.md`. No `SAVE_VERSION` change.
+- **Out of scope:** elaborate jewelry geometry; icons; integration (Task 35). If
+  deemed not worth the budget, document the decision and skip — it is explicitly
+  additive.
+- **Hints:** keep it tiny + high-tier-only so it never costs phone fps; reuse the gem
+  colour from rarity.
+
+### Task 34 — Rewrite weapon firing & melee attack animations from scratch (MMORPG-grade)
+- **Status:** `[ ]`
+- **Depends on:** Task 5 (the `Swing` state machine) and Task 10 (the impact-frame
+  fix) — this **replaces** them; Task 32 (the weapon meshes it animates); the
+  `Projectile` / `Hazard` combat system. Pairs with Task 32 (build them together).
+- **Goal.** Combat is a **single generic `Swing` arc** (anticipation → impact →
+  recovery) reused for every weapon. **Rewrite the firing + attack animations from
+  scratch** as a **per-weapon-class** system with real weight and follow-through — the
+  distinct, readable attacks of a real MMORPG — without regressing hit timing, pause
+  behaviour or headless-safety.
+- **Scope (build this):**
+  - **A from-scratch, per-weapon-class attack system.** Replace the `Swing` state
+    machine with weapon-class animations, each with proper **windup → strike →
+    recovery** and body involvement (torso rotation, foot plant, shoulder/hip drive):
+    - **Melee:** sword = swept horizontal/diagonal **slashes** with a blade **trail**
+      (optionally a 2–3 hit **combo** chain); axe = weighty **overhead chop**; dagger =
+      quick **stabs**. The damage lands on the correct **strike frame** in the weapon's
+      real arc/reach (preserve the Task 10 impact-frame correctness, per weapon).
+    - **Ranged / cast:** bow = **nock → draw → release → recoil** with a string snap;
+      wand/staff = **raise → channel (glow) → release**. The `Projectile` spawns on the
+      correct **release frame**, aimed from the weapon, not before.
+  - **Reactions + feel.** Hit/flinch reactions and follow-through; optional weapon
+    trails / muzzle glow gated by the quality tier; idle never looks frozen.
+  - **Keep the engine guarantees.** All animation is **time-based / `dt`-driven**,
+    frame-rate independent, **pauses correctly** with the pause menu + zone transitions,
+    is **feature-detected/headless-safe**, and **tier-gated**. Remove the old `Swing`
+    cleanly (no dead code); keep gather/mine motions working (move them onto the new
+    system or retain a minimal variant).
+- **Acceptance criteria:**
+  - Each weapon class has a **distinct, readable** attack with clear windup → strike →
+    recovery and weight; ranged/cast release the projectile on the right frame; melee
+    lands damage on the right strike frame in the right arc/reach (no early/late/double
+    hits, correct facing).
+  - Animation is `dt`-driven, frame-rate independent, **pauses** correctly, never throws
+    headless, and is tier-gated; the old `Swing` is gone with no regressions to combat,
+    gather/mine, or projectiles.
+  - Full pipeline green; a real-browser pass shows each weapon's attack reading correctly.
+- **Tests to add:** the **per-weapon attack state machine** is pure + tested (windup /
+  active / recovery timers; the **strike frame** for melee and the **release frame** for
+  ranged; arc/reach gating so out-of-arc/out-of-range targets aren't hit; no double-hit);
+  **frame-rate independence** (same result at 30 vs 120 fps); **pause-correctness**;
+  headless no-throw; a Playwright clip per weapon class.
+- **Files:** `src/game.js` (remove `Swing`; the new per-weapon attack system in
+  `Player.update`/attack + `Monster`/`Boss` where they share it, `Projectile` release
+  hookup, weapon-trail hook from Task 32, gather/mine motion), `test/*` (a new
+  `test/combat-anim.test.js` + the existing animation suite), `README.md`. No
+  `SAVE_VERSION` change (animation is transient).
+- **Out of scope:** imported skeletal animation clips / a rigging pipeline (keep it
+  procedural over the existing primitive body); rebalancing weapon damage (timing parity,
+  not balance); new weapon types.
+- **Hints:** model each weapon class as its own small, pure state machine with named
+  frames (windup/strike|release/recovery) so timing is testable; build it alongside
+  Task 32 so the grip + trail anchors match; keep everything `dt`-driven so pause +
+  frame-rate independence come for free.
+
+### Task 35 — Full-loadout fit & clipping integration (no stray textures across all gear + the new attacks)
+- **Status:** `[ ]`
+- **Depends on:** the worn-category tasks (25–33) **and** the combat-animation rewrite
+  (Task 34) — this is the **final integration pass** that runs after them. Builds on
+  the named **fit table** each category task introduces.
+- **Goal.** Each category task (25–33) makes its own part look right and fit cleanly in
+  isolation; this task verifies the **whole loadout together**. With **every** category
+  equipped at once and the **new per-weapon attacks** (Task 34) playing, ensure **no
+  part pokes through the body or any other part** — the original "check every visible
+  part of the clothing; no stray textures sticking out" — across **all equip
+  combinations, all animation states (idle / walk / each weapon's attack / flinch) and
+  all quality tiers**, to the layered-armour cleanliness well-reviewed RPGs (Skyrim,
+  Monster Hunter, Guild Wars 2) hold their character models to.
+- **Scope (build this):**
+  - **Cross-part interaction audit.** With a full loadout, check the known
+    inter-part interactions at rest and in motion: **cloak vs legs/body**, **pauldrons
+    vs chest/neck**, **belt vs chest**, **boots vs legs/ground**, **gloves vs weapon
+    grip**, **helmet vs ponytail**, and the **held weapon vs the body** through each
+    weapon's attack arc. Re-tune the per-category **fit tables** where two parts
+    collide; no part may penetrate another beyond a small tolerance at any frame.
+  - **All tiers + all loadouts.** Verify every `wornDetailFor` tier and a representative
+    matrix of equipped/empty slot combinations: a part never appears when its slot is
+    empty, never leaves a stray mesh after unequip/swap (`refreshWornGear`), and disposes
+    cleanly on teardown (no leaks). Confirm a full set (Ironguard/Dragonscale) reads as
+    one coherent suit.
+  - **Lock it down.** Consolidate/confirm the named fit tables so placement stays
+    auditable, and add the regression net below so the clean fit can't silently rot as
+    future gear/animations land.
+- **Acceptance criteria:**
+  - With any mix of gear equipped and **any weapon attacking**, **no worn part or weapon
+    clips through Lily's body or another part** in idle / walk / attack / flinch on every
+    tier; empty slots show no mesh; unequip/swap leaves no stray mesh; everything disposes
+    on teardown (no leaks).
+  - Headless-safe; full pipeline green; a real-browser screenshot pass confirms clean fit
+    from the gameplay camera for a fully-geared Lily **mid-attack for each weapon class**.
+- **Tests to add:** an invariant test that, with a full loadout, each part's bounding
+  region stays within tolerance of its anchor and out of its neighbours' envelopes at
+  sampled animation phases (idle + each weapon's strike/release frame); `refreshWornGear`
+  shows/hides exactly the equipped parts (no stray on unequip/swap); teardown disposes
+  all worn + weapon meshes; a Playwright **screenshot matrix** (a full set per weapon
+  class, mid-attack) for visual regression.
+- **Files:** `src/game.js` (`_buildWornGear` / `refreshWornGear` fit tables across all
+  parts, teardown/dispose, the Task 34 attack hookups), a new `test/worngear.test.js`
+  (or extend `test/items.test.js`) + a Playwright screenshot spec, `README.md`. No
+  `SAVE_VERSION` change (visual only).
+- **Out of scope:** introducing new gear *shapes* (that is each category task's job —
+  this only makes them coexist); full skeletal skinning/rigging; the item icons (still
+  unchanged).
+- **Hints:** assert penetration at a few sampled attack/stride phases rather than every
+  frame; the cloak, pauldrons and the held weapon are the known offenders — start there;
+  keep the per-category fit tables as the single source of placement truth.
+
+### Task 36 — Customizable on-screen control layout (drag any control anywhere; saved + restored)
 - **Status:** `[ ]`
 - **Depends on:** Task 16 (the responsive HUD + the reusable Pointer-Events drag
-  controller / `dragSlotReducer`, `src/game.js` ~5503-5710) and **Task 30** (the HUD
-  region/layer system — do this **after** Task 30 so custom positions build on
+  controller / `dragSlotReducer`, `src/game.js` ~5503-5710) and **Task 39** (the HUD
+  region/layer system — do this **after** Task 39 so custom positions build on
   non-overlapping defaults). Coordinate `SAVE_VERSION` with any task that changes the
   schema.
 - **Goal.** The on-screen controls — the **movement joystick**, the **3 skill
@@ -1998,7 +2262,7 @@ A task is **done** only when **all** of these are true:
     mirror), survives **reload and orientation / desktop⇄mobile switches**, and applies
     before first interaction; **older saves load** with defaults.
   - Works on the **S24 Ultra** (portrait + landscape) + desktop; tap targets stay
-    ≥ ~48 px; no overlaps introduced (respects Task 30's regions); full pipeline green;
+    ≥ ~48 px; no overlaps introduced (respects Task 39's regions); full pipeline green;
     headless-safe.
 - **Tests to add:** a **pure layout reducer/clamp** (set / move / reset a control's
   fractional position, clamp to safe-area bounds) unit-tested independent of the DOM;
@@ -2020,7 +2284,7 @@ A task is **done** only when **all** of these are true:
   *and* on load so a layout saved on one device is safe on another; keep the reducer
   pure so the DOM layer stays thin.
 
-### Task 28 — Exit/enter fullscreen control in the settings menu
+### Task 37 — Exit/enter fullscreen control in the settings menu
 - **Status:** `[ ]`
 - **Depends on:** Task 16 (the `Fullscreen` module — `toggle` / `active` / `supported`
   / `lockLandscape` / `unlockOrientation`, `src/game.js` ~10622-10686; the `#fsBtn`
@@ -2071,7 +2335,7 @@ A task is **done** only when **all** of these are true:
   `fullscreenchange` listener so both entry points and the glyph stay in lockstep; hide
   the control when `Fullscreen.supported()` is false.
 
-### Task 29 — Fix: NPCs are only talkable in the hub — spawn quest-givers in their home zones
+### Task 38 — Fix: NPCs are only talkable in the hub — spawn quest-givers in their home zones
 - **Status:** `[ ]`
 - **Depends on:** the world/zone + quest systems (`setupZoneContent` /
   `populateAdventure`, `QuestGiver` / `Dialogue`, `NPC_DATA` / `LOCATIONS`,
@@ -2133,10 +2397,10 @@ A task is **done** only when **all** of these are true:
   quest-givers (the `QuestGiver` constructor already positions itself from the landmark
   coordinates).
 
-### Task 30 — Collision-free HUD: a real region/layer system so no widget or button overlaps
+### Task 39 — Collision-free HUD: a real region/layer system so no widget or button overlaps
 - **Status:** `[ ]`
 - **Depends on:** Task 16 (the HUD markup + z-index tiers + the touch action arc).
-  Pairs with **Task 27** (do this **before** the free-form control editor so custom
+  Pairs with **Task 36** (do this **before** the free-form control editor so custom
   positions start from clean regions). None else.
 - **Goal.** HUD widgets **overlap**: the **weather** widget (and the **clock**) live as
   inline flex children of the top-centre `.hud-top` status row, while the top-right
@@ -2189,7 +2453,7 @@ A task is **done** only when **all** of these are true:
   containers), `src/game.js` (any HUD wiring that toggles regions),
   `test/e2e/responsive.spec.js` (+ a small Vitest helper test), `README.md`. No
   `SAVE_VERSION` change (layout only).
-- **Out of scope:** the free-form drag-to-reposition editor (Task 27 — this task fixes the
+- **Out of scope:** the free-form drag-to-reposition editor (Task 36 — this task fixes the
   *default* layout so it never overlaps), redesigning widget contents, a UI-framework
   rewrite.
 - **Hints:** the collision is the top-status row not reserving the icon-row width on the
@@ -2243,24 +2507,30 @@ Tasks are mostly independent, but this order minimizes rework.
 > device profile** (1440 × 3120, DPR ≈ 3.5, portrait + landscape) added in Task 16,
 > alongside the existing desktop coverage.
 
-**Tasks 23–30 (player-reported polish: sign-in persistence, deeper localization,
-gear visuals, customizable & collision-free HUD) — recommended order:**
+**Tasks 23–39 (player-reported polish: sign-in persistence, deeper localization, a
+worn-equipment + combat-animation overhaul, customizable & collision-free HUD) —
+recommended order:**
 
-1. **Task 29 — Fix NPC talk across zones** *(quick correctness fix; independent)*
-2. **Task 30 — Collision-free HUD regions** *(clean default layout before the editor)*
-3. **Task 27 — Customizable control layout** *(after Task 30; reuses Task 16's drag
+1. **Task 38 — Fix NPC talk across zones** *(quick correctness fix; independent)*
+2. **Task 39 — Collision-free HUD regions** *(clean default layout before the editor)*
+3. **Task 36 — Customizable control layout** *(after Task 39; reuses Task 16's drag
    utility; bumps `SAVE_VERSION` 13 → 14)*
-4. **Task 28 — Exit/enter fullscreen in settings** *(small; independent)*
+4. **Task 37 — Exit/enter fullscreen in settings** *(small; independent)*
 5. **Task 23 — Persist Google Drive sign-in** *(independent; builds on Tasks 15/17)*
 6. **Task 24 — Russian morphology/declensions** *(independent; builds on Task 7)*
-7. **Task 25 — Composite item icons** *(independent; builds on Tasks 3/12)*
-8. **Task 26 — Worn-gear clipping audit** *(after Task 25 — both are the gear-visual
-   pass)*
+7. **Worn-equipment + combat-animation overhaul (Tasks 25–35)** — do the worn-gear
+   categories first (establish the per-item shape pattern with **Task 25 — helmets**,
+   then **26** chest · **27** pauldrons · **28** gloves · **29** belts · **30** boots ·
+   **31** cloaks), then **Task 32 — held weapons** and **Task 34 — the from-scratch
+   attack animations** *together* (the weapon mesh + its motion are coupled), then the
+   additive **Task 33 — visible jewelry**, and finish with **Task 35 — the full-loadout
+   fit & clipping integration last** (it depends on all of 25–34).
 
-> Tasks 27 / 28 / 30 are UI-facing — they must pass their **UI/responsive tests on
-> the Galaxy S24 Ultra device profile** (portrait + landscape) added in Task 16,
-> alongside desktop. Only **Task 27** changes the save schema (`SAVE_VERSION`
-> 13 → 14); the rest persist via cookies/localStorage or are visual/logic-only.
+> Tasks 36 / 37 / 39 are UI-facing — they (and any on-character visual in Tasks 25–35)
+> must pass their **UI/responsive + screenshot tests on the Galaxy S24 Ultra device
+> profile** (portrait + landscape) added in Task 16, alongside desktop. Only **Task 36**
+> changes the save schema (`SAVE_VERSION` 13 → 14); Tasks 25–35 are visual/animation
+> (no schema change), and the rest persist via cookies/localStorage.
 
 If you skip ahead, still obey Golden Rule 9 (route new strings through i18n once
 it exists) and the shared Definition of Done. For Tasks 9 & 15, read each task's
