@@ -1643,6 +1643,561 @@ A task is **done** only when **all** of these are true:
 
 ---
 
+## 4d. The backlog (Tasks 23–30) — player-reported polish from real device play
+
+> Tasks 23–30 come from a player testing the shipped game on a real phone. They
+> keep the Google sign-in alive across reloads, deepen the Russian localization to
+> real grammar, make equipment actually *look* like gear, let players lay out their
+> own controls, and finish the mobile HUD so nothing overlaps and every NPC is
+> reachable. They hold to the same end-to-end, **release-ready, tested** bar as
+> Tasks 2–22 (one run completes exactly one task). Like Tasks 16–22, every
+> UI/responsive change must pass on the **Galaxy S24 Ultra** device profile
+> (1440 × 3120, DPR ≈ 3.5, portrait + landscape) added in Task 16, alongside the
+> existing desktop coverage. Recommended ordering is in [§ 5](#5-recommended-order).
+
+### Task 23 — Persist Google Drive sign-in across reloads (true silent re-auth; no unprompted dialog)
+- **Status:** `[ ]`
+- **Depends on:** Task 15 (Google Drive cloud saves — `CloudSave`/`CloudUI`/
+  `makeGoogleDriveClient`) and Task 17 (durable session — the `Session` cookie/hint
+  store, `silentAuthDecision`, `signInSilent`). None else.
+- **Note on Golden Rules:** unchanged — Drive stays **opt-in** and **degrades
+  gracefully** (signed-out / offline / unconfigured / headless never throws or
+  blocks). This task only makes the *existing* opt-in flow persist correctly; it
+  adds no new external dependency.
+- **Goal.** Two sign-in defects break the cloud-save UX. **(a) The player must sign
+  in again every time they open the page** — the Google session doesn't survive a
+  reload, so a returning player is effectively signed out. **(b) A Google sign-in
+  popup/redirect appears on page load even when the player never pressed "Sign in
+  with Google"** — the boot-time silent-auth attempt surfaces a *visible*
+  account/consent dialog instead of staying silent. Fix both so that, once a player
+  has opted into Drive, they **stay signed in across reloads** (re-acquired
+  silently, no dialog), and the sign-in UI **only ever appears when they explicitly
+  click it** — the way shipped web games keep you logged in without nagging.
+- **Scope (build this):**
+  - **Make boot-time re-auth truly silent (never show UI unprompted).** Today
+    `CloudUI.init()` unconditionally calls `CloudSave.trySilentSignIn()` on boot
+    (`src/game.js` ~9628), which runs GIS `requestAccessToken({ prompt: "" })`
+    (`signInSilent` → `requestToken("", loginHint)`, ~9346). With `prompt: ""` GIS
+    can still raise a **visible** popup/redirect (stale session, revoked scope,
+    account chooser). Guarantee the boot path **never opens any visible UI**: only
+    attempt re-auth when `silentAuthDecision(hint)` says the player previously opted
+    in, run it through GIS's non-interactive token path with an `error_callback` /
+    timeout that **swallows every non-silent outcome**, and on any result that
+    *would* require UI, abort quietly and leave the explicit "Sign in with Google"
+    button as the only path to interactive consent. No dialog may appear without a
+    user click.
+  - **Persist the signed-in state robustly.** GIS access tokens are short-lived
+    (~1 h) and intentionally not persisted, so "stay signed in" means **reliably
+    re-acquiring a token silently** from the player's existing Google session on
+    each load. Audit the hint pipeline end-to-end: `Session.rememberAuth()` /
+    `forgetAuth()` / `authHint()` (~9168), the `gg3d_sess` first-party cookie +
+    `ck_gg3d_sess` localStorage fallback (`buildCookieString` / `cookieSet` /
+    `cookieGet`, ~8985-9055), and `silentAuthDecision` (~9093). Ensure the
+    **`optedIn` flag + the account `login_hint` are written on every successful
+    sign-in** and read back on boot; verify the cookie attributes
+    (`SameSite=Lax`, `Secure`, 180-day `Max-Age`) actually let it survive a reload,
+    and that the localStorage mirror covers cookie-blocked / private-mode cases.
+    Once a token is re-acquired silently, the cloud UI must show **"Signed in to
+    Drive"** immediately — no button press.
+  - **Honour sign-out + first-run.** A signed-out player (or one who never opted in)
+    must get **no** silent attempt and **no** dialog on load — exactly today's
+    first-run experience. `forgetAuth()` must clear the hint so no silent re-auth
+    fires afterward.
+  - **Resilience.** Expired / consent-again / offline must fall back to the explicit
+    button with clear messaging (reuse the `cloud.*` toasts), never a surprise popup
+    and never a thrown error.
+- **Acceptance criteria:**
+  - After opting in once, **reloading keeps the player signed in** — the cloud panel
+    shows the signed-in state and Drive saves work **without any click or dialog**,
+    as long as the browser still holds the Google session.
+  - **No Google UI ever appears on page load** unless the player clicks "Sign in
+    with Google". Signed-out and first-run loads are dialog-free.
+  - Sign-out clears the remembered hint; subsequent loads do **not** silently
+    re-auth.
+  - Offline / expired / revoked-scope degrade to the explicit button with messaging;
+    nothing throws; the local save is unaffected. Headless-safe (no GIS / no cookies
+    ⇒ cleanly disabled).
+- **Tests to add:** extend `test/session.test.js` / `test/cloudsave.test.js` against
+  the **injected GIS stub**: `silentAuthDecision` returns *attempt* only when
+  opted-in + hint present and *never* when signed-out; the boot silent path **never
+  invokes the interactive prompt** (assert the stub's interactive callback isn't
+  called on load); a sign-in → reload → still-signed-in round-trip through the
+  cookie/hint store; sign-out clears the hint and blocks re-auth; the cookie helper
+  sets `SameSite=Lax` / `Secure` / `Max-Age` and round-trips via the localStorage
+  fallback. An E2E (injected client) that loads the built site with a stored hint
+  and asserts the signed-in state restores with **no visible auth dialog**.
+- **Files:** `src/game.js` (`CloudSave.trySilentSignIn` / `signInSilent` /
+  `requestToken`, `makeGoogleDriveClient`, `CloudUI.init` boot wiring, the `Session`
+  hint/cookie store, `silentAuthDecision`), `src/core/i18n.js` (any new messaging,
+  EN+RU), `test/*`, `README.md` (cloud-saves persistence + privacy note). No
+  `SAVE_VERSION` change (auth hints persist via cookie/localStorage, not the save).
+- **Out of scope:** a server-side OAuth/token backend or refresh-token storage (the
+  GIS web flow issues none — note as a follow-up); switching auth providers;
+  persisting the access token itself (insecure — re-acquire silently instead).
+- **Hints:** the cure for the unprompted popup is to make the boot attempt
+  **non-interactive-only** and abort on anything that needs UI; the cure for "signed
+  out every load" is reliably re-running that silent acquisition from the browser's
+  existing Google session — both hang off the already-stored opted-in hint, so wire
+  and test that hint carefully.
+
+### Task 24 — Russian grammatical morphology (Android-style declensions, gender & plural agreement)
+- **Status:** `[ ]`
+- **Depends on:** Task 7 (the i18n layer — `LOCALES` / `t()` / `interp()` /
+  `plural()` in `src/core/i18n.js`, the `RU` data-table dictionary + resolvers).
+  None else.
+- **Goal.** The Russian localization is **grammatically flat**: every string is
+  hand-written and every interpolated noun (`{name}`, `{label}`, `{boss}`,
+  `{zone}`, `{part}`, …) is dropped in its **nominative** form regardless of the
+  surrounding sentence's grammatical case, and adjectives/verbs don't agree in
+  **gender/number**. Russian is heavily inflected — "Reach {name}", "Gather
+  {label}", "Bought {name}", "Defeat {boss} in {zone}", "{n} parts raised" all need
+  the noun in the right **case** (and the verb/adjective to **agree**), or the text
+  reads broken to a native speaker. Build a proper morphology layer — the way
+  well-localized RPGs and **Android apps** do it (Android `<plurals>` quantity
+  strings + ICU `MessageFormat` `select` / `plural` / gender) — so Russian sentences
+  are grammatically correct, not just word-substituted.
+- **Scope (build this):**
+  - **A declension model for in-game nouns.** Give every interpolated Russian noun
+    (item / zone / landmark / NPC / material / relic / skill / boss names) the
+    grammatical metadata it needs: **gender** (m/f/n), animacy, and either explicit
+    **case forms** (nominative / genitive / dative / accusative / instrumental /
+    prepositional, singular + plural) or a small **rule-based decliner** for regular
+    nouns with an explicit-override table for irregulars. Store this alongside the
+    existing `RU` dictionary in `src/core/i18n.js` (additive — the English source
+    stays untouched).
+  - **Case-aware interpolation.** Extend the i18n core so a template can request a
+    noun in a specific case — e.g. `t("obj.reach", { name: nounRef("zone", id) })`
+    resolving a `{name:accusative}`-style marker, with the resolver returning the
+    correctly inflected form. Keep `interp()` backward-compatible (plain `{x}` still
+    works); layer the grammar on top.
+  - **Gender/number agreement.** Make adjectives and past-tense verbs that describe
+    a noun **agree** with its gender/number (e.g. "{part} raised" → возведён /
+    возведена / возведено / возведены). Provide an ICU-style **`select`** (by
+    gender) and a strengthened **`plural`** (the existing `plural()` already does
+    Slavic one/few/many — extend its reach so **all** count strings use it, not just
+    `castle.partWord`, which is currently the only call site).
+  - **Retrofit the affected strings.** Sweep every RU string that interpolates a
+    noun or a count and route it through the new case/agreement helpers (objectives,
+    toasts like `toast.bought` / `toast.gathered` / `toast.reached`, dialogue, quest
+    text, the map compass, boss banners). English is unaffected (its `select` /
+    `plural` collapse to the simple forms).
+  - **Pure + testable + headless-safe.** The decliner/agreement helpers are pure
+    functions of (lemma + metadata + case/number/gender); no DOM. English path
+    unchanged.
+- **Acceptance criteria:**
+  - Interpolated Russian nouns appear in the **correct grammatical case** for their
+    sentence, and adjectives/verbs **agree** in gender/number — verified by a
+    native-correct sample set across objectives, toasts, dialogue and the map.
+  - Count strings use proper Slavic **one/few/many** everywhere (not only the castle
+    counter); English still reads correctly (one/other).
+  - EN⇄RU still toggles live, persists, and the **key-parity + data-completeness
+    tests stay green** (now also covering the new case/gender metadata — no noun may
+    ship without it in RU).
+  - Headless-safe; full pipeline green; no English leaks in RU and vice-versa.
+- **Tests to add:** unit tests for the **decliner / agreement** helpers (regular +
+  irregular nouns across all six cases × number; gender agreement for a sample of
+  adjectives/verbs); the strengthened `plural()` over 0–1000 hitting the one/few/many
+  boundaries (1, 2, 5, 11, 21, 112…); a **completeness test** that every interpolated
+  RU noun has the required gender + case data (fails the build otherwise, mirroring
+  the existing untranslated-key gate); a retrofit smoke that key sentences render
+  grammatically in RU.
+- **Files:** `src/core/i18n.js` (new morphology metadata on `RU`, the decliner +
+  agreement + ICU-style `select`, extended `interp` / `plural` / `t`, retrofit
+  resolvers), `src/game.js` (call sites that interpolate nouns/counts now pass
+  grammatical refs), `test/harness.test.js` (the i18n suite [28]) or a new
+  `test/i18n-morphology.test.js`, `README.md` (i18n section). No `SAVE_VERSION`
+  change.
+- **Out of scope:** a full general-purpose Russian NLP morphology engine (cover the
+  game's vocabulary with rules + an override table, not every Russian word); adding
+  new locales (EN+RU only); machine translation.
+- **Hints:** model nouns as `{ lemma, gender, animate, forms?: { nom, gen, dat, acc,
+  ins, pre, … } }` with a regular-noun fallback decliner; keep English collapsing to
+  identity so the shared templates stay simple; extend the existing `plural()` rather
+  than replacing it.
+
+### Task 25 — Composite, multicoloured, real-looking equipment icons (procedural/SVG sprites, not flat emoji)
+- **Status:** `[ ]`
+- **Depends on:** Task 12 (`ITEM_DB`, the 12 equip slots, rarity tiers, the
+  inventory/shop/anvil UI cards) and Task 3 (the model/material fidelity pass). None
+  else.
+- **Goal.** Every item is drawn as a **single emoji + a rarity-coloured name**
+  (`ITEM_DB[*].icon` is one emoji, rendered as `<div class="icon">…</div>` at 26 px
+  via `itemCard()`; rarity shows only as the name's text colour). All helmets share
+  🧢/⛑️, all swords ⚔️, all rings 💍 — they don't read as distinct, real-looking gear
+  and don't show rarity at a glance. Replace the flat emoji with **composite,
+  multicoloured item icons** that look like real-world equipment — the layered,
+  rarity-framed inventory icons well-reviewed RPGs (Diablo, WoW, Path of Exile) use
+  — while honouring the **static-site / no-large-binaries** budget (so: **procedurally
+  drawn vector/SVG sprites**, not photographed PNGs).
+- **Scope (build this):**
+  - **A procedural composite-icon system.** Build each item's icon from **multiple
+    coloured layers/shapes** that reflect its real form — e.g. a sword = blade +
+    crossguard + grip + pommel; a helmet = dome + brim + band + visor; a ring = band
+    + gemstone; a potion = bottle + liquid + cork + highlight; a bow = limb + string
+    + grip. Author them as **inline SVG (vector)** or canvas-drawn sprites generated
+    from a small declarative spec per item *type*, tinted per item by a **material
+    palette** (iron / steel / leather / gold / crystal / wood) so two swords can look
+    different. SVG keeps it crisp at any DPI (incl. the S24 Ultra), multicolour, and
+    **zero binary weight** — aligned with the procedural-first Golden Rule.
+  - **Rarity made visible on the icon.** Frame each icon by rarity
+    (common → legendary) with a coloured border/backplate + a subtle gloss/glow on
+    epic/legendary (matching the worn-gear rarity sheen from Task 12), so rarity
+    reads from the icon itself, not just the name colour.
+  - **Wire it through every item surface.** Render the composite icon in the
+    inventory bag, equipment slots, shop, anvil, alchemist, quest rewards, loot
+    toasts and the potion quick-slots — replacing the `def.icon` emoji `<div>` (keep
+    a graceful **emoji/colour fallback** for headless and any item without a spec).
+    Reuse the colours already in `RARITY`.
+  - **Budget + perf.** Icons are lightweight vector/CSS, generated once and cached;
+    no per-frame work, no large assets, no layout jank on mobile. Any committed asset
+    (if SVG sprites are stored as files) stays small + lazy-loaded with a fallback.
+- **Acceptance criteria:**
+  - Items render as **composite, multicoloured, real-looking** icons (distinct
+    silhouettes per weapon/armour/jewelry/consumable kind, varied by material), not
+    single emoji; rarity is visible **on the icon**.
+  - Every `ITEM_DB` entry maps to a composite icon (or the documented fallback);
+    icons are crisp at phone DPI and on desktop; no perf regression or layout jank.
+  - Headless-safe (no canvas/SVG in Node ⇒ fallback path, no throw); full pipeline
+    green; repo stays lightweight (no large binaries).
+- **Tests to add:** the **icon-spec generator** is a pure, tested function (every
+  item type yields a layered spec; every `ITEM_DB` id resolves to an icon or
+  fallback); rarity-frame selection is unit-tested; a UI smoke that the
+  inventory/shop render the composite icon nodes (not the emoji `<div>`); the
+  headless fallback verified.
+- **Files:** `src/data/items.js` (per-type icon specs / material-palette metadata)
+  or a new `src/data/itemicons.js`, `src/game.js` (`itemCard()` + every
+  item-rendering surface, the icon builder + cache), `css/style.css` (icon sizing /
+  frames; rarity borders), `test/items.test.js` (+ a UI smoke), `README.md`. No
+  `SAVE_VERSION` change (visual only).
+- **Out of scope:** importing a photo-real texture/icon pack or large PNG atlases
+  (violates the asset budget — keep it vector/procedural); redesigning the 3D
+  worn-gear meshes (that's Task 26); rebalancing items.
+- **Hints:** drive icons from a **small declarative spec keyed by item type +
+  material**, not one hand-drawn asset per item, so 60+ items reuse a dozen shape
+  recipes; SVG is the sweet spot (vector, multicolour, tiny, crisp, headless-
+  fallbackable); reuse `RARITY[*].color` for frames so it matches the worn-gear sheen.
+
+### Task 26 — Worn-gear clipping audit: every visible clothing part fits cleanly (no stray/poke-through meshes)
+- **Status:** `[ ]`
+- **Depends on:** Task 12 (the visible worn gear on Lily — `_buildWornGear` /
+  `refreshWornGear` / `_animateCloak`, `WORN_SLOTS`, `wornDetailFor`) and Task 5 (the
+  `Swing` / flinch animation the parts move with). None else.
+- **Goal.** The equipped gear rendered on Lily — helmet (dome + brim), breastplate,
+  belt, pauldrons (L/R), gloves (L/R), boots (L/R) and a billowing cloak — is built
+  from hard-coded primitive offsets (`_buildWornGear`, `src/game.js` ~1175-1245), and
+  several parts **poke through the body or each other** in motion: the **pauldrons**
+  can clip inward into the torso/chest, the **cloak** can swing through the legs on
+  sharp turns (pivot rotates ±0.5 rad in `_animateCloak`), the **boots** can intersect
+  the leg meshes during stride, and the **belt** overlaps the chest band. Do a
+  thorough **clipping/fit audit** of **every visible worn part**, across **all equip
+  combinations, all animation states (idle / walk / `Swing` / flinch) and all quality
+  tiers**, and fix the geometry so nothing sticks out or punches through — the
+  layered-armour cleanliness well-reviewed RPGs (Skyrim, Monster Hunter, Guild Wars 2)
+  hold their character models to.
+- **Scope (build this):**
+  - **Audit each part against the body + neighbours.** Review the offsets / scales /
+    parenting in `_buildWornGear` for helmet, breastplate, belt, pauldrons, gloves,
+    boots and cloak: confirm each sits **on** its body segment (head / torso / arms /
+    legs) without intersecting it or an adjacent part at rest, and re-tune the
+    hard-coded positions/scales so seams are clean.
+  - **Fix the motion cases.** Drive the audit through the real animation: bind the
+    cloak's billow (`_animateCloak`) and the limb-parented parts (pauldrons on
+    `armL`/`armR`, gloves on the hands, boots on `legL`/`legR`) through the full
+    `Swing` arc + walk stride + flinch and ensure **no part penetrates the body or
+    another part** at any frame. Clamp the cloak pivot / reshape it so it drapes
+    behind the legs instead of scything through them; seat the pauldrons on the
+    shoulder without diving into the chest; keep boots hugging the shins through the
+    stride.
+  - **All tiers + all loadouts.** Verify both `wornDetailFor` tiers (low drops
+    pauldrons / belt + cloak sway; high builds everything) and a representative matrix
+    of equipped/empty slot combinations — a part must never appear when its slot is
+    empty, nor leave a stray mesh after unequip (`refreshWornGear` toggles), and must
+    dispose cleanly on teardown (no leaks).
+  - **Make fit data reviewable.** Pull the per-part transforms into a small, named
+    **fit table** (offset / scale / parent per part) so placement is auditable +
+    testable rather than buried in magic numbers, and document the body-segment anchor
+    each part rides.
+- **Acceptance criteria:**
+  - With any mix of gear equipped, **no worn part clips through Lily's body or
+    another part** in idle, walking, attacking (`Swing`) or flinching, on every
+    quality tier — the cloak drapes behind the legs, pauldrons sit on the shoulders,
+    boots hug the legs, belt/chest don't intersect.
+  - Empty slots show **no** mesh; unequip leaves **no** stray mesh; parts dispose on
+    zone teardown (no leaks); low tier still omits its parts cleanly.
+  - Headless-safe; full pipeline green; a real-browser screenshot pass confirms clean
+    fit from the gameplay camera.
+- **Tests to add:** the per-part **fit table** is a pure, tested data structure (each
+  part has a valid parent + bounded offset/scale); an invariant test that built part
+  bounding regions stay within their body segment's envelope (no inward/outward
+  penetration beyond a tolerance) at sampled animation phases; `refreshWornGear` shows
+  / hides exactly the equipped parts (no stray on unequip); teardown disposes all
+  worn meshes; a Playwright screenshot of a fully-geared Lily mid-`Swing` for visual
+  regression.
+- **Files:** `src/game.js` (`_buildWornGear` / `refreshWornGear` / `_animateCloak`
+  offsets → named fit table, `wornDetailFor`, teardown/dispose), `test/items.test.js`
+  (or a new `test/worngear.test.js`) + a Playwright screenshot spec, `README.md`. No
+  `SAVE_VERSION` change (visual only).
+- **Out of scope:** new worn-gear *kinds* or full skeletal skinning/rigging (keep the
+  procedural primitive parts — just make them fit); redesigning the item icons
+  (Task 25); per-item unique mesh shapes (rarity recolour stays).
+- **Hints:** lift the magic offsets into a named table so fit becomes data you can
+  assert; test penetration at a few sampled `Swing` / stride phases rather than every
+  frame; the cloak and pauldrons are the known offenders — start there.
+
+### Task 27 — Customizable on-screen control layout (drag any control anywhere; saved + restored)
+- **Status:** `[ ]`
+- **Depends on:** Task 16 (the responsive HUD + the reusable Pointer-Events drag
+  controller / `dragSlotReducer`, `src/game.js` ~5503-5710) and **Task 30** (the HUD
+  region/layer system — do this **after** Task 30 so custom positions build on
+  non-overlapping defaults). Coordinate `SAVE_VERSION` with any task that changes the
+  schema.
+- **Goal.** The on-screen controls — the **movement joystick**, the **3 skill
+  quick-slots**, the **3 potion quick-slots**, the **interact "E" button** and the
+  **fire/cast button** — sit at **hard-coded CSS positions** with no way to move them,
+  so players with different hand sizes / grips / phone shapes can't make combat
+  comfortable. Add a **control-layout editor** in settings that lets the player **drag
+  each control to any point on screen**, and **persist the layout in the game's save
+  engine** — the fully customizable HUD that well-reviewed mobile action games (Call
+  of Duty Mobile, PUBG Mobile, Genshin Impact) ship.
+- **Scope (build this):**
+  - **An "Edit control layout" mode** reachable from **pause → settings** (and a
+    sensible entry on the start-screen controls panel). Entering it overlays the live
+    HUD with draggable handles on each movable control, dims the rest, and shows
+    **Save** / **Reset to default** actions. Reuse Task 16's **pointer-drag
+    controller** (touch + mouse, the `.sk-drag-ghost` ghost, the 6 px tap/drag
+    threshold) — don't write a second drag stack.
+  - **Move every requested control.** Make the **joystick**, the **skill bar**
+    (`#skillBar`), the **potion bar** (`#potionBar`), the **interact button**
+    (`#actionBtn`) and the **cast/fire button** (`#castBtn`) repositionable to any
+    on-screen point. Persist a **per-control position** stored as a
+    resolution-independent **fraction of the viewport** (so it survives rotation /
+    different screens), **clamped to the safe area** (`env(safe-area-inset-*)`) so a
+    control can never land off-screen or under a notch. Keep tap targets ≥ ~48 px. A
+    control with no custom position falls back to its Task 16 default (portrait + the
+    landscape one-thumb arc).
+  - **Persist through the save engine (as requested).** Serialize the control layout
+    in `serializeGame` / `applySave` and **bump `SAVE_VERSION` (13 → 14)** so a
+    player's layout travels with their save (incl. cloud / slots); **older saves
+    load** with the default layout. **Also mirror the layout to `localStorage`** (like
+    the existing audio/graphics/locale prefs) so it's a per-device setting that applies
+    on the start screen and **before** any save is loaded. Document which store wins
+    (the device pref as the live source; the save value as the portable default on
+    load).
+  - **Apply layout live + headless-safe.** Positions apply immediately on drop and on
+    boot / zone-load; the editor and the persisted layout are fully **feature-detected**
+    (no Pointer Events / no DOM ⇒ no-op, defaults stand) so the headless suite is
+    unaffected. Works in portrait + landscape on the **Galaxy S24 Ultra** profile and
+    desktop.
+  - **i18n.** All new strings (editor heading, Save / Reset, hints) through `t()` in
+    **EN + RU**.
+- **Acceptance criteria:**
+  - From settings, the player can **drag the joystick, skill slots, potion slots, E
+    button and fire button to any point** and **Save**; positions are clamped to the
+    safe area (never off-screen / under a notch) and snap back on **Reset to default**.
+  - The custom layout **round-trips through save/load** (and the localStorage device
+    mirror), survives **reload and orientation / desktop⇄mobile switches**, and applies
+    before first interaction; **older saves load** with defaults.
+  - Works on the **S24 Ultra** (portrait + landscape) + desktop; tap targets stay
+    ≥ ~48 px; no overlaps introduced (respects Task 30's regions); full pipeline green;
+    headless-safe.
+- **Tests to add:** a **pure layout reducer/clamp** (set / move / reset a control's
+  fractional position, clamp to safe-area bounds) unit-tested independent of the DOM;
+  a **save/load round-trip** of the layout schema + **migration** (pre-v14 save ⇒
+  default layout); the localStorage mirror round-trips; a Playwright drag at the S24
+  Ultra profile that moves a control, saves, reloads and asserts it restored (and that
+  a control can't be dropped off-screen).
+- **Files:** `src/game.js` (the layout model + editor mode, drag wiring reusing the
+  Task 16 controller, apply-on-boot, `serializeGame` / `applySave`, `SAVE_VERSION`
+  13 → 14, the localStorage mirror), `index.html` / `css/style.css` (editor overlay,
+  handles, positioning the controls from the stored fractions), `src/core/i18n.js`
+  (EN+RU), `test/*` (+ E2E), `README.md`. **`SAVE_VERSION` 13 → 14.**
+- **Out of scope:** resizing / opacity / per-control scale (note as a follow-up —
+  this task is *position*); customizing the non-combat HUD widgets (status chips /
+  minimap — Task 30 owns their regions); multiple named layout presets (one layout per
+  profile is enough; note presets as a follow-up).
+- **Hints:** store positions as **viewport fractions**, not pixels, so they survive
+  any resolution/orientation; reuse Task 16's pointer-drag + ghost; clamp on apply
+  *and* on load so a layout saved on one device is safe on another; keep the reducer
+  pure so the DOM layer stays thin.
+
+### Task 28 — Exit/enter fullscreen control in the settings menu
+- **Status:** `[ ]`
+- **Depends on:** Task 16 (the `Fullscreen` module — `toggle` / `active` / `supported`
+  / `lockLandscape` / `unlockOrientation`, `src/game.js` ~10622-10686; the `#fsBtn`
+  HUD button). None else.
+- **Goal.** Fullscreen can only be toggled from the small **`⛶`/`✕` HUD button** in
+  the top-right corner; there is **no fullscreen control in the pause/settings menu**,
+  so a player who wants to leave fullscreen (or doesn't notice the corner glyph) has no
+  option where they'd expect it. Add an explicit **fullscreen toggle (with a clear
+  "Exit fullscreen" state) in the settings menu**, the way every PC/console game keeps a
+  Display option in its menu.
+- **Scope (build this):**
+  - **A fullscreen control in pause → settings.** Add a labelled control (in a new
+    **"Display"** sub-panel, or alongside Graphics) that **enters fullscreen when
+    windowed and exits when fullscreen**, with its label reflecting the current state
+    ("Enter fullscreen" / "Exit fullscreen"). Drive it through the existing
+    `Fullscreen.toggle()` so behaviour (incl. the Task 16 touch **landscape lock** on
+    enter and `unlockOrientation()` on exit) stays consistent with the HUD button; keep
+    the HUD button too.
+  - **State sync + feature detection.** Keep the menu control, the HUD button glyph and
+    the actual `document.fullscreenElement` state in sync (listen to `fullscreenchange`).
+    **Feature-detect** `requestFullscreen` / `exitFullscreen` (and the vendor-prefixed
+    forms already handled) — when unsupported (e.g. iOS Safari) **hide/disable** the
+    control gracefully rather than showing a dead button. Never throw if the exit/lock
+    promise rejects.
+  - **i18n.** New / audited strings via `t()` in **EN + RU** (the
+    `btnTitle.exitFullscreen` string already exists — reuse/extend it for the menu
+    label).
+- **Acceptance criteria:**
+  - The settings/pause menu has a working control that **exits fullscreen when in
+    fullscreen** (and enters when not), label reflecting state, kept in sync with the
+    HUD button and the browser's actual fullscreen state.
+  - On browsers without the Fullscreen API the control is **cleanly hidden/disabled**
+    (no dead click, no throw); desktop + mobile both behave; the touch landscape lock
+    still releases on exit.
+  - EN+RU localized; full pipeline green; headless-safe.
+- **Tests to add:** a Vitest check that the menu toggle calls `Fullscreen.toggle()` and
+  that the label/visibility derive from `Fullscreen.active()` / `supported()`
+  (feature-detected, no-op safe headless); a Playwright assertion that the settings
+  control is present and reflects state (entering is gated by a user gesture in-browser,
+  so assert the wiring/visibility + that it's hidden when unsupported).
+- **Files:** `index.html` (pause-menu Display sub-panel + control, ~the settings panels
+  at lines 207-271), `src/game.js` (`Fullscreen` menu wiring + a `fullscreenchange`
+  state sync), `css/style.css` (the control), `src/core/i18n.js` (EN+RU labels),
+  `test/*`, `README.md`. No `SAVE_VERSION` change.
+- **Out of scope:** a windowed-resolution picker or borderless-window modes (browser
+  fullscreen only); changing the existing HUD button (keep it).
+- **Hints:** reuse `Fullscreen.toggle()` verbatim and just add a second trigger + a
+  `fullscreenchange` listener so both entry points and the glyph stay in lockstep; hide
+  the control when `Fullscreen.supported()` is false.
+
+### Task 29 — Fix: NPCs are only talkable in the hub — spawn quest-givers in their home zones
+- **Status:** `[ ]`
+- **Depends on:** the world/zone + quest systems (`setupZoneContent` /
+  `populateAdventure`, `QuestGiver` / `Dialogue`, `NPC_DATA` / `LOCATIONS`,
+  `ZoneManager`). None else.
+- **Goal.** The player can talk to quest-givers in the hub **Meadowgate Vale** but
+  **not in any other land** (e.g. Frostpeak Trail). Root cause: `populateAdventure()` —
+  which instantiates every `QuestGiver` from `NPC_DATA` — is called **only inside the
+  `if (zone.home)` branch** of `setupZoneContent()` (`src/game.js` ~4822-4845), and
+  **only the meadow zone has `home: true`** (`src/data/zones.js` ~30). Every wild zone
+  takes the `else` branch (resources only, **no NPCs**), so non-hub quest-givers —
+  `herbalist` (Whisperwood Grove), `fisher` (Saltmarsh Shore), `smith2` (Frostpeak
+  Pass), `hermit` (Sunken Ruins) — are **never spawned**, even though the campaign sends
+  the player to them. Fix it so every NPC is present and talkable **in their own land** —
+  the baseline reliability a quest-driven RPG must have.
+- **Scope (fix this — root-cause, not a band-aid):**
+  - **Associate each NPC/landmark with its zone.** `NPC_DATA` entries carry a `loc`
+    (landmark id) and `LOCATIONS` entries (`src/data/content.js` ~105-139) currently have
+    **no `zone` field**. Add an explicit landmark → zone association (a `zone` field on
+    `LOCATIONS`, or a small mapping) so the game knows `grove` → forest, `seaside` →
+    shore, `mountain` → peaks, `ruins` → its land, `village` / `apothecary` → the hub,
+    etc. Keep it data-driven and i18n-safe.
+  - **Spawn the right NPCs per zone.** Change `setupZoneContent` / `populateAdventure`
+    so that on entering **any** zone it instantiates the quest-givers **whose landmark
+    belongs to that zone** (placed at their landmark coordinates, registered as
+    interactables at the existing talk range), instead of gating all NPC spawning behind
+    `zone.home`. Hub-only systems (merchant, blacksmith, alchemist vendor, castle site)
+    stay hub-gated; only the **quest-giver placement** becomes zone-aware.
+  - **Re-register interactables on travel.** Confirm that after `ZoneManager`
+    teardown → rebuild the new zone's NPC interactables are freshly registered (no stale
+    / missing interactables), so walking up + pressing **E** opens `Dialogue` and quest
+    **accept / turn-in** works in **every** zone, not just the hub. Sweep for any other
+    hub-only assumption in the talk/quest path.
+  - **Determinism + no leaks.** NPCs spawn deterministically, dispose on teardown (no
+    leaks across travel), and the guided waypoint / minimap NPC markers (Tasks 13/20)
+    point at NPCs now that they exist in their zones.
+- **Acceptance criteria:**
+  - The player can **walk up to and talk to** the herbalist, fisher, smith and hermit
+    **in their own lands** (Whisperwood / Saltmarsh / Frostpeak / the ruins), accept and
+    turn in their missions there — not only in Meadowgate.
+  - Hub NPCs / vendors / castle still work in the hub; no NPC appears in the wrong zone;
+    interactables register correctly after **every** zone travel (and after a save-load
+    into a non-hub zone).
+  - No leaks on teardown; headless-safe; full pipeline green.
+- **Tests to add:** a test that each NPC is placed in its **correct zone** (landmark →
+  zone mapping) and **not** spawned elsewhere; a regression test that, after travelling
+  to a non-hub zone, the NPC interactable is registered and the **talk → Dialogue →
+  accept/turn-in** flow runs (the bug = zero NPCs outside the hub); a save-load into a
+  wild zone still yields talkable NPCs; teardown disposes NPCs.
+- **Files:** `src/game.js` (`setupZoneContent` zone gate, `populateAdventure` →
+  zone-aware NPC spawn, interactable re-registration on travel), `src/data/content.js`
+  (landmark → zone association on `LOCATIONS` / `NPC_DATA`), `test/harness.test.js` (or a
+  new `test/npc-zones.test.js`), `README.md`. No `SAVE_VERSION` change expected (the
+  world is rebuilt from data; confirm zone-state load still works).
+- **Out of scope:** new NPCs or new quests (this is a **placement fix** for existing
+  content); moving the merchant / blacksmith / alchemist out of the hub; redesigning
+  dialogue.
+- **Hints:** the one-line cause is the `if (zone.home)` gate around `populateAdventure`;
+  the clean fix is a **landmark → zone** field so each zone spawns exactly its own
+  quest-givers (the `QuestGiver` constructor already positions itself from the landmark
+  coordinates).
+
+### Task 30 — Collision-free HUD: a real region/layer system so no widget or button overlaps
+- **Status:** `[ ]`
+- **Depends on:** Task 16 (the HUD markup + z-index tiers + the touch action arc).
+  Pairs with **Task 27** (do this **before** the free-form control editor so custom
+  positions start from clean regions). None else.
+- **Goal.** HUD widgets **overlap**: the **weather** widget (and the **clock**) live as
+  inline flex children of the top-centre `.hud-top` status row, while the top-right
+  **icon button row** (fullscreen / pause / inventory / skills / craft / **quest**) is
+  independently absolutely-positioned at the same top edge and extends ~260 px in from
+  the right — and on touch `.hud-top` only reserves ~132 px on the right (enough to clear
+  the 116 px minimap, **not** the wider button row), so the **weather/clock chips flow
+  rightward under the quest button**. Despite Task 16's intent, there is **no real named
+  region system** — every element is positioned independently, so overlaps recur whenever
+  a label grows or wraps. Give the HUD a disciplined **region/layer layout** so **no two
+  widgets or buttons ever share pixels** at any supported resolution/orientation — the
+  safe-area HUD hygiene console/mobile games hold to.
+- **Scope (build this):**
+  - **Define named, non-overlapping HUD regions.** Carve the screen into explicit
+    anchored regions — **top-status** (location / level / XP / coins / clock / weather),
+    **top-right control row** (icon buttons), **corner minimap + compass**, **centre
+    bars** (health / focus / boss), **left column** (relics / quest tracker) and the
+    **bottom action cluster** (joystick / skill bar / potion bar / buff bar / E / fire) —
+    each with a reserved bounding box and a z-tier, using a small set of CSS layer classes
+    + `pointer-events` discipline. Audit **every** absolutely-positioned HUD element and
+    assign it to exactly one region.
+  - **Fix the weather/quest collision specifically.** Reserve the top-right control-row
+    width in the top-status row's layout (or move the clock/weather into a region that can
+    never reach the button row) so the weather/clock chips **never** sit under the quest
+    (or any) icon button — at the S24 Ultra width, at a narrow ~360 px width, with long
+    localized labels (e.g. "Гроза" / "Thunderstorm"), and when the row would otherwise wrap.
+  - **Prove it at every breakpoint.** Make the regions hold in **portrait and landscape**
+    on the **Galaxy S24 Ultra** profile, a small phone width, and desktop — including when
+    labels are at their longest in either locale and when the boss bar / compass / quest
+    tracker are all visible at once.
+  - **No behaviour/visual regressions.** Keep the Task 16 declutter (no duplicate
+    buttons), the one-thumb action arc, safe-area insets and the minimap-tap map entry;
+    this is **layout layering**, not a redesign of widget contents.
+- **Acceptance criteria:**
+  - **No two HUD widgets/buttons overlap** at any tested resolution/orientation —
+    explicitly, the **weather/clock never collide with the quest button** (or any icon
+    button) — verified by bounding-box assertions across the S24 Ultra (portrait +
+    landscape), a small width and desktop, with longest-label locales.
+  - The HUD reads as deliberate anchored regions with correct z-layering and
+    `pointer-events` (taps land on the right control); the Task 16 declutter + action arc
+    are intact.
+  - Works desktop + mobile; headless-safe; full pipeline green.
+- **Tests to add:** extend the **Playwright responsive suite** (`test/e2e/responsive.spec.js`
+  — S24 Ultra portrait + landscape, a ~360 px width, desktop) with **pairwise bounding-box
+  non-overlap** assertions over all key HUD elements (explicitly weather × quest button),
+  run with the longest EN **and** RU labels and with the boss bar / compass / tracker
+  visible; a Vitest check on any pure region-geometry helper if one is introduced.
+- **Files:** `css/style.css` (HUD region/layer classes + anchored bounding boxes; the
+  top-status right-reserve fix), `index.html` (group HUD elements into their region
+  containers), `src/game.js` (any HUD wiring that toggles regions),
+  `test/e2e/responsive.spec.js` (+ a small Vitest helper test), `README.md`. No
+  `SAVE_VERSION` change (layout only).
+- **Out of scope:** the free-form drag-to-reposition editor (Task 27 — this task fixes the
+  *default* layout so it never overlaps), redesigning widget contents, a UI-framework
+  rewrite.
+- **Hints:** the collision is the top-status row not reserving the icon-row width on the
+  right; fix it at the layout level (a region reserve) rather than nudging one element;
+  assert non-overlap in E2E so the regression can't return as new widgets are added.
+
+---
+
 ## 5. Recommended order
 
 Tasks are mostly independent, but this order minimizes rework.
@@ -1687,6 +2242,25 @@ Tasks are mostly independent, but this order minimizes rework.
 > All of Tasks 16–22 must pass their **UI/responsive tests on the Galaxy S24 Ultra
 > device profile** (1440 × 3120, DPR ≈ 3.5, portrait + landscape) added in Task 16,
 > alongside the existing desktop coverage.
+
+**Tasks 23–30 (player-reported polish: sign-in persistence, deeper localization,
+gear visuals, customizable & collision-free HUD) — recommended order:**
+
+1. **Task 29 — Fix NPC talk across zones** *(quick correctness fix; independent)*
+2. **Task 30 — Collision-free HUD regions** *(clean default layout before the editor)*
+3. **Task 27 — Customizable control layout** *(after Task 30; reuses Task 16's drag
+   utility; bumps `SAVE_VERSION` 13 → 14)*
+4. **Task 28 — Exit/enter fullscreen in settings** *(small; independent)*
+5. **Task 23 — Persist Google Drive sign-in** *(independent; builds on Tasks 15/17)*
+6. **Task 24 — Russian morphology/declensions** *(independent; builds on Task 7)*
+7. **Task 25 — Composite item icons** *(independent; builds on Tasks 3/12)*
+8. **Task 26 — Worn-gear clipping audit** *(after Task 25 — both are the gear-visual
+   pass)*
+
+> Tasks 27 / 28 / 30 are UI-facing — they must pass their **UI/responsive tests on
+> the Galaxy S24 Ultra device profile** (portrait + landscape) added in Task 16,
+> alongside desktop. Only **Task 27** changes the save schema (`SAVE_VERSION`
+> 13 → 14); the rest persist via cookies/localStorage or are visual/logic-only.
 
 If you skip ahead, still obey Golden Rule 9 (route new strings through i18n once
 it exists) and the shared Definition of Done. For Tasks 9 & 15, read each task's
