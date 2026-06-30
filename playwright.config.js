@@ -164,6 +164,26 @@ export default defineConfig({
       testMatch: /map\.spec\.js/,
       use: s24Landscape,
     },
+    // Collision-free HUD regions (Task 39): a fast, engine-free geometry guard —
+    // it renders the static page, un-hides + fills the HUD, forces the worst case
+    // (longest EN/RU labels with boss bar / compass / tracker all visible) and
+    // asserts no two HUD widgets overlap, at desktop AND the S24 Ultra portrait +
+    // landscape profiles. Robust even if the Babylon CDN is unreachable.
+    {
+      name: "hud-regions-desktop",
+      testMatch: /hud-regions\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "hud-regions-s24-portrait",
+      testMatch: /hud-regions\.spec\.js/,
+      use: s24Portrait,
+    },
+    {
+      name: "hud-regions-s24-landscape",
+      testMatch: /hud-regions\.spec\.js/,
+      use: s24Landscape,
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",
