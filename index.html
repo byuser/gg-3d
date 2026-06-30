@@ -95,9 +95,24 @@
     </div>
   </div>
 
-  <!-- HUD -->
+  <!-- HUD — a disciplined REGION/LAYER system (Task 39). The screen is carved
+       into explicit, anchored, NON-OVERLAPPING regions, each a `.hud-region`
+       with a reserved bounding box and a z-tier (see css/style.css "HUD region
+       layout"). Every absolutely-positioned widget belongs to exactly one region
+       so no two widgets/buttons ever share pixels at any resolution/orientation:
+         • region-controls  — the top-right icon-button ROW (a real flex row whose
+           width drives the top-status reserve, so chips never slide under it);
+         • region-top-status — the top-centre status chips (it reserves the
+           control-row width on its right edge → the weather/clock fix);
+         • region-corner     — the corner minimap + the compass under it;
+         • region-centre     — the centred health / focus / boss bars;
+         • region-left       — the relic strip + the active-quest tracker;
+         • region-action     — the bottom action cluster (skills / potions / buffs);
+       the joystick + fire/E touch primaries live in #touch (its own z-tier). -->
   <div id="hud" class="hud hidden">
-    <div class="hud-top">
+    <!-- REGION: top-status. Centred status chips; reserves the control-row width
+         on the right so the chips never reach under the icon buttons (Task 39). -->
+    <div id="hudTopStatus" class="hud-region region-top-status hud-top">
       <div class="stat loc-stat">📍 <span id="location">Meadowgate Vale</span></div>
       <div class="stat lvl-stat" id="xpWrap"><span id="levelBadge">Lv 1</span>
         <span class="xp-track"><span id="xpFill" class="xp-fill"></span></span></div>
@@ -106,67 +121,91 @@
       <div class="stat" id="weather">☀️ Clear</div>
       <div id="prompt" class="prompt hidden" data-i18n-html="prompt.pressE">Press <b>E</b></div>
     </div>
-    <!-- Collected relics + the active-quest tracker. (Materials moved into the
-         unified inventory bag in Task 21 — no on-HUD chip strip anymore.) -->
-    <div id="relicBar" class="relic-bar"></div>
-    <div id="questTracker" class="quest-tracker hidden"></div>
-    <div class="healthwrap">
-      <span class="heart">❤</span>
-      <div class="healthbar"><div id="healthFill" class="health-fill"></div></div>
-    </div>
-    <!-- Focus (the spell resource for skills): regenerates over time. -->
-    <div class="focuswrap" id="focusWrap" data-i18n-title="hud.focusLabel" title="Focus">
-      <span class="focus-rune">✦</span>
-      <div class="focusbar"><div id="focusFill" class="focus-fill"></div></div>
+
+    <!-- REGION: top-right control row. The six HUD icon buttons live in ONE flex
+         row so the row has a single measurable width — `--controls-w` reserves
+         exactly that on the top-status row, which is what keeps the weather/clock
+         chips out from under the quest (or any) button. Buttons keep their IDs so
+         all existing wiring (getElementById) is untouched. -->
+    <div id="hudControls" class="hud-region region-controls">
+      <button id="fsBtn" class="icon-btn" data-i18n-title="btnTitle.fullscreen" data-i18n-aria="btnAria.fullscreen" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
+      <button id="pauseBtn" class="icon-btn" data-i18n-title="btnTitle.menu" data-i18n-aria="btnAria.menu" title="Menu (Esc)" aria-label="Open menu">☰</button>
+      <button id="invBtn" class="icon-btn" data-i18n-title="btnTitle.inventory" data-i18n-aria="btnAria.inventory" title="Inventory (I)" aria-label="Open inventory">🎒</button>
+      <button id="skillsBtn" class="icon-btn" data-i18n-title="btnTitle.skills" data-i18n-aria="btnAria.skills" title="Skills (K)" aria-label="Open skills">✨</button>
+      <button id="craftBtn" class="icon-btn" data-i18n-title="btnTitle.crafting" data-i18n-aria="btnAria.crafting" title="Crafting (C)" aria-label="Open crafting">🛠️</button>
+      <button id="questBtn" class="icon-btn" data-i18n-title="btnTitle.questLog" data-i18n-aria="btnAria.questLog" title="Quest log (J)" aria-label="Open quest log">📜</button>
     </div>
 
-    <!-- Boss health bar: shown only while a Sweet King boss is alive. -->
-    <div id="bossBar" class="boss-bar hidden">
-      <div id="bossName" class="boss-name">👑 Boss</div>
-      <div class="boss-track"><div id="bossFill" class="boss-fill"></div></div>
+    <!-- REGION: left column. Collected relics + the active-quest tracker, anchored
+         top-left under the status row. (Materials moved into the unified inventory
+         bag in Task 21 — no on-HUD chip strip anymore.) -->
+    <div id="hudLeft" class="hud-region region-left">
+      <div id="relicBar" class="relic-bar"></div>
+      <div id="questTracker" class="quest-tracker hidden"></div>
     </div>
 
-    <!-- Zone/location banner: shows the name of the land you've just entered. -->
+    <!-- REGION: centre bars. Health, focus and the boss bar stack down the top
+         centre, between the status row and the play area. -->
+    <div id="hudCentre" class="hud-region region-centre">
+      <div class="healthwrap">
+        <span class="heart">❤</span>
+        <div class="healthbar"><div id="healthFill" class="health-fill"></div></div>
+      </div>
+      <!-- Focus (the spell resource for skills): regenerates over time. -->
+      <div class="focuswrap" id="focusWrap" data-i18n-title="hud.focusLabel" title="Focus">
+        <span class="focus-rune">✦</span>
+        <div class="focusbar"><div id="focusFill" class="focus-fill"></div></div>
+      </div>
+      <!-- Boss health bar: shown only while a Sweet King boss is alive. -->
+      <div id="bossBar" class="boss-bar hidden">
+        <div id="bossName" class="boss-name">👑 Boss</div>
+        <div class="boss-track"><div id="bossFill" class="boss-fill"></div></div>
+      </div>
+    </div>
+
+    <!-- Zone/location banner: shows the name of the land you've just entered. A
+         transient, centred flash (pointer-events: none) — not an anchored region. -->
     <div id="waveBanner" class="wave-banner"></div>
 
-    <!-- Guided-waypoint compass: an arrow + label pointing toward the chosen
-         destination (or the next portal to take when it's in another land). The
-         arrow is an inline SVG (shaft + arrowhead) so the pointing end is
-         unambiguous; it points UP at rotation 0 (dead ahead) and is rotated
-         clockwise toward the target (Task 20). -->
-    <div id="compass" class="compass hidden">
-      <span id="compassArrow" class="compass-arrow" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="20" height="20" focusable="false">
-          <path d="M12 2 L19 12 L14 12 L14 22 L10 22 L10 12 L5 12 Z"
-                fill="currentColor" stroke="rgba(0,0,0,0.55)" stroke-width="1"
-                stroke-linejoin="round" />
-        </svg>
-      </span>
-      <span id="compassLabel" class="compass-label"></span>
+    <!-- REGION: corner. The tappable minimap and the guided-waypoint compass pill
+         beneath it, anchored top-right under the control row. -->
+    <div id="hudCorner" class="hud-region region-corner">
+      <!-- Corner minimap: the current land, north-up, with the player, portals,
+           NPCs, resources and the active waypoint. Tap it to open the full map. -->
+      <button id="minimap" class="minimap" data-i18n-title="map.openTitle" data-i18n-aria="map.openTitle" title="Open map (Tab)" aria-label="Open map">
+        <canvas id="minimapCanvas" class="minimap-canvas" width="150" height="150"></canvas>
+        <span class="minimap-n">N</span>
+        <span class="minimap-hint" data-i18n="map.tapHint">Tap to open map</span>
+      </button>
+      <!-- Guided-waypoint compass: an arrow + label pointing toward the chosen
+           destination (or the next portal to take when it's in another land). The
+           arrow is an inline SVG (shaft + arrowhead) so the pointing end is
+           unambiguous; it points UP at rotation 0 (dead ahead) and is rotated
+           clockwise toward the target (Task 20). -->
+      <div id="compass" class="compass hidden">
+        <span id="compassArrow" class="compass-arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" focusable="false">
+            <path d="M12 2 L19 12 L14 12 L14 22 L10 22 L10 12 L5 12 Z"
+                  fill="currentColor" stroke="rgba(0,0,0,0.55)" stroke-width="1"
+                  stroke-linejoin="round" />
+          </svg>
+        </span>
+        <span id="compassLabel" class="compass-label"></span>
+      </div>
     </div>
 
-    <!-- Corner minimap: the current land, north-up, with the player, portals,
-         NPCs, resources and the active waypoint. Tap it to open the full map. -->
-    <button id="minimap" class="minimap" data-i18n-title="map.openTitle" data-i18n-aria="map.openTitle" title="Open map (Tab)" aria-label="Open map">
-      <canvas id="minimapCanvas" class="minimap-canvas" width="150" height="150"></canvas>
-      <span class="minimap-n">N</span>
-      <span class="minimap-hint" data-i18n="map.tapHint">Tap to open map</span>
-    </button>
+    <!-- REGION: bottom action cluster. The skill quick bar, the potion belt and
+         the active-buff pills. On touch landscape these re-flow into the one-thumb
+         arc (Task 16); the joystick + fire/E primaries live in #touch below. -->
+    <div id="hudAction" class="hud-region region-action">
+      <!-- Skill quick bar: up to 3 active skills (cast with 1/2/3 or a tap). -->
+      <div id="skillBar" class="skill-bar"></div>
+      <!-- Potion belt: up to 3 stackable potion slots (use with 4/5/6 or a tap),
+           with active-buff countdown pills above it. -->
+      <div id="buffBar" class="buff-bar"></div>
+      <div id="potionBar" class="potion-bar"></div>
+    </div>
 
-    <!-- Skill quick bar: up to 3 active skills (cast with 1/2/3 or a tap). -->
-    <div id="skillBar" class="skill-bar"></div>
-
-    <!-- Potion belt: up to 3 stackable potion slots (use with 4/5/6 or a tap),
-         with active-buff countdown pills above it. -->
-    <div id="buffBar" class="buff-bar"></div>
-    <div id="potionBar" class="potion-bar"></div>
-
-    <button id="fsBtn" class="fs-btn" data-i18n-title="btnTitle.fullscreen" data-i18n-aria="btnAria.fullscreen" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
-    <button id="pauseBtn" class="pause-btn" data-i18n-title="btnTitle.menu" data-i18n-aria="btnAria.menu" title="Menu (Esc)" aria-label="Open menu">☰</button>
-    <button id="invBtn" class="icon-btn inv-btn" data-i18n-title="btnTitle.inventory" data-i18n-aria="btnAria.inventory" title="Inventory (I)" aria-label="Open inventory">🎒</button>
-    <button id="skillsBtn" class="icon-btn skills-btn" data-i18n-title="btnTitle.skills" data-i18n-aria="btnAria.skills" title="Skills (K)" aria-label="Open skills">✨</button>
-    <button id="craftBtn" class="icon-btn craft-btn" data-i18n-title="btnTitle.crafting" data-i18n-aria="btnAria.crafting" title="Crafting (C)" aria-label="Open crafting">🛠️</button>
-    <button id="questBtn" class="icon-btn quest-btn" data-i18n-title="btnTitle.questLog" data-i18n-aria="btnAria.questLog" title="Quest log (J)" aria-label="Open quest log">📜</button>
     <div id="toast" class="toast"></div>
   </div>
 

@@ -158,19 +158,93 @@ html, body {
 
 /* ---------- HUD ---------- */
 .hud { position: fixed; inset: 0; z-index: 20; pointer-events: none; }
-.hud-top {
-  position: absolute; top: max(14px, env(safe-area-inset-top)); left: 0; right: 0;
-  display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; padding: 0 14px;
+
+/* ===== HUD region/layer system (Task 39) =====
+   The HUD is carved into explicit, anchored, NON-OVERLAPPING regions so no two
+   widgets/buttons ever share pixels at any resolution/orientation. Each
+   `.hud-region` is a full-screen, transparent, pass-through LAYER (inset:0,
+   pointer-events:none) that owns a z-tier; its widgets keep their own precise
+   anchors (the per-widget positioning math is preserved) but are now grouped and
+   stacked deliberately. The two regions that are themselves laid-out boxes — the
+   top-status chip row and the top-right control row — are kept apart by reserving
+   the control row's width on the status row (`--controls-w`), the structural fix
+   for the weather/clock-under-the-quest-button overlap. */
+.hud-region { position: absolute; inset: 0; pointer-events: none; }
+/* Z-tiers (within the .hud z-index:20 context): bars lowest, then corner map,
+   left column, action cluster, with the always-tappable control row on top. */
+.region-centre { z-index: 1; }
+.region-left { z-index: 2; }
+.region-corner { z-index: 3; }
+.region-action { z-index: 4; }
+.region-top-status { z-index: 5; bottom: auto; }
+.region-controls { z-index: 6; }
+
+/* The control-row geometry is the single source of truth for the top reserve: the
+   row is `--ctrl-count` buttons of `--ctrl-btn` wide with `--ctrl-gap` between, so
+   the status row reserves exactly that width — change the button size in one place
+   and the reserve tracks it (no magic numbers spread across selectors). */
+.hud {
+  --ctrl-btn: 44px; --ctrl-gap: 8px; --ctrl-count: 6;
+  --ctrl-edge: max(12px, env(safe-area-inset-right));
+  --controls-w: calc(var(--ctrl-btn) * var(--ctrl-count) + var(--ctrl-gap) * (var(--ctrl-count) - 1));
 }
-/* On phones the top-right corner is owned by the icon-button row + the tappable
-   minimap, so reserve that column: the centred status chips wrap to the LEFT of
-   it and never slide under the minimap at narrow widths (Task 16 — no overlap). */
+
+/* REGION: top-right control row — the six icon buttons as ONE flex row anchored
+   top-right, so the row has a single measurable width (= --controls-w). */
+.region-controls {
+  inset: auto; position: absolute;
+  top: max(12px, env(safe-area-inset-top)); right: var(--ctrl-edge);
+  display: flex; flex-direction: row; gap: var(--ctrl-gap); align-items: flex-start;
+}
+
+/* REGION: top-status — centred status chips. Reserves the control-row column on
+   its right edge (+ a clearance gap) so no chip can flow under the icon buttons. */
+.hud-top {
+  position: absolute; top: max(14px, env(safe-area-inset-top)); left: 0; right: 0; bottom: auto;
+  display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;
+  padding-left: max(14px, env(safe-area-inset-left));
+  padding-right: calc(var(--ctrl-edge) + var(--controls-w) + 12px);
+}
+
+/* ===== Touch HUD: explicit, banded, non-overlapping regions (Task 39) =====
+   On phones there is no room for the status chips beside the full control row AND
+   the minimap, so the HUD lays out in distinct VERTICAL BANDS, each owning a
+   y-range the next clears: control row (top) · status chips + corner minimap ·
+   centred health/focus/boss · left relics+tracker. Named CSS vars are the single
+   source of truth for each band's top edge. */
 @media (pointer: coarse) {
-  .hud-top {
-    justify-content: flex-start;
-    padding-right: calc(max(12px, env(safe-area-inset-right)) + 132px);
-    row-gap: 6px;
+  .hud {
+    --minimap-w: 116px; --compass-h: 34px;
+    /* The minimap + compass sit just BELOW the control-row band on the right. */
+    --minimap-top: calc(max(12px, env(safe-area-inset-top)) + var(--ctrl-btn) + 8px);
+    --compass-top: calc(var(--minimap-top) + var(--minimap-w) + 10px);
   }
+}
+/* Touch PORTRAIT (narrow): no room beside the control row, so the status chips
+   DROP into their own band below it (reserving only the minimap column), and the
+   other top-area regions drop below them. */
+@media (pointer: coarse) and (orientation: portrait) {
+  .hud {
+    --band-status-top: var(--minimap-top);
+    --status-reserve: calc(var(--ctrl-edge) + var(--minimap-w) + 12px);
+    /* Band 2 (centred bars + left column) clears the TALLER band-1 column: the
+       minimap+compass (right) vs the wrapped chips (left). On a ~360px phone the
+       chips (reserving the minimap) can wrap to ~5 rows — taller than the minimap
+       column — so max() keeps band 2 below whichever is taller. */
+    --band-bars-top: calc(var(--band-status-top) + max(calc(var(--minimap-w) + 10px + var(--compass-h) + 10px), 216px));
+  }
+  .hud-top {
+    top: var(--band-status-top);
+    justify-content: flex-start; row-gap: 6px;
+    padding-right: var(--status-reserve);
+  }
+}
+/* Touch LANDSCAPE (wide, short): keep the chips in the TOP row beside the control
+   row (ample width), so the top band stays short and the scarce vertical space
+   below isn't eaten; shrink the minimap so its column clears the one-thumb arc. */
+@media (pointer: coarse) and (orientation: landscape) {
+  .hud { --band-bars-top: calc(max(14px, env(safe-area-inset-top)) + 44px); --minimap-w: 96px; }
+  .hud-top { row-gap: 6px; }
 }
 .stat {
   background: rgba(11, 15, 26, 0.6);
@@ -430,29 +504,8 @@ html, body {
 .shop-close:active { transform: scale(0.9); }
 .shop-done { font-size: 16px; padding: 11px 26px; }
 
-.fs-btn {
-  position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right));
-  width: 44px; height: 44px; border-radius: 12px; cursor: pointer;
-  background: rgba(11, 15, 26, 0.6); color: var(--ink);
-  border: 1px solid rgba(255, 255, 255, 0.14); font-size: 20px; line-height: 1;
-  pointer-events: auto; display: flex; align-items: center; justify-content: center;
-  transition: background 0.15s ease, transform 0.1s ease;
-}
-.fs-btn:hover { background: rgba(11, 15, 26, 0.85); }
-.fs-btn:active { transform: scale(0.92); }
-
-/* ---------- Pause (☰) button — sits just left of the fullscreen button ---------- */
-.pause-btn {
-  position: absolute; top: max(12px, env(safe-area-inset-top));
-  right: calc(max(12px, env(safe-area-inset-right)) + 52px);
-  width: 44px; height: 44px; border-radius: 12px; cursor: pointer;
-  background: rgba(11, 15, 26, 0.6); color: var(--ink);
-  border: 1px solid rgba(255, 255, 255, 0.14); font-size: 20px; line-height: 1;
-  pointer-events: auto; display: flex; align-items: center; justify-content: center;
-  transition: background 0.15s ease, transform 0.1s ease;
-}
-.pause-btn:hover { background: rgba(11, 15, 26, 0.85); }
-.pause-btn:active { transform: scale(0.92); }
+/* (The fullscreen ⛶ + pause ☰ buttons now share the .icon-btn styling and live in
+   the #hudControls flex row with the other icon buttons — Task 39.) */
 
 /* ---------- Menu action buttons (start screen + pause menu) ---------- */
 .menu-actions { display: grid; gap: 12px; }
@@ -646,10 +699,14 @@ html, body {
 }
 .cast-btn:active { transform: scale(0.92); }
 
-/* ---------- HUD icon buttons (inventory / craft / quest) ---------- */
+/* ---------- HUD icon buttons (fullscreen / pause / inventory / skills / craft /
+   quest) ---------- */
+/* All six are now flex children of the #hudControls row (Task 39) — no per-button
+   absolute offsets. Each is sized from the shared --ctrl-btn/--ctrl-gap vars that
+   also drive the top-status reserve, so the row width and the reserve never drift. */
 .icon-btn {
-  position: absolute; top: max(12px, env(safe-area-inset-top));
-  width: 44px; height: 44px; border-radius: 12px; cursor: pointer;
+  flex: 0 0 auto;
+  width: var(--ctrl-btn); height: var(--ctrl-btn); border-radius: 12px; cursor: pointer;
   background: rgba(11, 15, 26, 0.6); color: var(--ink);
   border: 1px solid rgba(255, 255, 255, 0.14); font-size: 20px; line-height: 1;
   pointer-events: auto; display: flex; align-items: center; justify-content: center;
@@ -657,22 +714,11 @@ html, body {
 }
 .icon-btn:hover { background: rgba(11, 15, 26, 0.85); }
 .icon-btn:active { transform: scale(0.92); }
-/* Row, right→left: fullscreen, pause(+52), inventory(+104), skills(+156),
-   craft(+208), quest(+260). The map (minimap-tap) and music (settings mute)
-   buttons were removed in Task 16. */
-.inv-btn    { right: calc(max(12px, env(safe-area-inset-right)) + 104px); }
-.skills-btn { right: calc(max(12px, env(safe-area-inset-right)) + 156px); }
-.craft-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 208px); }
-.quest-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 260px); }
-/* On phones the row holds five buttons; shrink + tighten them so the row keeps a
-   compact footprint and never crowds the top status chips. */
+/* On phones the row shrinks its buttons + gap; the reserve is derived from the
+   same vars, so the top-status reserve shrinks in lock-step. */
 @media (pointer: coarse) {
-  .fs-btn, .pause-btn, .icon-btn { width: 38px; height: 38px; font-size: 18px; }
-  .pause-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 44px); }
-  .inv-btn    { right: calc(max(12px, env(safe-area-inset-right)) + 88px); }
-  .skills-btn { right: calc(max(12px, env(safe-area-inset-right)) + 132px); }
-  .craft-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 176px); }
-  .quest-btn  { right: calc(max(12px, env(safe-area-inset-right)) + 220px); }
+  .hud { --ctrl-btn: 38px; --ctrl-gap: 6px; }
+  .icon-btn { font-size: 18px; }
 }
 
 /* ---------- Shop Buy/Sell tabs ---------- */
@@ -1280,10 +1326,9 @@ html, body {
 .map-actions .start-btn { margin: 0; flex: 1 1 auto; min-width: 120px; }
 .map-guide:disabled { opacity: 0.5; cursor: default; }
 
-@media (pointer: coarse) {
-  .minimap { width: 116px; height: 116px; top: max(58px, calc(env(safe-area-inset-top) + 50px)); }
-  .compass { top: max(182px, calc(env(safe-area-inset-top) + 174px)); max-width: 190px; }
-}
+/* (The touch minimap + compass anchors moved into the unified band system at the
+   end of this file — Task 39 — so they align with the status band and never
+   collide with the status chips.) */
 /* Narrow / portrait phones: stack the map above the search+results. The canvas
    takes a clamped slice of the viewport height (so it never pushes the list or
    the action buttons off-screen) and the results list flexes into the rest and
@@ -1304,4 +1349,36 @@ html, body {
   .map-panel h2 { font-size: clamp(18px, 4.5vw, 24px); margin-bottom: 2px; }
   .map-tabs { margin: 5px 0; }
   .map-sel-info { max-height: 3.2em; }
+}
+
+/* ===== Touch HUD region anchoring (Task 39) — placed LAST so it wins the cascade.
+   Re-anchors every top-area region on touch into the deliberate, non-overlapping
+   vertical BANDS defined by the band-top CSS vars on .hud (above). It lives at
+   the end because the per-widget defaults (.minimap, .compass, .healthwrap,
+   .boss-bar, .relic-bar, .quest-tracker) are scattered above and, at equal
+   specificity, source order decides. Band order top → bottom: control row · status
+   chips + minimap · health+focus · relics+tracker · boss bar. ===== */
+@media (pointer: coarse) {
+  /* Band 1 (right): the corner minimap aligns with the status band; the compass
+     tucks under it. The status chips reserve the minimap width, so they can't touch. */
+  .minimap { width: var(--minimap-w); height: var(--minimap-w); top: var(--minimap-top); }
+  .compass { top: var(--compass-top); right: var(--ctrl-edge); max-width: var(--minimap-w); }
+  /* Band 2 (centre + far-left): centred health + focus, with the small relic strip
+     on the far left at the same top (narrow enough to clear the centred bars). */
+  .healthwrap { top: var(--band-bars-top); }
+  .focuswrap { top: calc(var(--band-bars-top) + 20px); }
+  .relic-bar { top: var(--band-bars-top); }
+  /* Band 3 (left): the quest tracker, below the health/focus bars (it is wide and
+     would otherwise reach the centred bars). */
+  .quest-tracker { top: calc(var(--band-bars-top) + 40px); max-width: min(220px, 52vw); }
+  /* Band 4 (centre): the boss bar, STACKED below the tracker's full extent (the
+     wide centred bar and the wide left tracker can't sit side-by-side on a phone).
+     Narrowed so its edges clear the corner minimap. Hidden when no boss is alive. */
+  .boss-bar { top: calc(var(--band-bars-top) + 150px); width: min(280px, 64vw); }
+}
+/* Landscape (wide, short): the wide screen lets the tracker stay far-left while the
+   boss bar centres clear of it — tuck the boss bar back up below health/focus. */
+@media (pointer: coarse) and (orientation: landscape) {
+  .quest-tracker { max-width: min(220px, 28vw); }
+  .boss-bar { top: calc(var(--band-bars-top) + 44px); width: min(380px, 44vw); }
 }
