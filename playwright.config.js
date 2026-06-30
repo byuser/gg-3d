@@ -35,16 +35,31 @@ const s24Landscape = {
 // open. Babylon is fetched from its CDN, so this needs network at run time.
 export default defineConfig({
   testDir: "./test/e2e",
-  fullyParallel: false,
+  // Keep `fullyParallel` on so that, under CI sharding (below), Playwright splits
+  // the suite test-by-test for an even shard balance rather than file-by-file.
+  fullyParallel: true,
   forbidOnly: !!process.env.CI,
+  // One retry on CI absorbs a genuine flake.
   retries: process.env.CI ? 1 : 0,
+  // The E2E speed-up comes from SHARDING across parallel CI machines (see the
+  // matrix in .github/workflows/ci.yml), NOT from many workers per machine. Each
+  // test boots Babylon on a *software* WebGL canvas; running several such boots
+  // on one machine starves the CPU enough that the tests' own boot-readiness
+  // waits (e.g. the 15s "#hud visible" assertion) flake. So we keep ONE worker
+  // per machine (zero in-runner contention — tests behave exactly as in the old
+  // serial run) and get the wall-clock win from N shards running concurrently.
+  // (Once CI confirms headroom, a machine could likely afford 2 workers; bumping
+  // shard count is the safer lever.)
   workers: 1,
   reporter: process.env.CI ? "list" : "list",
-  // Each test drives the whole UI end-to-end (boot Babylon on a real WebGL canvas
-  // — fetched from the CDN — then open overlays / read HUD geometry, on desktop
-  // AND the mobile S24 Ultra profiles). On a cold runner that first boot is slow,
-  // so give every test a generous budget (the web server already gets 120s) to
-  // avoid flaky timeouts.
+  // Keep the generous per-test budget. A single test can boot Babylon on a real
+  // WebGL canvas (fetched from the CDN) MORE THAN ONCE — the session-resume and
+  // saves round-trip flows boot, save, reload and boot again — which legitimately
+  // runs well over a minute on a CI runner. Cutting this to 120s timed those heavy
+  // multi-boot tests out, so it stays at the proven 240s; the speed-up comes from
+  // sharding, not a tighter per-test cap. (The Task 39 stall that used to ride this
+  // budget is gone, so 240s no longer masks a hang here.) Per-action timeouts are
+  // left at their defaults so they never cap a legitimately slow first boot.
   timeout: 240_000,
   use: {
     baseURL: "http://localhost:4173",
