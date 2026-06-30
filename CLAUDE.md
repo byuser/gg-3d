@@ -110,6 +110,18 @@ on every push + PR — **do not merge red**. A feature-specific smoke check (an
 extra Vitest case that boots the game via the stubs and exercises the new path)
 is encouraged.
 
+**Iterate fast — don't re-run the whole E2E matrix every loop.** `npm run lint`,
+`npm run typecheck` and `npm test` (Vitest) run in **seconds** — keep those in the
+tight edit loop. The slow stage is `npm run test:e2e` (real-browser Babylon boots,
+64 tests × device profiles, sharded 4× in CI and currently the long pole of the
+pipeline). While developing, run **only the spec/project you touched** —
+`npx playwright test test/e2e/<file>.spec.js --project=<one>` — instead of the full
+suite; run the **full** `npm run test:e2e` **once** before you merge. CI's 4-way
+sharded run is the authoritative full gate regardless, so lean on it rather than
+re-running all 64 locally. (Note: the sandbox often can't reach the Babylon CDN, so
+local E2E may need the `GG_LOCAL_BABYLON` route hook; the real-engine E2E is what CI
+verifies.) **Speeding up + de-flaking this stage is its own backlog item — Task 42.**
+
 ## Git / branch / deploy conventions
 
 - Develop on the branch named in the run instructions; create it if missing.

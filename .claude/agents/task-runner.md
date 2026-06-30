@@ -59,7 +59,17 @@ on your local/feature branch" or to "never push to `master`". That guidance does
 4. **Add tests** for what you build (Vitest logic + functional, and a Playwright
    assertion if it touches DOM/UI). Keep the **whole pipeline green**:
    `npm run lint && npm run typecheck && npm test && npm run build &&
-   npm run test:e2e` (match exactly what CI runs).
+   npm run test:e2e` (match exactly what CI runs). **Iterate fast:** the
+   lint/typecheck/`npm test` (Vitest) stages run in seconds — keep them in the tight
+   loop; the slow stage is `npm run test:e2e` (real-browser boots, sharded 4× in CI).
+   While developing, run **only the spec/project you touched**
+   (`npx playwright test test/e2e/<file>.spec.js --project=<one>`); run the **full**
+   `npm run test:e2e` **once** before you merge, and let CI's 4-way sharded run be the
+   authoritative full gate — don't burn time re-running all 64 E2E tests locally each
+   loop. (If the sandbox can't reach the Babylon CDN, use the `GG_LOCAL_BABYLON` route
+   hook locally; the real-engine E2E is verified by CI. A slow/flaky shard can take
+   ~16–20 min — wait for **all** shards to settle, don't conclude red early. Speeding
+   this up is Task 42.)
 5. **Docs**: tick the task's checkbox in `TODO.md` (add the date + a one-line note)
    and add the release entry to `CHANGELOG.md` (Keep a Changelog format) — never
    add dated entries back into `TODO.md`. Update `README.md` (relevant section +
