@@ -218,6 +218,26 @@ export default defineConfig({
       testMatch: /controllayout\.spec\.js/,
       use: { ...devices["Desktop Chrome"] },
     },
+    // Exit/enter fullscreen control in the settings menu (Task 37): the pause →
+    // settings → Display control is present + reflects state + stays in sync with
+    // the HUD button via `fullscreenchange`, and is cleanly hidden when the
+    // Fullscreen API is unsupported. Run at desktop AND the S24 Ultra portrait +
+    // landscape profiles (the landscape lock path is mobile-only).
+    {
+      name: "fullscreen-desktop",
+      testMatch: /fullscreen\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "fullscreen-s24-portrait",
+      testMatch: /fullscreen\.spec\.js/,
+      use: s24Portrait,
+    },
+    {
+      name: "fullscreen-s24-landscape",
+      testMatch: /fullscreen\.spec\.js/,
+      use: s24Landscape,
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",

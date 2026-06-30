@@ -53,6 +53,7 @@ and gear without ever blocking the main line. Slay the dragon to **win**.
 | Travel to another land | walk a road off the map edge (to its gateway) | same |
 | Music on/off | `M` | mute in pause → Audio settings |
 | Pause / menu | `Esc` | ☰ button (top-right) |
+| Enter / exit fullscreen | **⛶** button (top-right) · **pause → settings → Display** | same |
 | Customize control layout | start screen / pause → settings → **Controls** | drag the joystick / skills / potions / E / fire anywhere |
 | Language (EN / RU) | start screen · pause settings | same |
 | Audio volumes / mute | start screen · pause settings | same |
@@ -614,7 +615,16 @@ region/layer layout holds at every breakpoint, and the **control-layout** suite
 from pause → settings, **drags the joystick**, **Saves**, **reloads** and asserts it
 **restored**, then yanks it past the corner and asserts it **can't be dropped
 off-screen** (clamped) — with a **desktop** smoke that the editor opens cleanly in
-no-drag mode on a non-touch device:
+no-drag mode on a non-touch device, and the **fullscreen** suite
+(`test/e2e/fullscreen.spec.js`, desktop + S24 Ultra portrait + landscape) asserts the
+**pause → settings → Display** fullscreen control is present + reflects the windowed
+state, that faking `document.fullscreenElement` + dispatching `fullscreenchange` flips
+**both** the menu label **and** the HUD glyph to the exit state (and back) in lockstep,
+and that stripping the Fullscreen API hides the whole Display panel + the HUD button
+(no dead control). The headless **`test/fullscreen-settings.test.js`** covers the pure
+derivation — label from `Fullscreen.active()`, visibility/disabled from
+`Fullscreen.supported()`, the menu button wired to `Fullscreen.toggle()`, all no-op
+safe with no Fullscreen API:
 
 ```bash
 npm ci          # once
@@ -1098,4 +1108,13 @@ Source: GitHub Actions**.
       is DOM-free + feature-detected; EN/RU strings; respects the Task 39 regions. Covered by
       `test/controllayout.test.js` + a Playwright drag→save→reload→restore + off-screen-clamp suite at
       the S24 Ultra (portrait + landscape) plus a desktop no-drag smoke.
+- [x] **Fullscreen control in the settings menu** — a **Display** sub-panel in **pause → settings** with
+      a fullscreen toggle whose label reflects state (**Enter fullscreen** / **Exit fullscreen**, EN/RU).
+      It drives the **same `Fullscreen.toggle()`** as the corner **⛶** HUD button (so the touch
+      **landscape lock** on enter / `unlockOrientation()` on exit is shared), and a single
+      `fullscreenchange` listener keeps the menu label, the HUD glyph and `document.fullscreenElement` in
+      lockstep however fullscreen is toggled. The Fullscreen API (incl. vendor-prefixed forms) is
+      **feature-detected** — on browsers without it (e.g. iOS Safari) the whole Display panel + the HUD
+      button are cleanly hidden (no dead control), and the exit/lock promise rejecting never throws.
+      Covered by `test/fullscreen-settings.test.js` + a Playwright suite at desktop and the S24 Ultra.
 - [ ] Puzzles (levers, plates, gated doors)

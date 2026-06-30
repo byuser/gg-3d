@@ -50,6 +50,46 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-06-30] — Task 37 — Exit/enter fullscreen control in the settings menu
+
+### Added
+
+- **A fullscreen toggle in pause → settings.** A new **Display** sub-panel holds a
+  full-width control that **enters fullscreen when windowed and exits when
+  fullscreen**, its label reflecting the state — **Enter fullscreen** /
+  **Exit fullscreen** (reusing the existing `btnTitle.exitFullscreen` string), in
+  **EN + RU**. So a player who never noticed the corner glyph now has the option
+  where every PC/console game keeps it. The corner **⛶ / ✕** HUD button is kept.
+- It drives the **same `Fullscreen.toggle()`** as the HUD button, so the Task-16
+  touch **landscape lock** on enter and `unlockOrientation()` on exit are shared
+  verbatim — no second code path.
+
+### Changed
+
+- **The menu control, the HUD glyph and the browser's real fullscreen state stay in
+  lockstep.** A single `fullscreenchange` listener now refreshes **both** entry
+  points (`Fullscreen.sync` → `syncMenu`), so toggling fullscreen by any means (the
+  menu button, the HUD button, **Esc**, or a browser gesture) flips the menu label
+  to "Exit fullscreen", sets `aria-pressed`, and updates the corner glyph together.
+  `Pause.refreshTexts()` repaints the control on menu-open + on a live language
+  switch.
+
+### Notes
+
+- **Feature-detected + headless-safe.** Visibility/enabled derive from
+  `Fullscreen.supported()` and the label from `Fullscreen.active()`, both of which
+  feature-detect the (vendor-prefixed) Fullscreen API. On browsers without it
+  (e.g. iOS Safari) the **whole Display panel and the HUD button are cleanly
+  hidden** — no dead control — and the exit/lock promise rejecting never throws.
+- **No `SAVE_VERSION` change** (fullscreen is a transient display preference, not
+  saved state). New tests: `test/fullscreen-settings.test.js` (9 cases — pure
+  label/visibility derivation + the menu button wired to `toggle()`, no-op safe with
+  no Fullscreen API; **Vitest 309 → 318**) and `test/e2e/fullscreen.spec.js` (a
+  Playwright suite at desktop + the Galaxy S24 Ultra portrait/landscape: the control
+  is present + reflects state, the `fullscreenchange` sync flips both controls, and
+  stripping the API hides the panel + HUD button). `index.html` (Display sub-panel),
+  `css/style.css` (`.fs-menu-btn`), `src/core/i18n.js` (EN+RU labels) updated.
+
 ## [2026-06-30] — Task 36 — Customizable on-screen control layout (drag any control anywhere; saved + restored)
 
 ### Added

@@ -2296,7 +2296,16 @@ change** (visuals/animation are transient).
   pure so the DOM layer stays thin.
 
 ### Task 37 — Exit/enter fullscreen control in the settings menu
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-30 · Added a **Display** sub-panel in pause → settings with a fullscreen
+  toggle whose label reflects state (**Enter fullscreen** / **Exit fullscreen**, EN+RU) and drives the
+  **same `Fullscreen.toggle()`** as the kept `#fsBtn` HUD button (so the Task-16 touch landscape lock on
+  enter / `unlockOrientation()` on exit is shared). A single `fullscreenchange` listener
+  (`Fullscreen.sync` → new `syncMenu()`, also called from `Pause.refreshTexts()`) keeps the menu label,
+  the HUD glyph and `document.fullscreenElement` in lockstep however fullscreen is toggled. The
+  (vendor-prefixed) Fullscreen API is feature-detected — when unsupported (e.g. iOS Safari) the whole
+  `#displayPanel` + the HUD button hide cleanly (no dead control) and a rejecting exit/lock promise never
+  throws. New `test/fullscreen-settings.test.js` (9 cases; Vitest 309 → 318) + `test/e2e/fullscreen.spec.js`
+  (desktop + S24 Ultra portrait/landscape). No `SAVE_VERSION` change.
 - **Depends on:** Task 16 (the `Fullscreen` module — `toggle` / `active` / `supported`
   / `lockLandscape` / `unlockOrientation`, `src/game.js` ~10622-10686; the `#fsBtn`
   HUD button). None else.
