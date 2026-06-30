@@ -49,9 +49,18 @@ async function setupHud(page, locale) {
       /* storage may be unavailable; the default locale still loads */
     }
   }, locale);
-  // The Babylon CDN <script> tags block the full `load` event on some networks, so
-  // wait only for DOMContentLoaded — the static HUD markup + CSS we measure are
-  // present then.
+  // This is a PURE LAYOUT test — the HUD geometry is CSS, independent of the
+  // engine. Block the Babylon CDN scripts and the game module so the WebGL engine
+  // never boots: the page stays static HTML+CSS, so reading geometry is instant
+  // and deterministic (a booting engine thrashes the DOM/CSSOM and can stall a
+  // bounding-box read on a slow CI runner). The game's own feature-detection means
+  // a missing BABYLON simply no-ops.
+  await page.route(
+    (url) => /cdn\.babylonjs\.com/.test(url.href) || /\/src\/main\.js/.test(url.pathname),
+    (route) => route.abort(),
+  );
+  // With the engine scripts blocked the `load` event still fires; wait for
+  // DOMContentLoaded (the static HUD markup + CSS we measure are present then).
   await page.goto("/", { waitUntil: "domcontentloaded" });
   // #hud starts `hidden` (display:none); wait for it ATTACHED, not visible — we
   // un-hide it ourselves below (the engine normally does this on Start).
@@ -113,16 +122,27 @@ async function setupHud(page, locale) {
   await page.waitForTimeout(120);
 }
 
+// Read every widget's on-screen rectangle in ONE synchronous in-page pass with
+// getBoundingClientRect. This is instant and never auto-waits (unlike a per-widget
+// locator.boundingBox() round-trip, which can stall on a busy/slow runner). Also
+// returns the control-ROW container box for the explicit weather/clock checks.
+// Zero-area / display:none widgets own no pixels, so they are dropped.
 async function boxes(page) {
-  const out = {};
-  for (const id of WIDGETS) {
-    const loc = page.locator(id);
-    if ((await loc.count()) === 0) continue;
-    const b = await loc.boundingBox();
-    // Zero-area / display:none widgets own no pixels, so they cannot collide.
-    if (b && b.width > 0 && b.height > 0) out[id] = b;
-  }
-  return out;
+  return page.evaluate(
+    (ids) => {
+      const out = {};
+      for (const id of ids) {
+        const el = document.querySelector(id);
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) {
+          out[id] = { x: r.x, y: r.y, width: r.width, height: r.height };
+        }
+      }
+      return out;
+    },
+    [...WIDGETS, "#hudControls"],
+  );
 }
 
 for (const locale of ["en", "ru"]) {
@@ -131,14 +151,16 @@ for (const locale of ["en", "ru"]) {
   }, testInfo) => {
     await setupHud(page, locale);
     const b = await boxes(page);
-    const collisions = pairwiseCollisions(b);
+    // The control-ROW container contains its child buttons by design, so exclude
+    // it from the pairwise grid (it is only used for the explicit checks below).
+    const { "#hudControls": controls, ...leaves } = b;
+    const collisions = pairwiseCollisions(leaves);
     if (process.env.HUD_DEBUG)
       console.log(`[${testInfo.project.name}/${locale}] boxes:`, JSON.stringify(b));
     expect(collisions, `overlapping HUD regions: ${collisions.join(", ")}`).toEqual([]);
 
     // Call out the historic regression explicitly: weather + clock never sit under
     // the quest button or anywhere in the icon-button row.
-    const controls = await page.locator("#hudControls").boundingBox();
     expect(
       overlaps(b["#weather"], b["#questBtn"]),
       "weather must not overlap the quest button",
@@ -159,6 +181,7 @@ test("HUD regions own distinct pixels at a narrow ~360px width", async ({ page }
   await page.setViewportSize({ width: 360, height: 740 });
   await page.waitForTimeout(80);
   const b = await boxes(page);
-  const collisions = pairwiseCollisions(b);
+  const { "#hudControls": _controls, ...leaves } = b;
+  const collisions = pairwiseCollisions(leaves);
   expect(collisions, `overlapping HUD regions @360px: ${collisions.join(", ")}`).toEqual([]);
 });

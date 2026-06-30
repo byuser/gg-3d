@@ -146,18 +146,29 @@ async function forceWorstCaseHud(page, locale) {
   await page.waitForTimeout(120);
 }
 
-// Measure the on-screen boxes of every widget that is present + rendered, then
-// assert no two of them intersect (1px sub-pixel tolerance, as `overlaps`).
+// Read the given selectors' on-screen rectangles in ONE synchronous in-page pass
+// with getBoundingClientRect. This is instant and never auto-waits — unlike a
+// per-widget locator.boundingBox() round-trip, which auto-waits for stability and
+// can stall for the whole test timeout when the just-booted engine is still
+// thrashing layout on a slow CI runner. Zero-area / display:none widgets are
+// dropped (they own no pixels, so they cannot collide).
+async function readBoxes(page, ids) {
+  return page.evaluate((sel) => {
+    const out = {};
+    for (const id of sel) {
+      const el = document.querySelector(id);
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0)
+        out[id] = { x: r.x, y: r.y, width: r.width, height: r.height };
+    }
+    return out;
+  }, ids);
+}
+
+// Measure the boxes of every always-on HUD widget, then assert no two intersect.
 async function assertNoHudOverlaps(page, label) {
-  const boxes = {};
-  for (const id of HUD_WIDGETS) {
-    const loc = page.locator(id);
-    if ((await loc.count()) === 0) continue;
-    const box = await loc.boundingBox();
-    // Skip zero-area / display:none widgets (e.g. an empty relic bar before any
-    // relic is collected) — they own no pixels, so they cannot collide.
-    if (box && box.width > 0 && box.height > 0) boxes[id] = box;
-  }
+  const boxes = await readBoxes(page, HUD_WIDGETS);
   const collisions = pairwiseCollisions(boxes);
   expect(collisions, `${label}: overlapping HUD regions: ${collisions.join(", ")}`).toEqual([]);
 }
@@ -317,10 +328,11 @@ for (const locale of ["en", "ru"]) {
 
     // Call out the historic regression explicitly: the weather + clock chips must
     // never sit under the quest button or anywhere in the icon-button row.
-    const weather = await page.locator("#weather").boundingBox();
-    const clock = await page.locator("#clock").boundingBox();
-    const quest = await page.locator("#questBtn").boundingBox();
-    const controls = await page.locator("#hudControls").boundingBox();
+    const m = await readBoxes(page, ["#weather", "#clock", "#questBtn", "#hudControls"]);
+    const weather = m["#weather"];
+    const clock = m["#clock"];
+    const quest = m["#questBtn"];
+    const controls = m["#hudControls"];
     expect(overlaps(weather, quest), "weather must not overlap the quest button").toBe(false);
     expect(overlaps(weather, controls), "weather must not overlap the control row").toBe(false);
     expect(overlaps(clock, quest), "clock must not overlap the quest button").toBe(false);
@@ -360,9 +372,10 @@ test("HUD regions never overlap at a narrow ~360px width", async ({ page }) => {
 
   await assertNoHudOverlaps(page, "narrow-360 ru");
 
-  const weather = await page.locator("#weather").boundingBox();
-  const quest = await page.locator("#questBtn").boundingBox();
-  const controls = await page.locator("#hudControls").boundingBox();
+  const m = await readBoxes(page, ["#weather", "#questBtn", "#hudControls"]);
+  const weather = m["#weather"];
+  const quest = m["#questBtn"];
+  const controls = m["#hudControls"];
   expect(overlaps(weather, quest), "weather must not overlap the quest button at 360px").toBe(
     false,
   );
@@ -378,9 +391,10 @@ test("HUD control row + minimap own distinct top-right pixels", async ({ page })
   await bootToHud(page);
   await forceWorstCaseHud(page, "en");
 
-  const controls = await page.locator("#hudControls").boundingBox();
-  const minimap = await page.locator("#minimap").boundingBox();
-  const compass = await page.locator("#compass").boundingBox();
+  const m = await readBoxes(page, ["#hudControls", "#minimap", "#compass"]);
+  const controls = m["#hudControls"];
+  const minimap = m["#minimap"];
+  const compass = m["#compass"];
   expect(overlaps(controls, minimap), "control row clear of the minimap").toBe(false);
   expect(overlaps(controls, compass), "control row clear of the compass").toBe(false);
   expect(overlaps(minimap, compass), "minimap clear of the compass").toBe(false);
