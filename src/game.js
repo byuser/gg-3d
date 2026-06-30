@@ -675,6 +675,9 @@ import {
     langRu: document.getElementById("langRu"),
     langEnPause: document.getElementById("langEnPause"),
     langRuPause: document.getElementById("langRuPause"),
+    // ---- Display options (pause settings, Task 37) ----
+    displayPanel: document.getElementById("displayPanel"),
+    fsBtnP: document.getElementById("fsBtnP"),
     // ---- Graphics-quality selector (pause settings) ----
     gfxAuto: document.getElementById("gfxAuto"),
     gfxHigh: document.getElementById("gfxHigh"),
@@ -10379,6 +10382,7 @@ import {
       const r = runRecap(stateRef);
       if (dom.pauseStats) dom.pauseStats.innerHTML = t("pause.stats", { level: r.level, xp: r.totalXp });
       _syncGfxButtons();   // reflect the current graphics preference + detected tier
+      if (typeof Fullscreen !== "undefined" && Fullscreen.syncMenu) Fullscreen.syncMenu(); // Display: fullscreen label/visibility (Task 37)
       if (this.pendingAction && dom.confirmText) {
         if (this.pendingAction === "restart") dom.confirmText.textContent = t("pause.confirmRestart");
         else if (this.pendingAction === "exit") dom.confirmText.textContent = t("pause.confirmExit");
@@ -11128,13 +11132,37 @@ import {
         }
       } catch (err) { console.warn("Fullscreen failed:", err); }
     },
+    // Reflect the current fullscreen state on the pause → settings → Display
+    // control (Task 37): its label reads "Enter fullscreen" when windowed and
+    // "Exit fullscreen" when fullscreen, so a player who never noticed the corner
+    // glyph still has the option where every PC/console game keeps it. The whole
+    // Display sub-panel is hidden when the Fullscreen API is unsupported (e.g. iOS
+    // Safari) — no dead button. Pure, no-op-safe headless (driven off active()/
+    // supported(), which feature-detect the browser-only API), so it is callable
+    // from refreshTexts() on open + on a live language switch.
+    syncMenu() {
+      const supported = this.supported();
+      if (dom.displayPanel) dom.displayPanel.style.display = supported ? "" : "none";
+      if (!dom.fsBtnP) return;
+      const on = this.active();
+      dom.fsBtnP.textContent = t(on ? "btnTitle.exitFullscreen" : "settings.enterFullscreen");
+      dom.fsBtnP.disabled = !supported;
+      try { dom.fsBtnP.setAttribute("aria-pressed", on ? "true" : "false"); } catch (e) {}
+    },
     init() {
+      // The menu Display control mirrors the HUD button and is hidden the same way
+      // when the API is missing — wire it even if the HUD button is absent.
+      this.syncMenu();
+      if (dom.fsBtnP) dom.fsBtnP.addEventListener("click", () => this.toggle());
       if (!dom.fsBtn) return;
       if (!this.supported()) { dom.fsBtn.style.display = "none"; return; } // e.g. iOS Safari
       const sync = () => {
         const on = this.active();
         dom.fsBtn.textContent = on ? "✕" : "⛶";
         dom.fsBtn.title = t(on ? "btnTitle.exitFullscreen" : "btnTitle.fullscreen");
+        // Keep the menu label + the HUD glyph + the browser's real state in lockstep
+        // off the one fullscreenchange listener, however fullscreen was toggled.
+        this.syncMenu();
         // If the user left fullscreen by any means (Esc, gesture), drop the lock.
         if (!on) this.unlockOrientation();
         engine.resize();

@@ -552,6 +552,13 @@ html, body {
   margin: 8px 0 0; font-size: 12px; opacity: 0.6; line-height: 1.35; text-align: center;
 }
 
+/* ---------- Display options: fullscreen toggle (pause settings, Task 37) ---------- */
+/* A full-width settings button whose label reads "Enter fullscreen" / "Exit
+   fullscreen"; reuses .lang-btn looks + the shared :disabled style, and the whole
+   #displayPanel hides when the Fullscreen API is unsupported. */
+.fs-menu-btn { display: block; width: 100%; margin-top: 8px; }
+.sub-panel .fs-menu-btn { margin-bottom: 14px; }
+
 /* ---------- Audio mixer (start screen + pause settings) ---------- */
 .audio-settings {
   display: flex; flex-direction: column; align-items: stretch; gap: 7px;

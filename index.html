@@ -288,6 +288,17 @@
         </div>
       </details>
 
+      <details id="displayPanel" class="sub-panel">
+        <summary data-i18n="settings.display">Display</summary>
+        <!-- Display options (Task 37): a fullscreen toggle that enters fullscreen
+             when windowed and exits when fullscreen, its label reflecting the
+             current state. Drives the same Fullscreen.toggle() as the #fsBtn HUD
+             button (incl. the touch landscape lock) and stays in sync with it via
+             the fullscreenchange listener. Hidden when the Fullscreen API is
+             unsupported (e.g. iOS Safari) — no dead button. -->
+        <button id="fsBtnP" class="lang-btn fs-menu-btn" data-i18n="settings.fullscreen">Fullscreen</button>
+      </details>
+
       <details class="sub-panel">
         <summary data-i18n="settings.graphics">Graphics</summary>
         <!-- Graphics-quality selector: Auto-detect (default) or force a tier.
