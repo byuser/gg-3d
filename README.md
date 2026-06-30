@@ -591,6 +591,18 @@ npm run test:e2e  # Playwright: real-browser boot smoke (needs a browser)
 npm run verify  # lint + typecheck + test + build (the fast CI path)
 ```
 
+In **CI** the real-browser stage is **sharded across 4 parallel machines**
+(`playwright test --shard=i/4`), each running a **single worker**. Every test
+boots Babylon on a *software* WebGL canvas, which doesn't parallelize within one
+machine without flaking the tests' boot-readiness waits — so the speed-up comes
+from running shards **concurrently across machines**, not from many workers per
+machine. The Chromium download is cached between runs, and the per-test budget
+stays at the proven **240 s** because the heaviest tests boot Babylon several
+times (the session-resume and saves round-trip flows boot, save, reload and boot
+again). The stage drops from a serial **~30 min** to roughly **10–15 min**
+(bounded by the slowest shard). To run a single shard locally:
+`npm run test:e2e -- --shard=1/4`.
+
 ### Architecture
 
 The runtime in `src/game.js` is organised as small systems so features are

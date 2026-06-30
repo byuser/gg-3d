@@ -35,6 +35,21 @@ delta it shipped with, since later tasks reference those.
   `session-s24-landscape` Playwright E2E (resume-via-Continue → open pause → open
   Cloud Saves), which previously timed out on `master`.
 
+### Changed
+
+- **Playwright E2E is parallelised in CI by sharding across machines (~4× faster
+  wall-clock).** The real-browser job (`.github/workflows/ci.yml`) now runs as a
+  **4-way shard matrix** (`playwright test --shard=i/4`) whose shards execute
+  concurrently on separate runners, and caches the Chromium download between runs
+  (`~/.cache/ms-playwright`). `playwright.config.js` keeps **one worker per
+  machine** on purpose — each test boots Babylon on a *software* WebGL canvas, and
+  several boots on one machine starve the CPU enough to flake the tests' own
+  boot-readiness waits, so the speed-up comes from concurrent shards, not
+  in-runner workers. The per-test budget stays at **240 s** (the heaviest tests
+  boot Babylon several times — boot → save → reload → boot again — so a tighter
+  cap timed them out). No game or test behaviour changes; all device-profile
+  coverage (desktop + S24 Ultra portrait/landscape) is preserved.
+
 ## [2026-06-30] — Task 39 — Collision-free HUD: a real region/layer system
 
 ### Fixed
