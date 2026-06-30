@@ -199,6 +199,25 @@ export default defineConfig({
       testMatch: /hud-regions\.spec\.js/,
       use: s24Landscape,
     },
+    // Customizable on-screen control layout (Task 36): the real drag → save →
+    // reload → restore loop + the off-screen clamp. Needs touch + Pointer Events,
+    // so it runs ONLY at the S24 Ultra portrait + landscape profiles (a desktop
+    // mouse can't open the touch-control editor). Both orientations are in scope.
+    {
+      name: "controllayout-s24-portrait",
+      testMatch: /controllayout\.spec\.js/,
+      use: s24Portrait,
+    },
+    {
+      name: "controllayout-s24-landscape",
+      testMatch: /controllayout\.spec\.js/,
+      use: s24Landscape,
+    },
+    {
+      name: "controllayout-desktop",
+      testMatch: /controllayout\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",

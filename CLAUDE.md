@@ -34,7 +34,9 @@ runtime — `Player`, `Monster`, `Boss`, `Dragon`, `buildWorld`, `SpawnDirector`
 `WorldMap`/`WorldMapUI` (minimap, world map + guided waypoint),
 `Sfx`/`Music`, `QUEST_BY_ID`, the `dom` map, `serializeGame`/`applySave`, the
 opt-in Google Drive cloud saves `CloudSave`/`CloudUI` (`makeGoogleDriveClient` +
-the pure `cloudAutosaveDue`/`cloudPrune`/`cloudNewer` policy), and the test seam
+the pure `cloudAutosaveDue`/`cloudPrune`/`cloudNewer` policy), the customizable
+on-screen control layout `ControlLayout`/`ControlLayoutUI` (the pure
+`clampLayoutPos`/`layoutReducer`/`sanitizeLayout`), and the test seam
 `window.__GG_TEST__` — in `src/game.js`.
 
 ## Golden rules (apply to EVERY change)

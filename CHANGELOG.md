@@ -50,6 +50,62 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-06-30] — Task 36 — Customizable on-screen control layout (drag any control anywhere; saved + restored)
+
+### Added
+
+- **An "Edit control layout" mode** reachable from **pause → settings → Controls**
+  and the **start-screen Controls panel**. It dims the live HUD, floats a labelled
+  **draggable handle** over each movable control, and offers **Save layout** /
+  **Reset to default** / **Cancel**. The drag **reuses the Task-16 pointer-drag
+  pattern** (touch + mouse via Pointer Events, the `.sk-drag-ghost`-style floating
+  ghost, the 6px tap/drag threshold) — there is still exactly **one** drag stack.
+- **Every requested control is repositionable to any on-screen point:** the
+  **movement joystick**, the **skill quick-bar** (`#skillBar`), the **potion belt**
+  (`#potionBar`), the **interact "E" button** (`#actionBtn`) and the **fire/cast
+  button** (`#castBtn`). A control with no custom position keeps its Task-16 default
+  (portrait + the landscape one-thumb arc).
+- **Resolution-independent + safe.** Each position is stored as a **viewport
+  fraction** `{x,y}` (the control's centre), so it survives rotation / different
+  screens, and is **clamped to the safe area** (`env(safe-area-inset-*)` + the
+  control's own size) **on apply and on load**, so a control can never land
+  off-screen or under a notch; tap targets stay ≥ ~48 px. Positions apply **live on
+  drop** and on **boot / zone-load** (a window-resize / re-orientation re-clamps).
+
+### Changed
+
+- **`SAVE_VERSION` 13 → 14.** The control layout now serializes in
+  `serializeGame` / `applySave` so a player's arrangement travels with their save
+  (incl. cloud / slots). The layout is **also mirrored to `localStorage`**
+  (`gg3d_controls`, like the audio / graphics / locale prefs), which is the **live
+  per-device source** applied on the start screen **before** any save loads; a save's
+  layout is the **portable default** a device with no stored layout adopts on load.
+  **Older saves still load** — a pre-v14 save has no `controls` field, so the default
+  layout stands. New strings (editor heading, Save / Reset / Cancel, hints, handle
+  labels) are localized in **EN + RU**. The editor is a **DOM-only** feature, wired
+  before the WebGL engine boots, and is fully **feature-detected** (no Pointer Events
+  / no DOM ⇒ it opens in a no-drag explanatory mode or no-ops, so the headless suite
+  is unaffected). No overlaps are introduced — custom positions build on the Task 39
+  non-overlapping HUD regions.
+
+### Tests
+
+- New **Vitest** `test/controllayout.test.js` (23 cases) locks the **pure** model
+  with no DOM: `clampLayoutPos` (in-bounds unchanged, clamps past each edge, centres a
+  control wider than the band, garbage → finite in-bounds), `layoutReducer`
+  (set / move / reset-one / clear, unknown-id + non-finite guards, never mutates its
+  input), `sanitizeLayout` (drops foreign / out-of-range / non-finite), the
+  **localStorage mirror** round-trip (+ corrupt-value → default), the **save/load
+  round-trip** of the layout, the **device-wins** rule, the **pre-v14 migration**
+  (no `controls` ⇒ default), and the editor's headless-safety. **Vitest 285 → 308.**
+- New **Playwright** `test/e2e/controllayout.spec.js`: at the **Galaxy S24 Ultra**
+  portrait **and** landscape profiles it opens the editor from pause → settings,
+  **drags the joystick** to mid-screen, **Saves**, **reloads**, and asserts the
+  joystick **restored** to its saved spot; then yanks it far past the corner and
+  asserts it **can't be dropped off-screen** (clamped to the safe area). A
+  **desktop** smoke asserts the editor opens cleanly in **no-drag** mode on a
+  non-touch device (the entry is never a dead click).
+
 ## [2026-06-30] — Task 39 — Collision-free HUD: a real region/layer system
 
 ### Fixed

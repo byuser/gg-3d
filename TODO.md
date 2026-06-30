@@ -2209,7 +2209,18 @@ change** (visuals/animation are transient).
   keep the per-category fit tables as the single source of placement truth.
 
 ### Task 36 — Customizable on-screen control layout (drag any control anywhere; saved + restored)
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-30 · Shipped a drag-to-arrange control-layout editor (pause → settings →
+  Controls + the start-screen Controls panel): it dims the HUD, floats a labelled draggable handle over
+  the joystick / skill bar / potion belt / E / fire, and offers Save / Reset / Cancel — reusing the
+  Task-16 pointer-drag (ghost + 6px threshold), the only drag stack. Positions are stored as
+  **viewport-fraction** centres, **clamped to the safe area** (`env(safe-area-inset-*)` + control size)
+  on apply *and* load (tap targets ≥ ~48 px), applied live on drop + on boot/zone-load/resize. Persisted
+  through the save engine (`controls` in `serializeGame`/`applySave`, **`SAVE_VERSION` 13 → 14**; older
+  saves load with defaults) **and** mirrored to `localStorage` (`gg3d_controls`) as the live per-device
+  source (the save value is the portable default a fresh device adopts). Pure model (`clampLayoutPos` /
+  `layoutReducer` / `sanitizeLayout`) is DOM-free + fully feature-detected; EN+RU strings. New Vitest
+  `controllayout.test.js` (23; 285 → 308) + a Playwright drag→save→reload→restore + off-screen-clamp
+  spec at the S24 Ultra (portrait + landscape) and a desktop no-drag smoke. Respects Task 39's regions.
 - **Depends on:** Task 16 (the responsive HUD + the reusable Pointer-Events drag
   controller / `dragSlotReducer`, `src/game.js` ~5503-5710) and **Task 39** (the HUD
   region/layer system — do this **after** Task 39 so custom positions build on

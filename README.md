@@ -53,8 +53,25 @@ and gear without ever blocking the main line. Slay the dragon to **win**.
 | Travel to another land | walk a road off the map edge (to its gateway) | same |
 | Music on/off | `M` | mute in pause → Audio settings |
 | Pause / menu | `Esc` | ☰ button (top-right) |
+| Customize control layout | start screen / pause → settings → **Controls** | drag the joystick / skills / potions / E / fire anywhere |
 | Language (EN / RU) | start screen · pause settings | same |
 | Audio volumes / mute | start screen · pause settings | same |
+
+### Customizable on-screen controls (Task 36)
+
+Different hands, grips and phone shapes want the touch controls in different
+places, so the **on-screen layout is fully customizable**. Open **Edit control
+layout** from the start-screen **Controls** panel or **pause → settings →
+Controls**: the HUD dims and a draggable handle appears over each movable
+control — the **movement joystick**, the **3 skill quick-slots**, the **3 potion
+slots**, the **interact "E" button** and the **fire/cast button**. Drag any of
+them to a comfy spot and **Save**, or **Reset to default**. Positions are stored
+as **resolution-independent viewport fractions** and **clamped to the safe area**
+(never off-screen or under a notch; tap targets stay ≥ ~48 px), so they survive
+rotation and different screens. The layout is a **per-device setting** (saved to
+`localStorage`, applied on the start screen before any save loads) **and** rides
+along **in your save** so it travels to other devices / the cloud — your device's
+own arrangement always wins, and older saves load with the defaults.
 
 ## Languages (English / Russian)
 
@@ -562,7 +579,17 @@ rectangle-geometry helper the non-overlap tests rely on (`rectsOverlap` /
 `pairwiseCollisions` in `test/util/rect.js`) — edge-touching (a reserved-column
 seam) is **not** a collision, a >1px intrusion **is**, containment is, hidden /
 zero-area boxes never collide, and a clean banded layout reports nothing while the
-historic weather-under-the-quest-button case is flagged. On top of that, a
+historic weather-under-the-quest-button case is flagged.
+The **control-layout** suite (`test/controllayout.test.js`) locks in Task 36: the
+**pure** model with no DOM — `clampLayoutPos` (in-bounds unchanged; clamps past each
+edge; centres a control wider than the safe band; garbage → finite in-bounds),
+`layoutReducer` (set / move / reset-one / clear, unknown-id + non-finite guards,
+never mutates its input), `sanitizeLayout` (drops foreign / out-of-range / non-finite
+entries) — plus the **`localStorage` mirror** round-trip (and corrupt-value →
+default), the **save/load round-trip** of the layout, the **device-wins** rule, the
+**pre-v14 migration** (a save with no `controls` ⇒ the default layout), and the
+editor's **headless-safety** (`canEdit()` false + nothing throws without Pointer
+Events). On top of that, a
 **functional** suite (`test/functional.test.js`) boots the assembled game in
 isolation and drives whole flows (start → zone travel → save/reload round-trip),
 and **Playwright** suites load the built bundle in real headless Chromium: the
@@ -582,7 +609,12 @@ materials strip is gone, and the **HUD-regions** suite
 HUD's **worst case** — longest EN/RU labels with the boss bar, compass and quest
 tracker all visible at once — and asserts **no two HUD widgets/buttons share
 pixels** (the weather/clock never under the quest button), proving the Task 39
-region/layer layout holds at every breakpoint:
+region/layer layout holds at every breakpoint, and the **control-layout** suite
+(`test/e2e/controllayout.spec.js`, S24 Ultra portrait + landscape) opens the editor
+from pause → settings, **drags the joystick**, **Saves**, **reloads** and asserts it
+**restored**, then yanks it past the corner and asserts it **can't be dropped
+off-screen** (clamped) — with a **desktop** smoke that the editor opens cleanly in
+no-drag mode on a non-touch device:
 
 ```bash
 npm ci          # once
@@ -1052,4 +1084,18 @@ Source: GitHub Actions**.
       safe-area insets and minimap-tap map entry are intact. Layout only (no `SAVE_VERSION` change);
       pure rectangle geometry in `test/util/rect.js` + `test/hud-regions.test.js` and a Playwright
       `hud-regions` suite of pairwise bounding-box non-overlap assertions.
+- [x] **Customizable on-screen control layout** — an **Edit control layout** mode (start-screen
+      **Controls** panel + **pause → settings → Controls**) that dims the HUD, floats a draggable
+      handle over each movable control (the **joystick**, the **3 skill slots**, the **3 potion
+      slots**, the **interact E** button and the **fire/cast** button) and offers **Save / Reset /
+      Cancel**, reusing the Task-16 pointer-drag (ghost + 6px threshold — still one drag stack). Each
+      position is a **viewport fraction**, **clamped to the safe area** (`env(safe-area-inset-*)` +
+      the control's size) on apply *and* load so it can never land off-screen / under a notch (tap
+      targets ≥ ~48 px), applied live on drop + on boot/zone-load/resize. The layout persists in the
+      **save** (`SAVE_VERSION` **14**; older saves load with defaults) **and** a **`localStorage`
+      device mirror** (the live source applied before any save loads; the save value is the portable
+      default a fresh device adopts). Pure model (`clampLayoutPos`/`layoutReducer`/`sanitizeLayout`)
+      is DOM-free + feature-detected; EN/RU strings; respects the Task 39 regions. Covered by
+      `test/controllayout.test.js` + a Playwright drag→save→reload→restore + off-screen-clamp suite at
+      the S24 Ultra (portrait + landscape) plus a desktop no-drag smoke.
 - [ ] Puzzles (levers, plates, gated doors)
