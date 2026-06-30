@@ -2409,7 +2409,20 @@ change** (visuals/animation are transient).
   coordinates).
 
 ### Task 39 — Collision-free HUD: a real region/layer system so no widget or button overlaps
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-30 · Gave the HUD a disciplined **region/layer system**: the six
+  top-right icon buttons became **one `#hudControls` flex row** whose width (`--controls-w`, derived
+  from the shared button vars) the top-status chip row now **reserves** on its right edge, so the
+  **weather/clock can never flow under the quest (or any) button** — the structural fix. Every
+  absolutely-positioned widget is grouped into an explicit, anchored, non-overlapping `.hud-region`
+  (top-status · control row · corner minimap+compass · centre bars · left relics+tracker · bottom
+  action cluster) with a z-tier + `pointer-events` discipline; on phones they lay out in distinct
+  **vertical bands** sized from named CSS vars (boss bar stacked below the tracker; landscape shrinks
+  the minimap so its column clears the one-thumb arc). Holds at the S24 Ultra (portrait + landscape),
+  ~360px and desktop, in either locale's longest labels, with boss/compass/tracker all visible.
+  Layout only (no `SAVE_VERSION` change). New `test/util/rect.js` + Vitest `test/hud-regions.test.js`
+  (11 cases; 274 → 285) + a Playwright `hud-regions` suite of pairwise non-overlap assertions, with
+  the same worst-case checks added to the live `responsive.spec.js`. Task 16 declutter + action arc +
+  safe-area insets + minimap-tap intact.
 - **Depends on:** Task 16 (the HUD markup + z-index tiers + the touch action arc).
   Pairs with **Task 36** (do this **before** the free-form control editor so custom
   positions start from clean regions). None else.

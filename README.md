@@ -399,7 +399,8 @@ src/data/               # pure content tables: items, skills, content, story, zo
 src/game.js             # the runtime: entities, world, systems, UI, save/load
 test/setup/stubs.js     # Babylon + DOM + Web Audio stubs for the Vitest suites
 test/*.test.js          # Vitest unit/logic (ported harness) + functional flows
-test/e2e/               # Playwright real-browser boot smoke
+test/util/              # shared pure test helpers (e.g. rectangle geometry)
+test/e2e/               # Playwright real-browser boot smoke + responsive/HUD suites
 vite.config.js          # build → hashed static bundle in dist/ (Babylon stays CDN)
 eslint.config.js .prettierrc.json tsconfig.json   # lint / format / typecheck
 ARCHITECTURE.md         # module map + data flow + toolchain (read this first)
@@ -555,7 +556,13 @@ the talk interactable** (the player walks up and it becomes the active prompt),
 the **regression** that the full **talk → Dialogue → accept → turn-in** flow runs
 for a wild-zone NPC (the bug was zero NPCs outside the hub), that a **save-load
 into a wild zone** still yields a talkable NPC there, and that **teardown disposes**
-the zone's NPCs (no leaks). On top of that, a
+the zone's NPCs (no leaks).
+The **HUD-regions** suite (`test/hud-regions.test.js`) locks in Task 39: the pure
+rectangle-geometry helper the non-overlap tests rely on (`rectsOverlap` /
+`pairwiseCollisions` in `test/util/rect.js`) — edge-touching (a reserved-column
+seam) is **not** a collision, a >1px intrusion **is**, containment is, hidden /
+zero-area boxes never collide, and a clean banded layout reports nothing while the
+historic weather-under-the-quest-button case is flagged. On top of that, a
 **functional** suite (`test/functional.test.js`) boots the assembled game in
 isolation and drives whole flows (start → zone travel → save/reload round-trip),
 and **Playwright** suites load the built bundle in real headless Chromium: the
@@ -567,10 +574,15 @@ device profile (portrait + landscape) to assert every menu control is reachable
 overlap, and the one-thumb action arc sits bottom-right in landscape, and the
 **saves** suite (`test/e2e/saves.spec.js`, same profiles) opens the Saves screen
 from the start menu + pause, saves into a named slot, **renames** it, **reloads**,
-and **loads** the slot back into play, and the **inventory** suite
+and **loads** the slot back into play, the **inventory** suite
 (`test/e2e/inventory.spec.js`, same profiles) opens the inventory's Potions tab,
 **drag-assigns** a bag potion to a combat quick-slot, and asserts the on-HUD
-materials strip is gone:
+materials strip is gone, and the **HUD-regions** suite
+(`test/e2e/hud-regions.spec.js`, same profiles + a ~360px small phone) forces the
+HUD's **worst case** — longest EN/RU labels with the boss bar, compass and quest
+tracker all visible at once — and asserts **no two HUD widgets/buttons share
+pixels** (the weather/clock never under the quest button), proving the Task 39
+region/layer layout holds at every breakpoint:
 
 ```bash
 npm ci          # once
@@ -1016,4 +1028,16 @@ Source: GitHub Actions**.
       the hub keeps its merchant/blacksmith/alchemist/castle. The world-map / minimap / guided
       waypoint now route to where the NPCs actually stand. No save-schema change (the world rebuilds
       from data) — `test/npc-zones.test.js`.
+- [x] **Collision-free HUD regions** — the HUD is now a disciplined **region/layer system** so no two
+      widgets or buttons ever share pixels at any resolution/orientation. The six top-right icon
+      buttons became **one flex control ROW** whose width (`--controls-w`) the top-status chip row
+      **reserves** on its right edge, so the **weather/clock chips can never flow under the quest (or
+      any) button** — the historic bug. On phones the HUD lays out in explicit, non-overlapping
+      **vertical bands** (control row · status chips + corner minimap · centred health/focus/boss ·
+      left relics + tracker), sized from named CSS variables, so the boss bar, compass and quest
+      tracker hold even when all visible at once on the **S24 Ultra** (portrait + landscape) and a
+      ~360px phone — in either locale's longest labels. The Task 16 declutter, one-thumb action arc,
+      safe-area insets and minimap-tap map entry are intact. Layout only (no `SAVE_VERSION` change);
+      pure rectangle geometry in `test/util/rect.js` + `test/hud-regions.test.js` and a Playwright
+      `hud-regions` suite of pairwise bounding-box non-overlap assertions.
 - [ ] Puzzles (levers, plates, gated doors)

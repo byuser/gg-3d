@@ -35,6 +35,60 @@ delta it shipped with, since later tasks reference those.
   `session-s24-landscape` Playwright E2E (resume-via-Continue → open pause → open
   Cloud Saves), which previously timed out on `master`.
 
+## [2026-06-30] — Task 39 — Collision-free HUD: a real region/layer system
+
+### Fixed
+
+- **The weather/clock chips flowed under the top-right icon buttons.** The status
+  chips (`#weather`, `#clock`, location, level, coins) lived in the top-centre
+  `.hud-top` flex row while the six icon buttons (fullscreen / pause / inventory /
+  skills / craft / quest) were **independently** absolutely-positioned at the same
+  top edge, extending ~260px in from the right; `.hud-top` reserved only ~132px on
+  the right (enough for the 116px minimap, **not** the wider button row), so on a
+  phone the chips slid **under the quest button**. There was no real named region
+  system, so such overlaps recurred whenever a label grew or wrapped.
+
+### Changed
+
+- **A disciplined HUD region/layer system.** The screen is now carved into explicit,
+  anchored, **non-overlapping regions**, each a `.hud-region` layer with a z-tier and
+  reserved bounding box: **top-status** (location / level / XP / coins / clock /
+  weather), **top-right control row** (the icon buttons), **corner** (minimap +
+  compass), **centre** (health / focus / boss), **left** (relics + quest tracker) and
+  the **bottom action cluster** (skills / potions / buffs). Every absolutely-positioned
+  HUD widget is assigned to exactly one region.
+- **The control row is now ONE flex row.** The six icon buttons moved into a single
+  `#hudControls` flex container (IDs unchanged, so all `getElementById` wiring is
+  untouched), giving the row a single measurable width `--controls-w` derived from the
+  shared `--ctrl-btn`/`--ctrl-gap` button variables. The top-status row **reserves
+  exactly that width** on its right edge, so the weather/clock chips can **never** reach
+  under the quest (or any) button — the structural fix, not a per-element nudge.
+- **Banded touch layout.** On phones there is no room for the chips beside the full
+  control row, so the HUD lays out in distinct **vertical bands** sized from named CSS
+  variables (`--band-status-top` / `--minimap-top` / `--compass-top` / `--band-bars-top`):
+  control row (top) · status chips + corner minimap · centred health/focus · left relics
+  + tracker · boss bar (stacked below the tracker, since the wide centred bar and the
+  wide left tracker can't sit side-by-side on a phone). Landscape keeps the chips in the
+  top row (ample width) and shrinks the corner minimap so the minimap + compass column
+  clears the bottom-right one-thumb skill arc.
+- The Task 16 declutter (no duplicate buttons), the **one-thumb action arc**, safe-area
+  insets and the **minimap-tap** map entry are all intact. **Layout only — no
+  `SAVE_VERSION` change.**
+
+### Tests
+
+- New **Vitest** `test/hud-regions.test.js` (11 cases) locks the pure rectangle-geometry
+  helper in `test/util/rect.js` (`rectsOverlap` / `pairwiseCollisions`): edge-touching (a
+  reserved-column seam) is not a collision, a >1px intrusion is, containment is, hidden /
+  zero-area boxes never collide, and the historic weather-under-the-quest-button case is
+  flagged. **Vitest 274 → 285.**
+- New **Playwright** `test/e2e/hud-regions.spec.js` (desktop + S24 Ultra portrait +
+  landscape, plus a ~360px small phone; the longest EN **and** RU labels with the boss
+  bar / compass / quest tracker all visible at once) asserts **pairwise bounding-box
+  non-overlap** over every HUD widget — explicitly weather × the quest button. The
+  **responsive** suite (`test/e2e/responsive.spec.js`) gains the same worst-case
+  non-overlap assertions against the **live** booted game.
+
 ## [2026-06-30] — Task 38 — Quest-givers spawn + are talkable in their home zones
 
 ### Fixed
