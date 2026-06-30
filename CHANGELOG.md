@@ -35,6 +35,61 @@ delta it shipped with, since later tasks reference those.
   `session-s24-landscape` Playwright E2E (resume-via-Continue → open pause → open
   Cloud Saves), which previously timed out on `master`.
 
+## [2026-06-30] — Task 38 — Quest-givers spawn + are talkable in their home zones
+
+### Fixed
+
+- **NPCs were only talkable in the hub.** The player could talk to the Mayor in
+  Meadowgate but to **none** of the wild quest-givers — the herbalist (Whisperwood),
+  the fisher (Saltmarsh), the smith (Frostpeak) and the hermit (the sunken ruins) —
+  even though the campaign sends the player to all of them. **Root cause:**
+  `populateAdventure()`, which instantiates every `QuestGiver` from `NPC_DATA`, was
+  called **only inside the `if (zone.home)` branch** of `setupZoneContent`, and
+  **only the meadow is `home`**. Every wild zone took the `else` branch (resources
+  only, no NPCs), so the non-hub givers were never spawned.
+
+### Changed
+
+- **Landmark → zone association (data-driven).** Each `LOCATIONS` entry now carries
+  a **`zone`** field (`src/data/content.js`) and a `landmarkZone()` helper resolves
+  it: `village`/`apothecary`/`castle` → the hub meadow; `grove` → forest, `seaside`
+  → shore, `mountain` → peaks, and `ruins` → **caverns** (the Sunken Ruins are the
+  Crystal Caverns reached through the sea-cave — the only existing land that fits
+  the hermit, since adding a zone is out of scope). The wild landmarks were given
+  sensible **in-zone** coordinates (well inside each fence) instead of the old hub
+  coordinates.
+- **Zone-aware NPC placement.** Story-NPC spawning moved out of the hub gate into a
+  per-zone `spawnZoneNpcs()` / `questGiversForZone()` that runs for **every** zone
+  in `setupZoneContent`, placing exactly the quest-givers whose landmark belongs to
+  that zone (at their landmark, registered as interactables at the existing talk
+  range). The hub still gets its merchant / blacksmith / alchemist / castle. Because
+  travel already does `teardownZone` (disposes `state.npcs`, clears the interaction
+  registry) → `setupZoneContent`, NPC interactables are **freshly re-registered**
+  after every travel and on a save-load into a wild zone, so **talk → Dialogue →
+  accept / turn-in works in every land**.
+- **Swept the other hub-only assumptions.** `checkLocations` now fires a `reach`
+  objective only for a landmark **in the current zone**; the world-map / minimap
+  helpers `mapTargets` / `targetZoneOf` / `targetPoint` (`src/data/worldmap.js`) and
+  the in-zone landmark dots resolve each landmark / NPC to its **home zone**, so the
+  guided waypoint + markers point at where the NPCs actually stand.
+- NPCs spawn **deterministically** (positioned from static landmark data) and
+  **dispose on teardown** (no leaks across travel). **No `SAVE_VERSION` change** —
+  the world is rebuilt from data on entry; zone-state load was confirmed to still
+  restore talkable NPCs.
+
+### Tests
+
+- New **`test/npc-zones.test.js`** (10 cases; Vitest **264 → 274**): the pure
+  landmark → zone placement (every giver → a real zone; the four wild givers map to
+  their own lands and not elsewhere; `questGiversForZone` returns exactly a zone's
+  residents; each in-zone point sits inside its fence); and, booting the assembled
+  game, that the hub seeds only the Mayor, that **travelling to each wild land
+  spawns its resident + registers the talk interactable** (walk-up → active prompt),
+  the **regression** that the full **talk → accept → turn-in** flow runs for a
+  wild-zone NPC, a **save-load into a wild zone** still yields a talkable NPC there,
+  and that **teardown disposes** the zone's NPCs. Updated `test/worldmap.test.js`
+  assertions that encoded the old hub-only model (`grove` → forest, etc.).
+
 ## [2026-06-25] — Task 22 — Environment rewrite (stable resource generation + natural road-edge teleporters)
 
 Two environment problems that broke immersion are fixed.

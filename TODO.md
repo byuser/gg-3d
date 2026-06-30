@@ -2336,7 +2336,18 @@ change** (visuals/animation are transient).
   the control when `Fullscreen.supported()` is false.
 
 ### Task 38 — Fix: NPCs are only talkable in the hub — spawn quest-givers in their home zones
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-30 · Root-caused + fixed the hub-only NPC bug: NPC spawning was gated
+  behind `if (zone.home)` in `setupZoneContent`, and only the meadow is `home`, so the four wild
+  quest-givers (herbalist/Whisperwood, fisher/Saltmarsh, smith2/Frostpeak, hermit/ruins) were never
+  spawned. Added a data-driven **`zone` field on `LOCATIONS`** + a `landmarkZone()` helper
+  (grove→forest, seaside→shore, mountain→peaks, ruins→**caverns**; village/apothecary/castle→hub),
+  pulled NPC placement into a per-zone `spawnZoneNpcs`/`questGiversForZone` that runs for **every**
+  zone (re-registered fresh after each `ZoneManager` teardown→rebuild and on save-load into a wild
+  land); the hub keeps its merchant/blacksmith/alchemist/castle. Made `checkLocations` + the world-
+  map/minimap `mapTargets`/`targetZoneOf`/`targetPoint` + the in-zone landmark dots **zone-aware** so
+  the guided waypoint routes to where each NPC actually stands. No `SAVE_VERSION` change (the world
+  rebuilds from data; zone-state load confirmed). New `test/npc-zones.test.js` (10 cases; Vitest
+  264 → 274) + updated the `worldmap.test.js` assertions that encoded the old hub-only model.
 - **Depends on:** the world/zone + quest systems (`setupZoneContent` /
   `populateAdventure`, `QuestGiver` / `Dialogue`, `NPC_DATA` / `LOCATIONS`,
   `ZoneManager`). None else.

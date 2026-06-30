@@ -84,10 +84,12 @@ runs in English without a browser.
   accept it, the live **objective** while you're on it, and a **✓ return to turn in** when it's
   done — so a new player can follow the whole story with **no guesswork**. An **intro** sets the
   scene on a fresh game and an **ending** plays on victory.
-- **Quests & NPCs:** five **story NPCs** stand at the island's landmarks (the village, the grove,
-  the shore, the mountain pass and the ruins), each marked with a floating **❗ / ✓**. Walk up +
-  press **E** to **talk**: accept a mission or side quest, check progress, or turn a finished one
-  in. Objectives are **hunt** (defeat sweets), **gather** (collect a material), **reach** a place,
+- **Quests & NPCs:** five **story NPCs** stand at landmarks **in their own lands** — the Mayor in
+  the home vale, and the herbalist, fisher, smith and hermit out in the **Whisperwood**, the
+  **Saltmarsh shore**, the **Frostpeak trail** and the **sunken ruins (the Crystal Caverns)** they
+  call home — each marked with a floating **❗ / ✓**. Walk up + press **E** to **talk** wherever
+  they live: accept a mission or side quest, check progress, or turn a finished one in. Objectives
+  are **hunt** (defeat sweets), **gather** (collect a material), **reach** a place,
   **talk** to someone, **defeat a lair boss**, **build** a castle part, or — for the finale —
   **slay the dragon**; rewards mix **coins**, **gear** and the castle **relics**.
 - **Side quests:** optional **bounties and errands** from the same NPCs, clearly **separated from
@@ -171,10 +173,12 @@ runs in English without a browser.
   and the land **respawns** fresh ones after a short delay, up to a per-land cap — so there
   are always foes to hunt, but you're never swarmed by an endless timer. Deeper lands hold
   **tougher, faster** monsters with more dangerous abilities.
-- **The home hub:** the **Meadowgate Vale** is where the **merchant**, the **blacksmith**,
-  the **story NPCs**, the **resource nodes** and the **castle build site** live — they're
-  always there to visit between expeditions. The wild lands are pure **hunting grounds** (plus
-  a few themed resource nodes), so head out to fight and gather, then return to spend and build.
+- **The home hub:** the **Meadowgate Vale** is where the **merchant**, the **blacksmith**, the
+  **apothecary** and the **castle build site** live — they're always there to visit between
+  expeditions. The wild lands are **hunting grounds** (plus a few themed resource nodes) **and each
+  is home to its own quest-giver** — the herbalist in the Whisperwood, the fisher on the shore, the
+  smith at Frostpeak, the hermit in the sunken Crystal Caverns — so you can accept and turn in their
+  missions out where they live, then return to the vale to spend and build.
 - **Potions & quick-slots:** buy **health potions** (minor / standard / **greater**) and
   **elixirs** (Might, Swiftness) from the **apothecary**, or craft them. Potions live in your
   **bag** (stacked) like everything else; the 3 combat **quick-slots** in the bottom corner
@@ -540,8 +544,18 @@ deterministic), **harvestable-after-travel** (a depleted node persists its coold
 and every enabled node stays registered — the phantom-node fix), the **road-edge
 trigger** (walking the road's end fires `ZoneManager.travel` to the right zone, both
 directions, and can't be skirted off the road), the **v13** per-zone-resource
-round-trip + **pre-v13 migration**, and **per-object dispose** on teardown. On top of
-that, a
+round-trip + **pre-v13 migration**, and **per-object dispose** on teardown.
+The **NPC-zones** suite (`test/npc-zones.test.js`) locks in Task 38: the pure
+**landmark → zone** placement (every giver resolves to a real zone; the four wild
+givers map to their own lands while the village folk stay in the hub;
+`questGiversForZone` returns exactly a zone's residents and each in-zone point
+sits inside its fence), and — booting the assembled game — that the hub seeds only
+its Mayor, that **travelling into each wild land spawns its resident and registers
+the talk interactable** (the player walks up and it becomes the active prompt),
+the **regression** that the full **talk → Dialogue → accept → turn-in** flow runs
+for a wild-zone NPC (the bug was zero NPCs outside the hub), that a **save-load
+into a wild zone** still yields a talkable NPC there, and that **teardown disposes**
+the zone's NPCs (no leaks). On top of that, a
 **functional** suite (`test/functional.test.js`) boots the assembled game in
 isolation and drives whole flows (start → zone travel → save/reload round-trip),
 and **Playwright** suites load the built bundle in real headless Chromium: the
@@ -993,4 +1007,13 @@ Source: GitHub Actions**.
       and **place names are no longer clipped** by the map circle — drawn after the clip via a pure,
       clamped, de-overlapped `layoutMapLabels` with a haloed plate. No save-schema change — pure
       helpers in `src/data/worldmap.js`, covered by `test/worldmap.test.js` + a Playwright map suite.
+- [x] **Quest-givers live in their home lands** — each non-hub story NPC (herbalist · fisher ·
+      smith · hermit) now **spawns + is talkable in its own zone** (Whisperwood · Saltmarsh ·
+      Frostpeak · the sunken Crystal Caverns), not only the hub. Root cause: NPC spawning was gated
+      behind `if (zone.home)`, and only the meadow is `home`. Fixed with a data-driven **landmark →
+      zone** field on `LOCATIONS` so `setupZoneContent` spawns exactly each zone's residents on
+      entering **any** land (re-registered fresh after every travel + on save-load into a wild land);
+      the hub keeps its merchant/blacksmith/alchemist/castle. The world-map / minimap / guided
+      waypoint now route to where the NPCs actually stand. No save-schema change (the world rebuilds
+      from data) — `test/npc-zones.test.js`.
 - [ ] Puzzles (levers, plates, gated doors)
