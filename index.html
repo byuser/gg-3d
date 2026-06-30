@@ -55,8 +55,11 @@
           <li><b data-i18n="ctrl.inventory">Inventory</b><span data-i18n="ctrl.inventoryKeys">I · or the 🎒 button</span></li>
           <li><b data-i18n="ctrl.craft">Craft · Quests</b><span data-i18n="ctrl.craftKeys">C · J · or the 🛠️ 📜 buttons</span></li>
           <li><b data-i18n="ctrl.map">Map</b><span data-i18n="ctrl.mapKeys">Tab · tap the minimap · N toggles the minimap</span></li>
+          <li><b data-i18n="ctrl.layout">On-screen controls</b><span data-i18n="ctrl.layoutKeys">drag the joystick, skills, potions, E &amp; fire anywhere</span></li>
           <li><b data-i18n="ctrl.travel">Travel</b><span data-i18n="ctrl.travelKeys">walk into a path / bridge / cave portal</span></li>
         </ul>
+        <!-- Open the drag-to-arrange control-layout editor (Task 36). -->
+        <button id="layoutEditBtn" class="lang-btn layout-edit-btn" data-i18n="settings.controlLayout">Edit control layout</button>
       </details>
 
       <details class="sub-panel">
@@ -221,6 +224,28 @@
     </div>
   </div>
 
+  <!-- Control-layout editor (Task 36): a full-screen overlay opened from the
+       start-screen Controls panel or pause → settings → Controls. It dims the
+       scene, floats a draggable handle over each movable control (joystick / skill
+       bar / potion belt / E / fire) and offers Save / Reset to default / Cancel.
+       The handles live in #layoutHandles (a fixed layer); the live HUD controls
+       sit just below and move under the drag. The `.no-drag` modifier hides the
+       handles + Save/Reset and shows only the hint + Cancel where the editor can't
+       run (no Pointer Events / non-touch). -->
+  <div id="layoutEditor" class="layout-editor hidden">
+    <div id="layoutHandles" class="layout-handles"></div>
+    <div class="layout-bar">
+      <h2 class="layout-bar-title" data-i18n="layout.title">Edit control layout</h2>
+      <p id="layoutHint" class="layout-bar-hint" data-i18n="layout.hint">Drag any control to a comfy spot. Each one stays on screen. Save to keep, or reset to the default.</p>
+      <p class="layout-bar-hint layout-touch-note" data-i18n="layout.touchOnly">On-screen controls appear on touch devices. Connect a touchscreen or play on a phone to arrange them.</p>
+      <div class="layout-actions">
+        <button id="layoutSave" class="start-btn" data-i18n="layout.save">Save layout</button>
+        <button id="layoutReset" class="start-btn secondary-btn" data-i18n="layout.reset">Reset to default</button>
+        <button id="layoutCancel" class="start-btn secondary-btn" data-i18n="layout.cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Game over screen -->
   <div id="over" class="overlay hidden">
     <div class="panel">
@@ -274,6 +299,13 @@
           <button id="gfxLow" class="lang-btn gfx-btn" data-i18n="settings.gfxLow">Low</button>
         </div>
         <p id="gfxHint" class="gfx-hint" data-i18n="settings.gfxReload">Reloads to apply · progress is kept</p>
+      </details>
+
+      <details class="sub-panel">
+        <summary data-i18n="settings.controls">Controls</summary>
+        <!-- Customizable on-screen control layout (Task 36): open the editor to drag
+             the joystick / skills / potions / E / fire anywhere; saved per device. -->
+        <button id="layoutEditBtnP" class="lang-btn layout-edit-btn" data-i18n="settings.controlLayout">Edit control layout</button>
       </details>
 
       <details class="sub-panel">

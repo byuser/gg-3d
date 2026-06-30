@@ -681,6 +681,15 @@ import {
     gfxMedium: document.getElementById("gfxMedium"),
     gfxLow: document.getElementById("gfxLow"),
     gfxHint: document.getElementById("gfxHint"),
+    // ---- Customizable control layout editor (Task 36) ----
+    layoutEditBtn: document.getElementById("layoutEditBtn"),
+    layoutEditBtnP: document.getElementById("layoutEditBtnP"),
+    layoutEditor: document.getElementById("layoutEditor"),
+    layoutHandles: document.getElementById("layoutHandles"),
+    layoutSave: document.getElementById("layoutSave"),
+    layoutReset: document.getElementById("layoutReset"),
+    layoutCancel: document.getElementById("layoutCancel"),
+    layoutHint: document.getElementById("layoutHint"),
     confirmDialog: document.getElementById("confirmDialog"),
     confirmText: document.getElementById("confirmText"),
     confirmYes: document.getElementById("confirmYes"),
@@ -5594,6 +5603,418 @@ import {
   }
 
   // =========================================================================
+  // Customizable on-screen control layout (Task 36) — let the player drag the
+  // five movable touch controls (the movement joystick, the skill quick-bar, the
+  // potion belt, the interact "E" button and the fire/cast button) anywhere on
+  // screen and persist that arrangement, the way well-reviewed mobile action
+  // games ship a fully customizable HUD.
+  //
+  // The MODEL is a tiny pure layer so it unit-tests with no DOM:
+  //   - A control's position is stored as a resolution-independent VIEWPORT
+  //     FRACTION { x, y } in [0,1] (the control's CENTRE), so it survives
+  //     rotation / different screens. No entry ⇒ the control keeps its Task-16
+  //     CSS default (portrait + the landscape one-thumb arc).
+  //   - `clampLayoutPos` keeps a control fully inside the safe area (its half
+  //     size + the env(safe-area-inset-*) margins, all expressed as fractions),
+  //     so a control can NEVER land off-screen or under a notch — clamped both on
+  //     apply AND on load (a layout saved on one device stays safe on another).
+  //   - `layoutReducer` maps an editor gesture (set / reset one / reset all) onto
+  //     a NEW layout map; `sanitizeLayout` scrubs a parsed save / localStorage
+  //     blob (drops unknown ids + non-finite / out-of-range fractions).
+  // The DOM layer (`apply`) is thin and fully feature-detected: with no document
+  // / no element it no-ops, so the headless suite is unaffected and the defaults
+  // stand. Persistence mirrors the existing prefs: a per-device localStorage
+  // value (the LIVE source, applied on the start screen before any save loads)
+  // AND a copy inside the save (`serializeGame`/`applySave`) so a layout travels
+  // with the run; on load a device with no stored layout adopts the save's as its
+  // portable default (see ControlLayout.applyFromSave).
+  // =========================================================================
+  const LAYOUT_KEY = "gg3d_controls";          // localStorage: the per-device control layout
+  // The five repositionable controls, each tied to its HUD element id + a label
+  // key for the editor handle. Order drives the handle render + the test seam.
+  const CONTROL_DEFS = [
+    { id: "joystick", el: "joystick", label: "layout.handle.joystick" },
+    { id: "skillBar", el: "skillBar", label: "layout.handle.skillBar" },
+    { id: "potionBar", el: "potionBar", label: "layout.handle.potionBar" },
+    { id: "actionBtn", el: "actionBtn", label: "layout.handle.actionBtn" },
+    { id: "castBtn", el: "castBtn", label: "layout.handle.castBtn" },
+  ];
+  const CONTROL_IDS = CONTROL_DEFS.map((c) => c.id);
+  const _isControlId = (id) => CONTROL_IDS.indexOf(id) >= 0;
+  const _clamp01 = (n) => (n < 0 ? 0 : n > 1 ? 1 : n);
+
+  // Clamp a centre fraction so the control stays fully inside the safe area.
+  // `bounds` carries the control's half-width/height and the safe-area insets,
+  // all as fractions of the viewport; the returned centre keeps the control's box
+  // within [inset, 1-inset]. When the control is wider/taller than the available
+  // band (a tiny viewport) it centres on that axis so it never jumps off-screen.
+  // Pure + DOM-free.
+  function clampLayoutPos(pos, bounds) {
+    bounds = bounds || {};
+    const hw = +bounds.halfW || 0, hh = +bounds.halfH || 0;
+    const il = +bounds.insetLeft || 0, ir = +bounds.insetRight || 0;
+    const it = +bounds.insetTop || 0, ib = +bounds.insetBottom || 0;
+    const clampAxis = (v, half, lo, hi) => {
+      const min = lo + half, max = 1 - hi - half;
+      if (min > max) return (lo + (1 - hi)) / 2;   // band narrower than the control → centre it
+      return v < min ? min : v > max ? max : v;
+    };
+    return {
+      x: clampAxis(_clamp01(+pos.x || 0), hw, il, ir),
+      y: clampAxis(_clamp01(+pos.y || 0), hh, it, ib),
+    };
+  }
+
+  // Apply an editor action to a layout map, returning a NEW map (never mutates).
+  //   { op: "set",   id, x, y, bounds? } — place a control (clamped when bounds given)
+  //   { op: "reset", id }                — drop one control back to its CSS default
+  //   { op: "clear" }                    — reset every control to default
+  // Unknown ids / ops are ignored. Kept pure so the DOM layer stays thin.
+  function layoutReducer(layout, action) {
+    const out = {};
+    for (const id of CONTROL_IDS) if (layout && layout[id]) out[id] = { x: layout[id].x, y: layout[id].y };
+    if (!action || !action.op) return out;
+    if (action.op === "clear") return {};
+    if (action.op === "reset") { if (_isControlId(action.id)) delete out[action.id]; return out; }
+    if (action.op === "set" && _isControlId(action.id)) {
+      let p = { x: +action.x, y: +action.y };
+      if (!isFinite(p.x) || !isFinite(p.y)) return out;        // garbage → no change
+      if (action.bounds) p = clampLayoutPos(p, action.bounds);
+      else { p.x = _clamp01(p.x); p.y = _clamp01(p.y); }
+      out[action.id] = p;
+    }
+    return out;
+  }
+
+  // Scrub a parsed layout blob (from a save or localStorage) into a clean map:
+  // keep only known control ids whose x/y are finite and in [0,1]. Everything
+  // else drops out, so a foreign / older / tampered value loads as "default".
+  function sanitizeLayout(raw) {
+    const out = {};
+    if (!raw || typeof raw !== "object") return out;
+    for (const id of CONTROL_IDS) {
+      const p = raw[id];
+      if (!p || typeof p !== "object") continue;
+      const x = +p.x, y = +p.y;
+      if (!isFinite(x) || !isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) continue;
+      out[id] = { x, y };
+    }
+    return out;
+  }
+
+  const ControlLayout = {
+    layout: {},        // the live per-control { id: {x,y} } map (empty = all default)
+    _loaded: false,
+
+    // Read the per-device layout from localStorage (headless-safe; bad/missing → {}).
+    load() {
+      if (this._loaded) return this;
+      this._loaded = true;
+      this.layout = {};
+      try {
+        const raw = localGet(LAYOUT_KEY);
+        if (raw) this.layout = sanitizeLayout(JSON.parse(raw));
+      } catch (e) { this.layout = {}; }
+      return this;
+    },
+    save() { try { localSet(LAYOUT_KEY, JSON.stringify(this.layout)); } catch (e) {} },
+
+    // A plain copy for serializeGame (so a layout travels with the save).
+    serialize() {
+      const out = {};
+      for (const id of CONTROL_IDS) if (this.layout[id]) out[id] = { x: this.layout[id].x, y: this.layout[id].y };
+      return out;
+    },
+
+    // Restore from a SAVE's layout (applySave). The device localStorage value is
+    // the live source, so we only ADOPT the save's layout as this device's
+    // portable default when the device has none stored yet — otherwise the local
+    // arrangement wins and is left untouched. Either way we re-apply to the DOM.
+    applyFromSave(saved) {
+      this.load();
+      const fromSave = sanitizeLayout(saved);
+      if (!localGet(LAYOUT_KEY) && Object.keys(fromSave).length) {
+        this.layout = fromSave;
+        this.save();
+      }
+      this.apply();
+      return this;
+    },
+
+    // Replace the live layout wholesale (used by the editor's Save / Reset),
+    // persist it and re-apply. `next` is sanitized first.
+    set(next, persist) {
+      this.layout = sanitizeLayout(next);
+      if (persist !== false) this.save();
+      this.apply();
+      return this;
+    },
+
+    // Discard any unsaved live-preview edits: re-read the PERSISTED layout from
+    // localStorage into the live map and re-apply. Used by the editor's Cancel so
+    // a dragged-but-not-saved arrangement snaps back to what was last saved.
+    revert() {
+      let stored = {};
+      try { const raw = localGet(LAYOUT_KEY); if (raw) stored = sanitizeLayout(JSON.parse(raw)); } catch (e) { stored = {}; }
+      this.layout = stored;
+      this.apply();
+      return this;
+    },
+
+    // The live safe-area + viewport facts as fractions, read once per apply. Falls
+    // back to sane numbers headless (no window) so the pure clamp still runs.
+    _viewport() {
+      let w = 0, h = 0;
+      try { w = (typeof window !== "undefined" && window.innerWidth) || 0; h = (typeof window !== "undefined" && window.innerHeight) || 0; } catch (e) {}
+      if (!w || !h) { w = 411; h = 891; }
+      return { w, h };
+    },
+    // Resolve the safe-area inset (px) for a side via a probe element, so the
+    // clamp honours env(safe-area-inset-*). Returns a floor of 12px (matches the
+    // CSS) when the API/DOM is unavailable.
+    _safeInsets() {
+      const fallback = { top: 16, right: 12, bottom: 16, left: 12 };
+      if (typeof document === "undefined" || typeof getComputedStyle === "undefined") return fallback;
+      try {
+        const probe = this._probe || (this._probe = document.createElement("div"));
+        if (!probe.parentNode && document.body) {
+          probe.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;" +
+            "padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);";
+          document.body.appendChild(probe);
+        }
+        const cs = getComputedStyle(probe);
+        const px = (v, d) => { const n = parseFloat(v); return isFinite(n) ? n : d; };
+        return {
+          top: Math.max(16, px(cs.paddingTop, 0)),
+          right: Math.max(12, px(cs.paddingRight, 0)),
+          bottom: Math.max(16, px(cs.paddingBottom, 0)),
+          left: Math.max(12, px(cs.paddingLeft, 0)),
+        };
+      } catch (e) { return fallback; }
+    },
+
+    // Build the clamp bounds (fractions) for one control element at the live size.
+    boundsFor(elOrSize, vp, insets) {
+      vp = vp || this._viewport();
+      insets = insets || this._safeInsets();
+      let pw = 0, ph = 0;
+      if (elOrSize && typeof elOrSize.offsetWidth === "number") { pw = elOrSize.offsetWidth; ph = elOrSize.offsetHeight; }
+      else if (elOrSize) { pw = +elOrSize.w || 0; ph = +elOrSize.h || 0; }
+      return {
+        halfW: vp.w ? (pw / 2) / vp.w : 0,
+        halfH: vp.h ? (ph / 2) / vp.h : 0,
+        insetLeft: vp.w ? insets.left / vp.w : 0,
+        insetRight: vp.w ? insets.right / vp.w : 0,
+        insetTop: vp.h ? insets.top / vp.h : 0,
+        insetBottom: vp.h ? insets.bottom / vp.h : 0,
+      };
+    },
+
+    // Push the live layout onto the DOM. Each customized control gets the `gg-moved`
+    // class (which neutralizes its CSS right/bottom/transform default) plus inline
+    // left/top from its clamped fraction; controls with no custom pos are cleared
+    // back to their CSS default. Fully feature-detected → a no-op headless.
+    apply() {
+      if (typeof document === "undefined") return;
+      const vp = this._viewport(), insets = this._safeInsets();
+      for (const def of CONTROL_DEFS) {
+        const el = dom[def.el];
+        if (!el || !el.style) continue;
+        const pos = this.layout[def.id];
+        if (!pos) {
+          el.classList && el.classList.remove("gg-moved");
+          el.style.left = ""; el.style.top = ""; el.style.right = ""; el.style.bottom = ""; el.style.transform = "";
+          continue;
+        }
+        const clamped = clampLayoutPos(pos, this.boundsFor(el, vp, insets));
+        el.classList && el.classList.add("gg-moved");
+        el.style.left = (clamped.x * vp.w) + "px";
+        el.style.top = (clamped.y * vp.h) + "px";
+        el.style.right = "auto";
+        el.style.bottom = "auto";
+        el.style.transform = "translate(-50%, -50%)";
+      }
+    },
+  };
+
+  // =========================================================================
+  // Control-layout editor (Task 36) — the "Edit control layout" mode reachable
+  // from pause → settings (and the start-screen controls panel). It overlays the
+  // live HUD with a draggable HANDLE on each movable control, dims everything
+  // else, and offers Save / Reset to default / Cancel. The drag reuses the
+  // Task-16 pointer-drag pattern (touch + mouse via Pointer Events, the
+  // `.sk-drag-ghost`-style floating ghost, the 6px tap/drag threshold) — there is
+  // exactly ONE drag stack in the codebase. Everything is feature-detected: with
+  // no Pointer Events / no DOM the editor cleanly refuses to open and the saved
+  // layout (defaults) still stands, so the headless suite is untouched.
+  // =========================================================================
+  const ControlLayoutUI = {
+    open: false,
+    _work: null,        // the working layout copy (committed on Save, dropped on Cancel)
+    _wired: false,
+
+    // Build the editor overlay + handles lazily on first open (so the DOM nodes
+    // only exist when needed). The handles live in a fixed full-screen layer.
+    _ensure() {
+      if (this._wired || typeof document === "undefined") return;
+      this._wired = true;
+      const ov = dom.layoutEditor;
+      if (!ov) { this._wired = false; return; }
+      if (dom.layoutSave) dom.layoutSave.addEventListener("click", () => this.saveAndClose());
+      if (dom.layoutReset) dom.layoutReset.addEventListener("click", () => this.reset());
+      if (dom.layoutCancel) dom.layoutCancel.addEventListener("click", () => this.cancel());
+    },
+
+    // Can the editor actually run here? Needs Pointer Events + the touch controls
+    // (which only show on touch devices) + the overlay DOM. Used to gate the entry
+    // buttons (they explain why when it can't) and to keep it headless-safe.
+    canEdit() {
+      return pointerDragSupported() && isTouch && !!(dom.layoutEditor && dom.touch);
+    },
+
+    openUI() {
+      if (this.open || typeof document === "undefined") return;
+      this._ensure();
+      if (!dom.layoutEditor) return;
+      // Where the editor can't actually run (no Pointer Events / not a touch
+      // device) open in a "no-drag" mode: the overlay still shows, explaining via
+      // the hint, with only Cancel — so the entry is never a dead click.
+      const draggable = this.canEdit();
+      // Working copy starts from the live layout; live-apply edits as they happen.
+      this._work = ControlLayout.serialize();
+      this.open = true; uiPaused = true;
+      if (draggable && dom.touch) dom.touch.classList.remove("hidden");  // show controls to drag
+      if (dom.hud) dom.hud.classList.add("layout-editing");
+      dom.layoutEditor.classList.toggle("no-drag", !draggable);
+      dom.layoutEditor.classList.remove("hidden");
+      if (draggable) this.renderHandles(); else this._clearHandles();
+    },
+    close() {
+      if (!this.open) return;
+      this.open = false; uiPaused = false;
+      if (dom.layoutEditor) { dom.layoutEditor.classList.add("hidden"); dom.layoutEditor.classList.remove("no-drag"); }
+      if (dom.hud) dom.hud.classList.remove("layout-editing");
+      // Re-hide the touch controls if this isn't a touch device (we force-showed them).
+      if (!isTouch && dom.touch) dom.touch.classList.add("hidden");
+      this._clearHandles();
+    },
+    cancel() {
+      // Drop any unsaved working edits: snap the live layout back to the last
+      // SAVED arrangement (the live-preview drags mutated ControlLayout.layout).
+      ControlLayout.revert();
+      Sfx.play("ui_click");
+      this.close();
+    },
+    saveAndClose() {
+      ControlLayout.set(this._work, true);
+      Session.flush();                 // mirror into the in-progress run snapshot too
+      Sfx.play("ui_click");
+      toast(t("layout.saved"));
+      this.close();
+    },
+    reset() {
+      this._work = {};
+      ControlLayout.set({}, false);    // live-preview the defaults (persist on Save)
+      Sfx.play("ui_click");
+      toast(t("layout.wasReset"));
+      this.renderHandles();
+    },
+
+    _clearHandles() {
+      if (!dom.layoutHandles) return;
+      try { dom.layoutHandles.innerHTML = ""; } catch (e) {}
+    },
+
+    // Lay a labelled drag handle over each control at its current on-screen box,
+    // and wire the Task-16-style pointer-drag on it. Re-called after a Reset / a
+    // drop so the handles track the controls.
+    renderHandles() {
+      if (!dom.layoutHandles || typeof document === "undefined") return;
+      this._clearHandles();
+      for (const def of CONTROL_DEFS) {
+        const ctrl = dom[def.el];
+        if (!ctrl || !ctrl.getBoundingClientRect) continue;
+        const r = ctrl.getBoundingClientRect();
+        const handle = document.createElement("div");
+        handle.className = "layout-handle";
+        handle.setAttribute("role", "button");
+        handle.setAttribute("aria-label", t(def.label));
+        handle.style.left = (r.left + r.width / 2) + "px";
+        handle.style.top = (r.top + r.height / 2) + "px";
+        handle.style.width = Math.max(48, r.width) + "px";
+        handle.style.height = Math.max(48, r.height) + "px";
+        const tag = document.createElement("span");
+        tag.className = "layout-handle-tag";
+        tag.textContent = t(def.label);
+        handle.appendChild(tag);
+        dom.layoutHandles.appendChild(handle);
+        this._wireHandle(handle, def);
+      }
+    },
+
+    // Pointer-drag one handle (Task-16 pattern: 6px threshold, floating ghost via
+    // the shared `.sk-drag-ghost` look, setPointerCapture). On drop the control's
+    // new CENTRE fraction is written into the working copy (clamped to the safe
+    // area) and live-applied. Falls back to inert where Pointer Events are absent.
+    _wireHandle(handle, def) {
+      if (!handle || !pointerDragSupported() || !handle.addEventListener) return;
+      handle.addEventListener("pointerdown", (e) => {
+        if (e.button != null && e.button !== 0) return;
+        if (typeof e.preventDefault === "function") e.preventDefault();
+        const startX = e.clientX || 0, startY = e.clientY || 0;
+        let dragging = false, ghost = null;
+        try { if (handle.setPointerCapture && e.pointerId != null) handle.setPointerCapture(e.pointerId); } catch (err) {}
+
+        const begin = () => {
+          dragging = true;
+          handle.classList && handle.classList.add("dragging");
+          try {
+            ghost = document.createElement("div");
+            ghost.className = "sk-drag-ghost layout-ghost";
+            ghost.textContent = t(def.label);
+            ghost.style.left = startX + "px"; ghost.style.top = startY + "px";
+            (document.body || document.documentElement).appendChild(ghost);
+          } catch (err) { ghost = null; }
+        };
+        const place = (x, y) => {
+          const vp = ControlLayout._viewport();
+          const ctrl = dom[def.el];
+          const bounds = ControlLayout.boundsFor(ctrl, vp);
+          const pos = clampLayoutPos({ x: vp.w ? x / vp.w : 0, y: vp.h ? y / vp.h : 0 }, bounds);
+          this._work = layoutReducer(this._work, { op: "set", id: def.id, x: pos.x, y: pos.y });
+          ControlLayout.set(Object.assign(ControlLayout.serialize(), this._work), false);
+        };
+        const onMove = (ev) => {
+          const x = ev.clientX || 0, y = ev.clientY || 0;
+          if (!dragging && (Math.abs(x - startX) > 6 || Math.abs(y - startY) > 6)) begin();
+          if (dragging) {
+            if (ghost) { ghost.style.left = x + "px"; ghost.style.top = y + "px"; }
+            handle.style.left = x + "px"; handle.style.top = y + "px";
+            place(x, y);
+          }
+        };
+        const cleanup = () => {
+          handle.removeEventListener("pointermove", onMove);
+          handle.removeEventListener("pointerup", onUp);
+          handle.removeEventListener("pointercancel", onCancel);
+          handle.classList && handle.classList.remove("dragging");
+          if (ghost) { try { ghost.remove(); } catch (err) {} ghost = null; }
+        };
+        const onUp = (ev) => {
+          const x = ev.clientX || startX, y = ev.clientY || startY;
+          const was = dragging;
+          cleanup();
+          if (was) { place(x, y); this.renderHandles(); }
+        };
+        const onCancel = () => { cleanup(); this.renderHandles(); };
+        handle.addEventListener("pointermove", onMove);
+        handle.addEventListener("pointerup", onUp);
+        handle.addEventListener("pointercancel", onCancel);
+      });
+    },
+  };
+
+  // =========================================================================
   // Skills overlay (Task 14) — manage the skill roster, FUSE up to three owned
   // skills into a new one, and assign skills to the 3-slot quick bar. Opens with
   // the ✨ button or the "K" key. Mirrors the Inventory overlay's open/close/
@@ -8391,7 +8812,7 @@ import {
   // monsters, the boss, artifacts and dropped coins, plus the wave clock) is
   // serialized explicitly so the run resumes exactly where it left off.
   // =========================================================================
-  const SAVE_VERSION = 13;
+  const SAVE_VERSION = 14;
   const PENDING_LOAD_KEY = "gg3d_pending_load"; // sessionStorage hand-off across reload
   const AUTOSTART_KEY = "gg3d_autostart";       // restart -> skip the start screen
 
@@ -8474,6 +8895,12 @@ import {
       castle: state.castle ? state.castle.built.slice() : (state.castleBuilt || []),
       time: round(DayNight.t),
       weather: Weather.state,
+      // Customizable on-screen control layout (v14, Task 36): the per-control
+      // viewport-fraction positions so a player's HUD arrangement travels with the
+      // save. The per-device localStorage mirror is the live source; this is the
+      // portable default a fresh device adopts (see ControlLayout.applyFromSave).
+      // Omitted (an empty map) when every control is at its default.
+      controls: ControlLayout.serialize(),
     };
   }
 
@@ -8722,6 +9149,12 @@ import {
     // Day/night + weather (after the swap so the zone's handles are current).
     if (d.time != null) DayNight.set(d.time);
     if (d.weather) Weather.setState(d.weather);
+
+    // Customizable control layout (v14, Task 36). The device's own localStorage
+    // layout is the LIVE source and wins; a device with none yet adopts the save's
+    // as its portable default. Either way the layout is (re)applied to the DOM.
+    // A pre-v14 save has no `controls` field → an empty map → defaults stand.
+    ControlLayout.applyFromSave(d.controls);
 
     // Drop the player exactly where they saved (override the arrival spot).
     player.root.position.set(ps.pos[0], 0, ps.pos[1]);
@@ -10054,6 +10487,9 @@ import {
   function startGame(loaded) {
     dom.overlay.classList.add("hidden"); dom.hud.classList.remove("hidden");
     if (isTouch) dom.touch.classList.remove("hidden");
+    // Re-apply the saved control layout now the HUD + touch controls are visible
+    // (their real sizes drive the safe-area clamp; at boot they were display:none).
+    ControlLayout.apply();
     dom.canvas.focus();
     gameStarted = true;
     Music.start(); // browsers only allow audio after a user gesture (the click)
@@ -10715,6 +11151,21 @@ import {
     try {
       Input.init();
 
+      // Customizable control layout (Task 36): load the per-device arrangement and
+      // apply it to the (still-hidden) HUD before anything paints, so even on the
+      // start screen the controls already sit where the player put them — before
+      // any save loads. Headless-safe (no document ⇒ a clean no-op). Wire the
+      // "Edit control layout" entry buttons (start-screen Controls panel + pause →
+      // settings) here too — the editor is a DOM-only feature, independent of the
+      // 3D engine, so it stays functional even if the WebGL boot fails. On a device
+      // where the editor can't run (no Pointer Events / non-touch) it opens in a
+      // no-drag mode that explains why, so the entry is never a dead click.
+      ControlLayout.load();
+      ControlLayout.apply();
+      const openLayoutEditor = () => { Sfx.play("ui_click"); ControlLayoutUI.openUI(); };
+      if (dom.layoutEditBtn) dom.layoutEditBtn.addEventListener("click", openLayoutEditor);
+      if (dom.layoutEditBtnP) dom.layoutEditBtnP.addEventListener("click", openLayoutEditor);
+
       // Locale: apply the saved/default language to the static markup before the
       // world builds, so the start screen paints in the right language, then wire
       // the selectors on the start screen + pause settings.
@@ -10774,7 +11225,15 @@ import {
         }
       });
       engine.runRenderLoop(() => scene.render());
-      window.addEventListener("resize", () => engine.resize());
+      window.addEventListener("resize", () => {
+        engine.resize();
+        // Re-anchor the moved controls to the new viewport / orientation (the
+        // stored fractions are resolution-independent; re-clamping keeps them in
+        // the safe area after a rotation or window resize). If the editor is open,
+        // its handles track the controls too.
+        ControlLayout.apply();
+        if (ControlLayoutUI.open) ControlLayoutUI.renderHandles();
+      });
       dom.startBtn.addEventListener("click", startGame);
       dom.replayBtn.addEventListener("click", () => window.location.reload());
       // Shop open/close + Buy/Featured/Sell tabs.
@@ -10908,6 +11367,7 @@ import {
         // A confirmation guard (restart / exit / save-slot delete-overwrite) backs
         // out first, wherever it was raised (pause OR the Saves screen).
         if (Pause.pendingAction) { Pause.hideConfirm(); return; }
+        if (ControlLayoutUI.open) { ControlLayoutUI.cancel(); return; }
         if (SavesUI.open) { SavesUI.closeScreen(); return; }
         if (CloudUI.overlay && CloudUI.overlay.classList && !CloudUI.overlay.classList.contains("hidden")) { CloudUI.closeList(); return; }
         if (Shop.open) { Shop.closeShop(); return; }
@@ -11040,6 +11500,9 @@ import {
       deriveStats, equippedAfter, equipDelta, wornDetailFor, isGear,
       // ---- Responsive HUD / drag-to-slot / fullscreen (Task 16) ----
       dragSlotReducer, pointerDragSupported, Fullscreen,
+      // ---- Customizable on-screen control layout (Task 36) ----
+      ControlLayout, ControlLayoutUI, clampLayoutPos, layoutReducer, sanitizeLayout,
+      CONTROL_IDS, CONTROL_DEFS, LAYOUT_KEY,
       // ---- Skills, leveling & fusion (Task 14) ----
       Skills, SkillsUI, SKILL_DB, getSkill, ELEMENTS, EFFECTS,
       BASE_SKILL_IDS, BOSS_SKILL_IDS, STARTER_SKILL_IDS, SKILL_SLOTS, MAX_FUSE_INPUTS,
