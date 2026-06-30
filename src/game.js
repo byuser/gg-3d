@@ -9673,6 +9673,7 @@ import {
   const CLOUD_MAX_SLOTS = 12;                      // ~12 autosaves in an hour
   const CLOUD_MANUAL_NAME = "gg3d-save.json";      // the single manual slot
   const CLOUD_AUTO_PREFIX = "gg3d-auto-";          // autosave files: <prefix><epochMs>.json
+  const SILENT_AUTH_TIMEOUT_MS = 8000;             // boot silent re-auth watchdog (never hang on UI)
 
   // ---- Pure, testable policy helpers (no browser / no I/O) ----------------
 
@@ -9761,28 +9762,68 @@ import {
         } catch (e) { reject(e); }
       });
     }
+    // The pending request's reject handler — set per `requestToken` call so the
+    // token client's shared `error_callback` (non-OAuth failures: popup blocked /
+    // closed) can abort the in-flight request without surfacing UI.
+    let pendingReject = null;
     function ensureTokenClient() {
       if (tokenClient) return;
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: clientId, scope: CLOUD_SCOPE, callback: () => {},
+        // Non-OAuth errors (the GIS popup failed to open or was closed before a
+        // response) arrive here, NOT in `callback`. Route them to the current
+        // request's rejection so a blocked/closed popup fails soft — on the boot
+        // silent path that means we quietly fall back to the explicit button.
+        error_callback: (err) => {
+          const rej = pendingReject; pendingReject = null;
+          if (rej) rej(new Error(err && err.type ? err.type : "gis_error"));
+        },
       });
     }
-    // Request an access token. `prompt` is the GIS consent prompt: "consent" for
-    // an explicit sign-in, "" for a SILENT refresh (no dialog when the user has
-    // an active Google session that already granted the scope — Task 17). An
-    // optional `loginHint` (a remembered account email) steers the silent path.
-    function requestToken(prompt, loginHint) {
+    // Request an access token.
+    //   `prompt` is the GIS consent prompt: "consent" for an explicit sign-in,
+    //   "none" for a STRICTLY SILENT refresh — GIS shows NO popup/account chooser
+    //   and instead fails (via callback `error` or `error_callback`) when any user
+    //   interaction would be needed. (We must NOT use "" here: with "" GIS still
+    //   raises a visible account chooser when the session is stale — the Task 23
+    //   bug.) An optional `loginHint` (a remembered account email) steers it to the
+    //   right account. `opts.silent` adds a watchdog timeout so a hung silent
+    //   request can never leave the boot path waiting on UI that will never come.
+    function requestToken(prompt, loginHint, opts) {
+      opts = opts || {};
       return new Promise((resolve, reject) => {
+        let done = false;
+        let timer = null;
+        const settleReject = (e) => {
+          if (done) return; done = true;
+          if (timer) { try { clearTimeout(timer); } catch (e2) {} }
+          if (pendingReject === onError) pendingReject = null;
+          reject(e);
+        };
+        const settleResolve = (v) => {
+          if (done) return; done = true;
+          if (timer) { try { clearTimeout(timer); } catch (e2) {} }
+          if (pendingReject === onError) pendingReject = null;
+          resolve(v);
+        };
+        const onError = (e) => settleReject(e);
         try {
           ensureTokenClient();
+          pendingReject = onError;
           tokenClient.callback = (resp) => {
-            if (resp && resp.access_token) { accessToken = resp.access_token; resolve(accessToken); }
-            else reject(new Error(resp && resp.error ? resp.error : "no_token"));
+            if (resp && resp.access_token) { accessToken = resp.access_token; settleResolve(accessToken); }
+            else settleReject(new Error(resp && resp.error ? resp.error : "no_token"));
           };
           const req = { prompt: prompt || "" };
           if (loginHint) req.hint = loginHint;
+          // Watchdog: on the silent path, never hang. If neither callback fires
+          // within the window (e.g. a popup the policy would have shown), abort
+          // quietly so the explicit Sign-in button stays the only interactive path.
+          if (opts.silent && typeof setTimeout === "function") {
+            timer = setTimeout(() => settleReject(new Error("silent_timeout")), opts.timeoutMs || SILENT_AUTH_TIMEOUT_MS);
+          }
           tokenClient.requestAccessToken(req);
-        } catch (e) { reject(e); }
+        } catch (e) { settleReject(e); }
       });
     }
     async function authFetch(url, opts) {
@@ -9790,8 +9831,8 @@ import {
       opts = opts || {};
       opts.headers = Object.assign({}, opts.headers, { Authorization: "Bearer " + accessToken });
       let res = await fetch(url, opts);
-      if (res.status === 401) {                  // token expired → one silent refresh
-        await requestToken("");
+      if (res.status === 401) {                  // token expired → one strictly-silent refresh
+        await requestToken("none", null, { silent: true });
         opts.headers.Authorization = "Bearer " + accessToken;
         res = await fetch(url, opts);
       }
@@ -9801,11 +9842,15 @@ import {
 
     return {
       hasToken() { return !!accessToken; },
-      async signIn() { await loadGis(); await requestToken("consent"); return true; },
-      // Silent re-auth on boot: no consent dialog. Rejects if the browser has no
-      // active, already-consented Google session — the caller then falls back to
-      // the explicit Sign-in button (Task 17).
-      async signInSilent(loginHint) { await loadGis(); await requestToken("", loginHint); return true; },
+      // Explicit, user-initiated sign-in: a consent prompt is allowed here (the
+      // player just clicked "Sign in with Google").
+      async signIn(loginHint) { await loadGis(); await requestToken("consent", loginHint); return true; },
+      // Strictly-silent re-auth on boot: `prompt: "none"` so GIS shows NO popup or
+      // account chooser — it grants a token only from an active, already-consented
+      // Google session and otherwise fails soft (via the error_callback / timeout).
+      // The caller then leaves the explicit Sign-in button as the only path to UI
+      // (Task 23). NEVER opens visible UI.
+      async signInSilent(loginHint) { await loadGis(); await requestToken("none", loginHint, { silent: true }); return true; },
       signOut() {
         try { if (accessToken && gisReady() && google.accounts.oauth2.revoke) google.accounts.oauth2.revoke(accessToken, () => {}); } catch (e) {}
         accessToken = null;
@@ -9901,13 +9946,17 @@ import {
       if (this.busy) return false;
       this.busy = true; this._sync();
       try {
-        await this.ensureClient().signIn();
+        // Steer the consent flow to the remembered account when we have one.
+        const prevHint = Session.authHint();
+        await this.ensureClient().signIn(prevHint && prevHint.email);
         this.signedIn = true;
         this.sched.lastAt = Date.now();       // first autosave one interval from now
         // Remember the opt-in (a non-sensitive hint) so a reload can SILENTLY
-        // re-acquire a token without a fresh consent dialog (Task 17). No secret
-        // is stored — only the "opted in" flag (+ optional account email hint).
-        Session.rememberAuth("");
+        // re-acquire a token without a fresh consent dialog (Task 17/23). No secret
+        // is ever stored — only the "opted in" flag (+ an optional account email
+        // hint, here unknown under the appdata-only scope, so empty). The flag is
+        // the gate `silentAuthDecision` reads back on the next boot.
+        Session.rememberAuth((prevHint && prevHint.email) || "");
         Sfx.play("ui_click");
         toast(t("toast.cloudSignedIn"));
         return true;
@@ -9923,21 +9972,31 @@ import {
       this._sync();
     },
 
-    // Boot-time SILENT re-auth (Task 17): if the player had opted into cloud and
-    // hasn't signed out (an auth hint is stored), try to re-acquire a Google
-    // token without a consent prompt. Fails soft — on any rejection the explicit
-    // Sign-in button remains the path. No-ops when not configured/available.
+    // Boot-time SILENT re-auth (Task 17/23): if — and ONLY if — the player had
+    // opted into cloud and hasn't signed out (the `optedIn` hint is stored), try to
+    // re-acquire a Google token with NO visible UI. The decision gate runs FIRST
+    // (before any GIS load), so a signed-out / first-run / never-opted-in player
+    // makes no attempt at all. `signInSilent` uses `prompt: "none"`, which GIS
+    // resolves only from an active, already-consented session and otherwise rejects
+    // WITHOUT showing a popup/account chooser; a watchdog timeout guarantees the
+    // boot path can never hang on UI that won't appear. Fails soft on any rejection
+    // — the explicit "Sign in with Google" button stays the only interactive path,
+    // so no dialog ever appears without a click. No-ops when not configured.
     async trySilentSignIn() {
       if (!this.available() || this.signedIn) return false;
       const decision = silentAuthDecision(Session.authHint());
-      if (!decision.attempt) return false;
+      if (!decision.attempt) return false;       // signed out / never opted in → never attempt
       try {
         await this.ensureClient().signInSilent(decision.loginHint);
         this.signedIn = true;
         this.sched.lastAt = Date.now();
+        // Re-stamp the opt-in hint so the 180-day cookie keeps rolling for an
+        // active player (so "stay signed in" doesn't quietly lapse after 180 days
+        // of returning visits). Still only the non-sensitive flag + hint.
+        Session.rememberAuth(decision.loginHint || "");
         this._sync();
         return true;
-      } catch (e) { return false; }
+      } catch (e) { return false; }              // expired / revoked / offline → fall back to the button
     },
 
     setAutosave(on) {
@@ -11207,6 +11266,15 @@ import {
         if (dom[id]) dom[id].addEventListener("click", () => pickLocale(loc));
       });
 
+      // Cloud-saves UI (opt-in Google Drive): sign-in + manual save + autosave
+      // toggle on the start screen and pause settings, plus the browse overlay.
+      // It is a DOM-only feature, independent of the 3D engine — so it is wired
+      // (and its boot-time SILENT re-auth attempted) BEFORE the WebGL scene builds,
+      // so a returning player who opted into Drive stays signed in even if the
+      // engine boot is slow or fails (graceful degradation; Task 23). With no
+      // client id / no GIS / headless it is cleanly disabled and never throws.
+      CloudUI.init();
+
       // A save chosen on the start screen is stashed in sessionStorage, then the
       // page reloads into this path. Re-seed BEFORE building the world so the
       // environment regenerates identically, then lay the run back in once ready.
@@ -11317,10 +11385,6 @@ import {
 
       // Audio mixer controls (volume sliders + mute) on the start screen + pause.
       AudioUI.init();
-
-      // Cloud-saves UI (opt-in Google Drive): sign-in + manual save + autosave
-      // toggle on the start screen and pause settings, plus the browse overlay.
-      CloudUI.init();
 
       // Save management (Task 18): the unified Saves screen (named local slots +
       // cloud section + file export/import), reachable from start screen + pause.
@@ -11547,7 +11611,7 @@ import {
       // ---- Cloud saves: Google Drive appDataFolder (Task 15) ----
       CloudSave, CloudUI, makeGoogleDriveClient, CLOUD_KEY,
       CLOUD_AUTOSAVE_MS, CLOUD_HISTORY_MS, CLOUD_MAX_SLOTS, CLOUD_MANUAL_NAME, CLOUD_AUTO_PREFIX,
-      cloudAutosaveDue, cloudPrune, cloudNewer, cloudAutoName, cloudParseAuto,
+      SILENT_AUTH_TIMEOUT_MS, cloudAutosaveDue, cloudPrune, cloudNewer, cloudAutoName, cloudParseAuto,
       // ---- Save slots: multiple named manual saves + management (Task 18) ----
       SAVE_VERSION,
       SaveSlots, SavesUI, SLOTS_KEY, SLOTS_VERSION, SLOT_COUNT, SLOT_NAME_MAX,

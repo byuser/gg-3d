@@ -238,6 +238,16 @@ export default defineConfig({
       testMatch: /fullscreen\.spec\.js/,
       use: s24Landscape,
     },
+    // Persistent Drive sign-in (Task 23): with an injected GIS client + a stored
+    // opted-in hint, a reload restores the signed-in state via the silent
+    // (prompt:"none") path with NO visible dialog; a clean load makes no GIS call;
+    // and the explicit button is the only path to an interactive consent. The flow
+    // is layout-independent (no canvas needed), so desktop exercises it fully.
+    {
+      name: "cloudsignin-desktop",
+      testMatch: /cloudsignin\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",
