@@ -101,18 +101,34 @@
   }
 
   // ---- Named locations scattered across the larger world. Each is a landmark
-  // the story sends you to; several host a story NPC with quests + rewards. ----
+  // the story sends you to; several host a story NPC with quests + rewards.
+  //
+  // Each landmark belongs to a `zone` (Task 38): the hub landmarks (village,
+  // apothecary, castle) live in the home meadow, while every wild landmark names
+  // — and is placed inside — its own land (grove → forest, seaside → shore,
+  // mountain → peaks, ruins → caverns). The `x`/`z` are the landmark's point IN
+  // THAT zone (zones are centred on the origin with their own radius), so the
+  // wild landmarks sit well inside their fence rather than at hub coordinates.
+  // This is what lets `setupZoneContent` spawn each quest-giver in its home zone
+  // (not only the hub) and lets the world-map / waypoint route to it correctly. ----
   const LOCATIONS = [
-    { id: "village",  name: "Meadowgate Village", icon: "🏘️", x: 0,    z: -14, color: "#ffd98a" },
-    { id: "apothecary", name: "Meadowgate Apothecary", icon: "⚗️", x: 8, z: 2, color: "#9ad6a0" },
-    { id: "grove",    name: "Whisperwood Grove",  icon: "🌲", x: -48,  z: -40, color: "#5be0a0" },
-    { id: "seaside",  name: "Saltmarsh Shore",    icon: "🌊", x: 60,   z: 52,  color: "#6cc6ff" },
-    { id: "mountain", name: "Frostpeak Pass",     icon: "⛰️", x: -58,  z: 50,  color: "#cfe3ff" },
-    { id: "ruins",    name: "Sunken Ruins",       icon: "🏛️", x: 56,   z: -52, color: "#c8a86a" },
-    { id: "castle",   name: "Castle Hill",        icon: "🏰", x: 0,    z: 64,  color: "#ff9d5c" },
+    { id: "village",  name: "Meadowgate Village", icon: "🏘️", zone: "meadow",  x: 0,   z: -14, color: "#ffd98a" },
+    { id: "apothecary", name: "Meadowgate Apothecary", icon: "⚗️", zone: "meadow", x: 8, z: 2,  color: "#9ad6a0" },
+    { id: "grove",    name: "Whisperwood Grove",  icon: "🌲", zone: "forest",  x: -18, z: -14, color: "#5be0a0" },
+    { id: "seaside",  name: "Saltmarsh Shore",    icon: "🌊", zone: "shore",   x: 20,  z: 14,  color: "#6cc6ff" },
+    { id: "mountain", name: "Frostpeak Pass",     icon: "⛰️", zone: "peaks",   x: -18, z: 16,  color: "#cfe3ff" },
+    { id: "ruins",    name: "Sunken Ruins",       icon: "🏛️", zone: "caverns", x: 20,  z: -8,  color: "#c8a86a" },
+    { id: "castle",   name: "Castle Hill",        icon: "🏰", zone: "meadow",  x: 0,   z: 64,  color: "#ff9d5c" },
   ];
   const LOCATION_BY_ID = {};
   for (const l of LOCATIONS) LOCATION_BY_ID[l.id] = l;
+  // Which zone a landmark id belongs to (defaults to the hub for safety / older
+  // data). Drives the zone-aware NPC placement + the map/waypoint routing.
+  const HUB_ZONE_ID = "meadow";
+  const landmarkZone = (locId) => {
+    const l = LOCATION_BY_ID[locId];
+    return (l && l.zone) || HUB_ZONE_ID;
+  };
 
   // ---- Story NPCs. Each stands at a landmark, has an intro line, and serves as
   // a GIVER for the campaign's missions + side quests (defined below). Identity
@@ -158,5 +174,5 @@
 export {
   MATERIALS, MATERIAL_IDS, RESOURCE_KINDS, RELICS, RELIC_IDS, getRelic,
   CASTLE_PARTS, CASTLE_PART_BY_ID, CRAFT_RECIPES, MONSTER_ABILITIES, abilitiesForWave,
-  LOCATIONS, LOCATION_BY_ID, NPC_DATA, NPC_BY_ID,
+  LOCATIONS, LOCATION_BY_ID, NPC_DATA, NPC_BY_ID, landmarkZone,
 };

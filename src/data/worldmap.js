@@ -8,7 +8,7 @@
 // guided waypoint read these; the tests exercise them directly.
 
 import { ZONES, ZONE_BY_ID, HUB_ZONE } from "./zones.js";
-import { LOCATIONS, LOCATION_BY_ID, NPC_DATA, NPC_BY_ID } from "./content.js";
+import { LOCATIONS, LOCATION_BY_ID, NPC_DATA, NPC_BY_ID, landmarkZone } from "./content.js";
 
   // ---- Zone adjacency (derived from every zone's portals) -------------------
   const ZONE_ADJ = {};
@@ -155,26 +155,30 @@ import { LOCATIONS, LOCATION_BY_ID, NPC_DATA, NPC_BY_ID } from "./content.js";
   }
 
   // ---- Map targets (searchable) ---------------------------------------------
-  // Every zone, every hub landmark and every story NPC, as data only (no display
+  // Every zone, every landmark and every story NPC, as data only (no display
   // names — the UI resolves those through i18n so this index stays translation-
-  // agnostic). LOCATIONS + NPCs live in the hub; each carries its in-zone point.
+  // agnostic). Each landmark / NPC carries its HOME ZONE (Task 38: grove → forest,
+  // seaside → shore, …; the hub landmarks stay in the meadow) plus its in-zone
+  // point, so the world-map / waypoint route to where the NPC actually stands.
   function mapTargets() {
     const out = [];
     for (const z of ZONES) out.push({ kind: "zone", id: z.id, zoneId: z.id, icon: z.icon });
-    for (const l of LOCATIONS) out.push({ kind: "location", id: l.id, zoneId: HUB_ZONE, x: l.x, z: l.z, icon: l.icon });
+    for (const l of LOCATIONS) out.push({ kind: "location", id: l.id, zoneId: landmarkZone(l.id), x: l.x, z: l.z, icon: l.icon });
     for (const n of NPC_DATA) {
       const l = LOCATION_BY_ID[n.loc];
-      out.push({ kind: "npc", id: n.id, zoneId: HUB_ZONE, x: (l ? l.x : 0) + 3, z: (l ? l.z : 0) + 3, icon: n.icon });
+      out.push({ kind: "npc", id: n.id, zoneId: landmarkZone(n.loc), x: (l ? l.x : 0) + 3, z: (l ? l.z : 0) + 3, icon: n.icon });
     }
     return out;
   }
   const MAP_TARGETS = mapTargets();
 
   // Which zone a target lives in, and its in-zone point (a whole zone has no
-  // specific point — arrival just means standing in it).
+  // specific point — arrival just means standing in it). Landmarks + NPCs resolve
+  // to their home zone (Task 38) so cross-zone routing leads the player there.
   function targetZoneOf(kind, id) {
     if (kind === "zone") return ZONE_BY_ID[id] ? id : null;
-    if (kind === "location" || kind === "npc") return HUB_ZONE;
+    if (kind === "location") return LOCATION_BY_ID[id] ? landmarkZone(id) : null;
+    if (kind === "npc") { const n = NPC_BY_ID[id]; return n ? landmarkZone(n.loc) : null; }
     return null;
   }
   function targetPoint(kind, id) {

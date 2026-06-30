@@ -217,10 +217,17 @@ describe("Task 13 — map targets, search & layout (pure)", () => {
   it("derives every zone, landmark and NPC as a target (no duplication)", () => {
     expect(MAP_TARGETS.length).toBe(ZONES.length + LOCATIONS.length + NPC_DATA.length);
     expect(MAP_TARGETS.filter((t) => t.kind === "zone").length).toBe(ZONES.length);
-    // Landmarks + NPCs live in the hub; zones are their own.
+    // Each landmark / NPC lives in its HOME zone (Task 38): hub landmarks stay in
+    // the meadow, wild landmarks resolve to their own land.
     expect(targetZoneOf("zone", "forest")).toBe("forest");
-    expect(targetZoneOf("npc", "mayor")).toBe("meadow");
-    expect(targetZoneOf("location", "grove")).toBe("meadow");
+    expect(targetZoneOf("npc", "mayor")).toBe("meadow"); // mayor @ village (hub)
+    expect(targetZoneOf("location", "village")).toBe("meadow");
+    expect(targetZoneOf("location", "grove")).toBe("forest"); // grove → Whisperwood
+    expect(targetZoneOf("npc", "herbalist")).toBe("forest"); // herbalist @ grove
+    expect(targetZoneOf("npc", "fisher")).toBe("shore"); // fisher @ seaside
+    expect(targetZoneOf("npc", "smith2")).toBe("peaks"); // smith @ mountain
+    expect(targetZoneOf("npc", "hermit")).toBe("caverns"); // hermit @ the ruins
+    expect(targetZoneOf("location", "ghost")).toBe(null); // unknown id
     // A whole zone has no specific in-zone point; a landmark does.
     expect(targetPoint("zone", "forest")).toBe(null);
     expect(targetPoint("location", "village")).toEqual({ x: 0, z: -14 });

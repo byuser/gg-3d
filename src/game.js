@@ -34,7 +34,7 @@ import {
 import {
   MATERIALS, MATERIAL_IDS, RESOURCE_KINDS, RELICS, CASTLE_PARTS, CASTLE_PART_BY_ID,
   CRAFT_RECIPES, MONSTER_ABILITIES, abilitiesForWave, LOCATIONS, LOCATION_BY_ID,
-  NPC_DATA, NPC_BY_ID,
+  NPC_DATA, NPC_BY_ID, landmarkZone,
 } from "./data/content.js";
 import {
   STORY, MISSIONS, SIDE_QUESTS, QUEST_BY_ID, MAIN_IDS, MAIN_INDEX, SIDE_IDS,
@@ -4791,22 +4791,37 @@ import {
     }
   }
 
+  // The quest-givers whose home landmark belongs to a given zone (Task 38). Each
+  // story NPC stands at a landmark (`loc`) that now carries a `zone`; vendor NPCs
+  // (the alchemist) are placed separately as dedicated shop vendors and never
+  // appear here. Pure + headless-safe so the placement is unit-testable.
+  function questGiversForZone(zoneId) {
+    return NPC_DATA.filter((data) => !data.vendor && landmarkZone(data.loc) === zoneId);
+  }
+
+  // Spawn the story NPCs that live in THIS zone, at their landmark, registered as
+  // interactables at the existing talk range. Called for EVERY zone (not only the
+  // hub) so quest-givers are present + talkable in their own land — and freshly
+  // re-registered after each ZoneManager teardown → rebuild. Deterministic (the
+  // QuestGiver positions itself from its landmark coordinates) and disposed on
+  // teardown with the rest of `state.npcs`.
+  function spawnZoneNpcs(scene, world, interaction, state) {
+    for (const data of questGiversForZone(world.zone.id)) {
+      state.npcs.push(new QuestGiver(scene, world.shadow, interaction, data, (npc) => Dialogue.talk(npc)));
+    }
+  }
+
   // =========================================================================
-  // populateAdventure — scatter the story layer across the world: harvestable
-  // resource nodes, the story NPCs at their landmarks, and the castle build
-  // site on Castle Hill. Called once after the world is built.
+  // populateAdventure — lay the HUB-only story fixtures on the freshly built
+  // home world: the deterministic resource set and the castle build site on
+  // Castle Hill. (Story NPCs are placed per-zone by spawnZoneNpcs so they appear
+  // in their own land, not only the hub.) Called once after the hub is built.
   // =========================================================================
   function populateAdventure(scene, world, interaction, player, state) {
     // Resource nodes: built from the zone's DETERMINISTIC, PERSISTENT record
     // (Task 22) so re-entering the hub reuses the same set instead of scattering
     // a fresh batch. Per-kind caps + the time-gated regrow are enforced there.
     buildResourceNodes(scene, world, interaction, player, state);
-    // Story NPCs at their landmarks (vendor NPCs like the alchemist are placed
-    // separately as dedicated shop vendors — they don't give quests).
-    for (const data of NPC_DATA) {
-      if (data.vendor) continue;
-      state.npcs.push(new QuestGiver(scene, world.shadow, interaction, data, (npc) => Dialogue.talk(npc)));
-    }
     // The castle build site.
     state.castle = new CastleSite(scene, world.shadow, interaction, player, state);
     CastleUI.setSite(state.castle);
@@ -4814,10 +4829,11 @@ import {
 
   // =========================================================================
   // setupZoneContent — lay the per-zone CONTENT layer on a freshly built world.
-  // The hub (Meadowgate) gets the merchant, blacksmith, story NPCs, resource
-  // nodes, the castle build site and a few artifacts; the wild zones get a
-  // handful of themed resource nodes so gathering still works out in the world.
-  // Monsters are handled separately by the SpawnDirector.
+  // EVERY zone gets its resident story NPCs (quest-givers placed at the landmark
+  // that belongs to that zone — Task 38) and its themed, deterministic resource
+  // set. The hub (Meadowgate) additionally gets the merchant, blacksmith,
+  // alchemist, the castle build site and a few artifacts. Monsters are handled
+  // separately by the SpawnDirector.
   // =========================================================================
   function setupZoneContent(scene, world, interaction, player, state) {
     const zone = world.zone;
@@ -4842,12 +4858,20 @@ import {
       // counts stay stable across travel, and per-kind caps hold everywhere.
       buildResourceNodes(scene, world, interaction, player, state);
     }
+    // Story NPCs live in EVERY zone now (Task 38): spawn this zone's quest-givers
+    // at their landmarks, registered as interactables, so talk → Dialogue →
+    // accept / turn-in works in the wild lands, not only the hub.
+    spawnZoneNpcs(scene, world, interaction, state);
   }
 
-  // Fire "reach a location" quest objectives when the player gets close enough
-  // to a hub landmark (zone-entry reaches are fired by the ZoneManager).
+  // Fire "reach a location" quest objectives when the player gets close enough to
+  // a landmark IN THE CURRENT ZONE (Task 38: landmarks now live in their own land,
+  // so a reach only counts while standing in that land). Zone-entry reaches (a
+  // whole zone as the target) are fired separately by the ZoneManager.
   function checkLocations(state, player) {
+    const zoneId = state.world && state.world.zone && state.world.zone.id;
     for (const loc of LOCATIONS) {
+      if (landmarkZone(loc.id) !== zoneId) continue;
       const dx = player.position.x - loc.x, dz = player.position.z - loc.z;
       if (Math.hypot(dx, dz) <= CONFIG.questReachRange) Quests.onReach(loc.id);
     }
@@ -6387,9 +6411,11 @@ import {
     ctx.clip();
     ctx.fillStyle = shadeHex(theme.ground || "#5fae4f", 0.62);
     ctx.beginPath(); ctx.arc(c.x, c.y, fr, 0, Math.PI * 2); ctx.fill();
-    // Roads/landmarks of the hub: dots for the named locations.
-    if (world.zone.home) {
-      for (const l of LOCATIONS) { const s = proj(l.x, l.z); mmDot(ctx, s.x, s.y, labels ? 3 : 2, "rgba(255,240,200,0.5)"); }
+    // Named landmarks of THIS zone: dots at their in-zone points (Task 38 — the
+    // wild lands carry their own landmark now, not just the hub).
+    for (const l of LOCATIONS) {
+      if (landmarkZone(l.id) !== world.zone.id) continue;
+      const s = proj(l.x, l.z); mmDot(ctx, s.x, s.y, labels ? 3 : 2, "rgba(255,240,200,0.5)");
     }
     // Resource nodes (brighter when ready to harvest).
     for (const r of state.resources) {
@@ -11055,7 +11081,7 @@ import {
       Story, STORY, MISSIONS, SIDE_QUESTS, MAIN_IDS, SIDE_IDS, CHAPTER_BY_ID, missionsOfChapter,
       // ---- RPG world / zones ----
       ZONES, ZONE_BY_ID, HUB_ZONE, SpawnDirector, ZoneManager, buildWorld,
-      setupZoneContent, teardownZone,
+      setupZoneContent, teardownZone, questGiversForZone, spawnZoneNpcs,
       // ---- Minimap / world map / guided waypoint (Task 13, fixes Task 20) ----
       WorldMap, WorldMapUI, resolveWaypoint,
       ZONE_ADJ, zoneEdges, findRoute, nextZoneStep, bearingRad, dist2D,
