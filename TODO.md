@@ -1658,7 +1658,20 @@ A task is **done** only when **all** of these are true:
 > [§ 5](#5-recommended-order).
 
 ### Task 23 — Persist Google Drive sign-in across reloads (true silent re-auth; no unprompted dialog)
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-06-30 · Made boot re-auth **truly silent**: `signInSilent` now uses GIS's
+  strictly non-interactive `prompt: "none"` token path (was `""`, which could raise a visible account
+  chooser) wired with an `error_callback` + an 8 s watchdog that swallow every non-silent outcome, so
+  **no Google dialog appears on load** — the explicit "Sign in with Google" button is the only path to
+  consent. The boot path stays gated on `silentAuthDecision` (attempt only when the stored `optedIn`
+  hint is present; first-run / signed-out never touch GIS) and was **hoisted before the WebGL scene
+  builds** so it degrades gracefully even if the engine boot is slow/fails. The opted-in hint is
+  written on every successful sign-in + re-stamped on each silent re-acquire (rolling the 180-day
+  `SameSite=Lax`/`Secure` cookie, mirrored to `localStorage` for private mode); the 401 refresh is
+  silent too. Reused the existing `cloud.*` toasts (no new strings). New `test/drivesignin.test.js`
+  (7 cases, production client vs an injected GIS stub) + Task 23 blocks in `cloudsave.test.js` (+6) and
+  `session.test.js` (+4) + a Playwright `cloudsignin` suite (3 cases, injected GIS, asserts no visible
+  dialog). Vitest 313 → 335. **No `SAVE_VERSION` change** (auth hints persist via cookie/localStorage,
+  not the save).
 - **Depends on:** Task 15 (Google Drive cloud saves — `CloudSave`/`CloudUI`/
   `makeGoogleDriveClient`) and Task 17 (durable session — the `Session` cookie/hint
   store, `silentAuthDecision`, `signInSilent`). None else.

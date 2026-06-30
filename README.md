@@ -295,14 +295,20 @@ runs in English without a browser.
   so **reloading the page** — or switching desktop⇄mobile layout, re-orienting, or changing graphics
   quality — drops you straight back into the run. On the start screen a **Continue** button appears
   when a saved run exists (Start always begins a fresh one). If you opted into Google Drive, the
-  sign-in is **remembered and silently refreshed** so a reload keeps you logged in without a new
-  consent dialog. A small **first-party cookie** (`SameSite=Lax`, `Secure` on HTTPS) holds only a
-  session id, your locale/quality, the cloud-autosave flag and a **non-sensitive** sign-in hint —
-  never a token or secret, no third-party/tracking cookies; the run snapshot itself lives in
-  `localStorage`. Everything is feature-detected (cookies fall back to `localStorage`), so private
-  mode / blocked cookies / headless still play. **Clear saved session & sign out** (in the Cloud
-  Saves panel on the start screen and pause settings) wipes the local session, the cookie and the
-  Google sign-in.
+  sign-in **persists across reloads**: each load **silently re-acquires** a fresh access token from
+  your existing Google session (the short-lived token itself is never stored), so the panel shows
+  **Signed in to Drive** with no click. The silent re-auth uses Google's strictly non-interactive
+  token path (`prompt: "none"`), so **no Google dialog ever appears on load** — a popup or account
+  chooser only ever shows when you **click "Sign in with Google"** yourself. A signed-out or
+  first-run load makes no attempt at all; if the silent refresh can't succeed (expired/revoked/
+  offline) it falls back quietly to that explicit button. A small **first-party cookie**
+  (`SameSite=Lax`, `Secure` on HTTPS, 180-day `Max-Age`) holds only a session id, your locale/quality,
+  the cloud-autosave flag and a **non-sensitive** "opted-in" sign-in hint — **never a token or
+  secret**, no third-party/tracking cookies; the run snapshot itself lives in `localStorage`.
+  Everything is feature-detected (cookies fall back to `localStorage` for private mode / blocked
+  cookies / headless), so it always degrades gracefully. **Clear saved session & sign out** (in the
+  Cloud Saves panel on the start screen and pause settings) wipes the local session, the cookie and
+  the Google sign-in, so no silent re-auth fires afterward.
 - **Cloud saves (optional):** if the game has been configured with a Google OAuth client id (see
   [Cloud saves](#cloud-saves-optional-google-drive) below), you can **Sign in with Google** from the
   start screen, pause settings, or the **Manage Saves** screen and back your progress up to your
@@ -321,6 +327,16 @@ clutter. The game stores one **manual** slot plus an **autosave every 5 minutes*
 **one-hour history** (up to ~12 timestamped autosaves, oldest pruned automatically, the newest always
 kept). Cloud saves use the **exact same JSON** as the local file save, so versioning and migration
 behave identically.
+
+**Staying signed in & privacy.** Google's browser OAuth flow issues only **short-lived access tokens
+(~1 h)** and no refresh token, so the game **never stores a token**. Instead it remembers a single
+**non-sensitive "opted-in" hint** (in a first-party cookie + a `localStorage` mirror) and, on each
+load, **silently re-acquires** a token from your existing Google session — keeping you signed in
+without a click. That boot re-auth is **strictly non-interactive** (`prompt: "none"`): Google shows
+**no popup or account chooser**; if it can't grant a token silently (you signed out, the consent was
+revoked, or you're offline) it fails quietly and leaves **Sign in with Google** as the only path to a
+dialog. **No Google UI ever appears just from loading the page.** Signing out clears the hint so no
+re-auth fires afterward.
 
 The feature ships **disabled** and only turns on when you supply a Google OAuth **client id**.
 
@@ -624,7 +640,24 @@ and that stripping the Fullscreen API hides the whole Display panel + the HUD bu
 (no dead control). The headless **`test/fullscreen-settings.test.js`** covers the pure
 derivation — label from `Fullscreen.active()`, visibility/disabled from
 `Fullscreen.supported()`, the menu button wired to `Fullscreen.toggle()`, all no-op
-safe with no Fullscreen API:
+safe with no Fullscreen API.
+The **Drive sign-in** suites lock in Task 23 (persistent silent re-auth, no
+unprompted dialog). **`test/drivesignin.test.js`** drives the *production*
+`makeGoogleDriveClient` against an injected Google Identity Services stub and proves
+the prompt choice per path: interactive `signIn()` asks for `prompt: "consent"`,
+boot `signInSilent()` asks for `prompt: "none"` and **never** triggers the stub's
+visible-UI hook (failing soft when interaction is required, when a popup is blocked
+via `error_callback`, or when it hangs — the watchdog aborts), and a 401 refresh
+re-auths silently too. **`test/cloudsave.test.js`** adds the controller-level boot
+gating: `trySilentSignIn` attempts **only** when opted-in (never first-run /
+signed-out), restores via the **silent** client method with **zero** interactive
+calls, and an explicit click persists the hint that gates the next boot.
+**`test/session.test.js`** proves the opted-in hint **survives a reload** through the
+first-party cookie (`SameSite=Lax` / `Secure` / 180-day `Max-Age`) and its
+`localStorage` mirror, and that sign-out clears it. A Playwright **`cloudsignin`**
+suite loads the built site with a stored hint + an injected GIS client and asserts
+the signed-in state restores with **no visible auth dialog** (and a clean load makes
+no GIS call):
 
 ```bash
 npm ci          # once
@@ -833,8 +866,14 @@ is fully testable headless:
   **`appDataFolder`**. Pure policy (`cloudAutosaveDue` / `cloudPrune` / `cloudNewer`) plus an
   **injectable** Drive client (`makeGoogleDriveClient`, loading Google Identity Services on demand);
   every browser API is feature-detected so signed-out / offline / unconfigured / headless is cleanly
-  disabled and never throws. The autosave-on preference persists in `localStorage`; no save-schema
-  change. See [Cloud saves](#cloud-saves-optional-google-drive).
+  disabled and never throws. **Persistent sign-in (Task 23):** the cloud UI is wired (and its boot
+  silent re-auth attempted) **before the WebGL scene builds**, so a returning opted-in player is
+  re-acquired silently — `trySilentSignIn` runs only behind the stored `optedIn` hint
+  (`silentAuthDecision`) and `signInSilent` uses Google's strictly non-interactive `prompt: "none"`
+  token path with an `error_callback` + watchdog, so **no dialog ever appears without a click**. The
+  autosave-on preference persists in `localStorage`; the opted-in hint persists in the first-party
+  cookie (+ `localStorage` mirror) — **no token is ever stored**; no save-schema change.
+  See [Cloud saves](#cloud-saves-optional-google-drive).
 - **`Pause`** — the in-game pause menu (Resume / Manage Saves / Restart / Exit) that freezes the
   simulation, with a reusable, screen-centred confirmation guard (`askConfirm` takes an optional
   callback, so the save-slot delete/overwrite confirms reuse it) on the destructive actions.
@@ -1048,6 +1087,17 @@ Source: GitHub Actions**.
       a desktop⇄mobile / orientation / quality switch) resumes it via a **Continue** button; the Google
       sign-in is remembered and silently refreshed. A first-party cookie holds only small identifiers
       (`Session`, `src/game.js`); covered by `test/session.test.js`.
+- [x] **Persistent Drive sign-in (true silent re-auth)** — once you've opted into Google Drive, every
+      reload **silently re-acquires** a token from your existing Google session and shows **Signed in to
+      Drive** with no click, while **no Google dialog ever appears on load**: the boot path runs Google's
+      strictly non-interactive token flow (`prompt: "none"`) with an `error_callback` + watchdog timeout
+      that swallows anything that would need UI, so a popup/account-chooser only shows when you click
+      **Sign in with Google**. Signed-out / first-run loads make no attempt; expired/revoked/offline
+      degrade quietly to that button; sign-out clears the hint. The durable bit is a **non-sensitive
+      opted-in hint** in the first-party cookie (`SameSite=Lax`/`Secure`/180-day `Max-Age`) with a
+      `localStorage` mirror — never a token. `CloudSave`/`makeGoogleDriveClient` in `src/game.js`; covered
+      by `test/drivesignin.test.js`, `test/cloudsave.test.js`, `test/session.test.js` + a Playwright
+      `cloudsignin` suite (no schema change).
 - [x] **Multiple named save slots + full management** — a single **Manage Saves** screen (start screen
       *and* pause) with **six named local slots**: **Load / Rename / Delete / Overwrite / New save**,
       each showing level · zone · playtime · timestamp. Cloud saves are listed + manageable (restore /

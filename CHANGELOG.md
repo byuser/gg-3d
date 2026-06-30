@@ -50,6 +50,64 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-06-30] — Task 23 — Persist Google Drive sign-in across reloads (true silent re-auth; no unprompted dialog)
+
+### Fixed
+
+- **No Google sign-in dialog ever appears on page load.** The boot-time re-auth
+  used GIS `requestAccessToken({ prompt: "" })`, which can still raise a **visible**
+  account chooser / consent popup when the session is stale. `signInSilent` now uses
+  Google's **strictly non-interactive** token path (`prompt: "none"`), which grants
+  a token only from an active, already-consented session and otherwise **fails
+  without showing any UI**. It's wired with an **`error_callback`** (swallowing the
+  non-OAuth popup-blocked / popup-closed cases) and an **8 s watchdog** so the boot
+  path can never hang waiting on a dialog that won't come. The explicit **Sign in
+  with Google** button is now the *only* path to an interactive consent.
+- **A returning player who opted into Drive stays signed in across reloads.** GIS
+  access tokens are short-lived (~1 h) and not persisted, so each load now **silently
+  re-acquires** a token from the existing Google session and the panel shows
+  **Signed in to Drive** with no click. The `optedIn` hint is written on every
+  successful sign-in **and re-stamped on each silent re-acquire**, rolling the
+  180-day `SameSite=Lax` / `Secure` first-party cookie (mirrored to `localStorage`
+  for private mode / blocked cookies). The Drive `401` token refresh is silent too.
+
+### Changed
+
+- **The cloud-saves UI is wired (and its silent re-auth attempted) before the WebGL
+  scene builds.** `CloudUI.init()` was hoisted ahead of `createScene()` in `boot()`,
+  so the opt-in sign-in is a **DOM-only feature independent of the 3D engine** —
+  a returning player is restored even if the engine boot is slow or fails (graceful
+  degradation). The boot path remains gated on `silentAuthDecision` (it attempts
+  **only** when the stored `optedIn` hint is present — first-run / signed-out loads
+  make **no** GIS call), and `forgetAuth()` on sign-out clears the hint so no
+  re-auth fires afterward.
+
+### Notes
+
+- **Opt-in + graceful + headless-safe, unchanged.** Signed-out / offline / expired /
+  revoked / unconfigured / headless all degrade to the explicit button (or stay
+  cleanly disabled) and **never throw** or surface a surprise popup; the local save
+  is unaffected. **No new external dependency**; reuses the existing `cloud.*`
+  toasts (no new strings). **No token is ever stored** — only the non-sensitive hint.
+- **No `SAVE_VERSION` change** (auth hints persist via the cookie / `localStorage`,
+  not the save). New tests: `test/drivesignin.test.js` (7 cases — the **production**
+  `makeGoogleDriveClient` vs an injected GIS stub: interactive `signIn` →
+  `prompt:"consent"`, boot `signInSilent` → `prompt:"none"` with the visible-UI hook
+  **never** called, fail-soft on interaction-required / popup-blocked / hang, and a
+  silent 401 refresh), Task 23 blocks in `test/cloudsave.test.js` (+6 — controller
+  boot gating: attempt only when opted-in, restore via the silent method with zero
+  interactive calls, sign-out blocks re-auth, explicit sign-in persists the hint) and
+  `test/session.test.js` (+4 — the opted-in hint survives a reload via the cookie's
+  `SameSite=Lax`/`Secure`/180-day `Max-Age` + the `localStorage` mirror; sign-out
+  clears it). **Vitest 318 → 335.** A Playwright **`test/e2e/cloudsignin.spec.js`**
+  suite (3 cases, injected GIS client) loads the built site with a stored hint and
+  asserts the signed-in state restores with **no visible auth dialog**, a clean load
+  makes **no** GIS call, and the explicit button is the only path to consent.
+- **Files:** `src/game.js` (`makeGoogleDriveClient` `requestToken`/`signIn`/
+  `signInSilent`/`authFetch`, `CloudSave.signIn`/`trySilentSignIn`, `CloudUI.init`
+  boot wiring), `playwright.config.js` (new `cloudsignin-desktop` project),
+  `README.md` (cloud-saves persistence + privacy note + roadmap).
+
 ## [2026-06-30] — Task 37 — Exit/enter fullscreen control in the settings menu
 
 ### Added
