@@ -259,3 +259,53 @@ describe("Session.rememberAuth / forgetAuth — durable sign-in hint", () => {
     expect(T.silentAuthDecision(S.authHint()).attempt).toBe(false);
   });
 });
+
+// Task 23 — the sign-in hint must SURVIVE A RELOAD so a returning player stays
+// signed in (the token itself is short-lived and re-acquired silently; the
+// durable bit is the opted-in hint). These prove the first-party cookie carries
+// the hint with the right attributes, that re-reading it (a "reload") still yields
+// "attempt", and that the localStorage mirror covers cookie-blocked / private mode.
+describe("Task 23 — sign-in hint persists across reloads", () => {
+  it("the cookie that stores the hint sets SameSite=Lax / Secure / a 180-day Max-Age", () => {
+    // The session cookie is written with the default policy. Assert the exact
+    // string the helper would emit for it carries the durability attributes.
+    const s = T.buildCookieString(T.COOKIE_NAME, JSON.stringify({ auth: { optedIn: true } }), { secure: true });
+    expect(s).toContain("SameSite=Lax");
+    expect(s).toContain("Secure");
+    expect(s).toContain("Max-Age=" + T.COOKIE_MAX_AGE); // 180 days in seconds
+    expect(T.COOKIE_MAX_AGE).toBe(60 * 60 * 24 * 180);
+  });
+
+  it("an opted-in hint written this load is read back on the NEXT load (cookie path)", () => {
+    const jar = installCookieJar();
+    S.rememberAuth("");                       // player opted in (e.g. just signed in)
+    // The hint actually lives in the first-party cookie jar (not only memory).
+    expect(jar.has(T.COOKIE_NAME)).toBe(true);
+    // Simulate a reload: a fresh read of the cookie state (the only thing that
+    // survives a real reload is the cookie / its localStorage mirror).
+    const hint = S.authHint();
+    expect(hint && hint.optedIn).toBe(true);
+    expect(T.silentAuthDecision(hint).attempt).toBe(true);   // → boot WILL silently re-auth
+  });
+
+  it("the localStorage mirror carries the hint when cookies are blocked (private mode)", () => {
+    removeCookieJar();                        // no document.cookie → fallback path
+    S.forgetAuth();
+    S.rememberAuth("");
+    // Mirrored under the ck_* key so a reload in private mode still re-auths.
+    const mirror = lsStub.getItem("ck_" + T.COOKIE_NAME);
+    expect(typeof mirror).toBe("string");
+    expect(JSON.parse(mirror).auth.optedIn).toBe(true);
+    expect(T.silentAuthDecision(S.authHint()).attempt).toBe(true);
+  });
+
+  it("sign-out clears the hint so the NEXT load makes no silent attempt", () => {
+    installCookieJar();
+    S.rememberAuth("");
+    expect(T.silentAuthDecision(S.authHint()).attempt).toBe(true);
+    S.forgetAuth();                           // the sign-out path
+    // A reload now reads back no hint → boot is dialog-free, no re-auth.
+    expect(S.authHint()).toBe(null);
+    expect(T.silentAuthDecision(S.authHint()).attempt).toBe(false);
+  });
+});

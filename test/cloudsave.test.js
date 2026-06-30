@@ -24,8 +24,12 @@ function makeFakeDrive() {
   let nextId = 1;
   let signedIn = false;
   const c = {
-    calls: { signIn: 0, signOut: 0, list: 0, upload: 0, download: 0, remove: 0 },
+    // `signIn` = interactive (consent) sign-in; `signInSilent` = the boot-time
+    // strictly-silent re-auth (Task 23). Tracked separately so a test can assert
+    // the boot path NEVER calls the interactive one.
+    calls: { signIn: 0, signInSilent: 0, signOut: 0, list: 0, upload: 0, download: 0, remove: 0 },
     failNext: null, // assign an Error to make the next op throw once
+    failSilentNext: null, // assign an Error to make the next SILENT re-auth reject once
     _files: files,
     seed(name, content) {
       const id = "f" + nextId++;
@@ -33,6 +37,7 @@ function makeFakeDrive() {
       return id;
     },
     signIn() { c.calls.signIn++; if (c.failNext) { const e = c.failNext; c.failNext = null; return Promise.reject(e); } signedIn = true; return Promise.resolve(true); },
+    signInSilent() { c.calls.signInSilent++; if (c.failSilentNext) { const e = c.failSilentNext; c.failSilentNext = null; return Promise.reject(e); } signedIn = true; return Promise.resolve(true); },
     signOut() { c.calls.signOut++; signedIn = false; return Promise.resolve(); },
     hasToken() { return signedIn; },
     async list() { c.calls.list++; if (c.failNext) { const e = c.failNext; c.failNext = null; throw e; } return [...files.values()].map((f) => ({ id: f.id, name: f.name, modifiedTime: f.modifiedTime })); },
@@ -324,5 +329,80 @@ describe("Task 15 — browse + restore", () => {
     arm(drive);
     const id = drive.seed(T.CLOUD_MANUAL_NAME, "{not json");
     expect(await CS.restore(id)).toBe(false);
+  });
+});
+
+// Task 23 — boot-time silent re-auth must (1) only run when the player previously
+// opted in, (2) restore the signed-in state with NO interactive sign-in call, and
+// (3) honour sign-out / first-run by never attempting at all. The controller's
+// `trySilentSignIn` is the boot path `CloudUI.init()` invokes; it must route
+// through the client's SILENT method (never the interactive `signIn`).
+describe("Task 23 — boot silent re-auth gating (no unprompted dialog)", () => {
+  const Session = T.Session;
+  let drive;
+  // Put the singleton in a configured-but-signed-OUT state (the real boot state)
+  // with the injected client and a clean auth hint.
+  function armBoot() {
+    drive = makeFakeDrive();
+    CS.clientId = "test-client.apps.googleusercontent.com";
+    CS._setClient(drive);
+    CS.signedIn = false;
+    CS.busy = false; CS.hidden = false; CS.enabled = false;
+    CS.sched = { lastAt: 0, inFlight: false };
+  }
+  beforeEach(() => { Session.forgetAuth(); armBoot(); });
+
+  it("does NOT attempt (and never touches the client) for a first-run / never-opted-in player", async () => {
+    Session.forgetAuth();                       // no stored opt-in
+    expect(await CS.trySilentSignIn()).toBe(false);
+    expect(CS.signedIn).toBe(false);
+    expect(drive.calls.signInSilent).toBe(0);   // no GIS touched at all
+    expect(drive.calls.signIn).toBe(0);         // and DEFINITELY no interactive prompt
+  });
+
+  it("after opting in, a reload silently re-acquires a token via the SILENT path only", async () => {
+    Session.rememberAuth("");                   // the player opted in last session
+    expect(await CS.trySilentSignIn()).toBe(true);
+    expect(CS.signedIn).toBe(true);
+    expect(drive.calls.signInSilent).toBe(1);   // the silent (prompt:none) path ran
+    expect(drive.calls.signIn).toBe(0);         // the interactive consent path NEVER ran on boot
+  });
+
+  it("does NOT attempt after sign-out cleared the hint", async () => {
+    Session.rememberAuth("");
+    await CS.signOut();                          // clears the hint + signs out
+    armBoot();                                   // simulate the next page load
+    expect(await CS.trySilentSignIn()).toBe(false);
+    expect(CS.signedIn).toBe(false);
+    expect(drive.calls.signInSilent).toBe(0);
+    expect(drive.calls.signIn).toBe(0);
+  });
+
+  it("a failed silent re-acquire falls back soft (stays signed out, no interactive prompt, no throw)", async () => {
+    Session.rememberAuth("");
+    drive.failSilentNext = new Error("silent_timeout"); // GIS could not grant silently
+    let ok;
+    await expect((async () => { ok = await CS.trySilentSignIn(); })()).resolves.not.toThrow?.();
+    expect(ok).toBe(false);
+    expect(CS.signedIn).toBe(false);
+    expect(drive.calls.signIn).toBe(0);         // we do NOT escalate to a dialog on boot
+  });
+
+  it("an explicit sign-in writes the opted-in hint that gates the next boot's silent attempt", async () => {
+    Session.forgetAuth();
+    expect(await CS.signIn()).toBe(true);        // the player clicked "Sign in with Google"
+    expect(CS.signedIn).toBe(true);
+    expect(drive.calls.signIn).toBe(1);          // interactive consent, by a click
+    // The hint is now persisted → the NEXT boot is allowed to attempt silently.
+    const hint = Session.authHint();
+    expect(hint && hint.optedIn).toBe(true);
+    expect(T.silentAuthDecision(hint).attempt).toBe(true);
+  });
+
+  it("the boot path no-ops cleanly when cloud is unavailable (unconfigured / headless)", async () => {
+    Session.rememberAuth("");                    // even with a hint…
+    CS.clientId = ""; CS._setClient(null);       // …an unconfigured platform never attempts
+    expect(await CS.trySilentSignIn()).toBe(false);
+    expect(CS.signedIn).toBe(false);
   });
 });
