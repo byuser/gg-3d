@@ -540,20 +540,23 @@ high-tier extras, **tier-gated**, toggled with **no mesh reallocation** across
 equip/unequip), the **tabbed inventory** (filter / sort / potion consume), the **v7
 save round-trip** of affixes + the new slots **plus migration** from an older (v6) file,
 and the **distinct worn gear** selectors — Task 25's helmets, Task 26's chests, Task 27's
-pauldrons, Task 28's gloves, Task 29's belts and Task 30's boots (`helmetArchetype` / `chestArchetype` /
-`pauldronArchetype` / `gloveArchetype` / `beltArchetype` / `bootArchetype` are each pure + total — every def → a valid
+pauldrons, Task 28's gloves, Task 29's belts, Task 30's boots and Task 31's cloaks (`helmetArchetype` / `chestArchetype` /
+`pauldronArchetype` / `gloveArchetype` / `beltArchetype` / `bootArchetype` / `cloakArchetype` are each pure + total — every def → a valid
 archetype + material — every archetype group builds once, the equipped item shows its own shape, and
 equip churn never reallocates the meshes; the pauldron suite adds a **shoulder-fit invariant**
 proving the shoulder mesh's inner reach is pose-independent and never enters the torso through
 idle/walk/attack, the glove suite adds a **grip-fit invariant** proving every glove part stays
 compact around the hand and below the weapon shaft so it never engulfs the grip, the belt suite
 adds a **below-chest + clears-legs invariant** proving the belt band sits under the chest envelope
-and, sampled across the stride, never enters a leg, and the boot suite adds an **on-leg /
+and, sampled across the stride, never enters a leg, the boot suite adds an **on-leg /
 no-ground-clip invariant** proving every boot part hugs the foot/shin and, sampled across the full
-stride swing, never dips below the feet it rides on; Playwright
-`worn-{helmets,chests,pauldrons,gloves,belts,boots}.spec.js` screenshot the distinct pieces worn on a real
+stride swing, never dips below the feet it rides on, and the cloak suite adds a **pure, clamped,
+frame-rate-independent billow updater** (`cloakBillowStep`) plus a **behind-the-legs invariant**
+proving every drape part, swept across the whole sway range, stays behind the leg envelope and above
+the feet so it never scythes through the legs; Playwright
+`worn-{helmets,chests,pauldrons,gloves,belts,boots,cloaks}.spec.js` screenshot the distinct pieces worn on a real
 canvas — the pauldrons mid-attack confirming no chest penetration, the gloves wrapped around the wand
-grip, the belts seated below the chest hem, the boots striding on the feet),
+grip, the belts seated below the chest hem, the boots striding on the feet, the cloaks draping behind mid-turn),
 and the **skill & leveling** suite (`test/skills.test.js`) that locks in Task 14: the
 **XP curve + focus math** (pure), **level-up** grants (health + focus + auto-learned skills),
 **focus regen + cooldown** ticking, the **quick-bar** assign (deduplicated) + **activate**
@@ -842,6 +845,20 @@ whole thing is unit-testable without a GPU:
   so it rides the leg's bottom and **strides with the feet without clipping the leg or the ground**.
   Built once per leg (no reallocation) and tier-gated (finer trims/scale rows dropped on the low
   tier; the core boot is always drawn).
+- **Distinct worn cloaks (Task 31).** Each **cloak** renders as its own real draping cloak — a plain
+  tapered **cape** with a neck clasp, a hooded **mantle** with a shawl collar (rare/non-set), an
+  overlapping dragonscale **scaled** cloak with a fanged clasp (Dragonscale), an ornate gold-hemmed
+  **regal** mantle with tassels (epic), or a feathered **winged** cloak that flares at the shoulders
+  (legendary) — instead of the old single flat box on a pivot that swung **through the legs** on sharp
+  turns. A pure, tested selector `cloakArchetype(def)` maps every `cloak` item (via its
+  `cloak:{ archetype, material }` metadata, or inferred from set/rarity) to one of five archetypes + a
+  material, sharing the **Dragonscale** motif with the matching suit. Each cloak is a **tapered,
+  segmented cloth drape** (a few vertical fold panels) + a clasp, hung from a back pivot **behind the
+  hips**; the billow is a pure, dt-driven, frame-rate-independent updater (`cloakBillowStep`) whose
+  pivot is **clamped so the drape only ever trails behind** (never forward), so it reacts to
+  movement/turns **without scything through the legs or feet** at any frame. Built once (no
+  reallocation) and tier-gated (the per-frame sway + finer folds are dropped on the low tier; the core
+  drape is always drawn).
 - **Persistence.** `SAVE_VERSION` 7 stores `{ id, lvl, aff }` per instance across the bag + all 12
   slots; older saves (no affixes / no new slots) load with clean defaults.
 - **Value / weight.** Items carry a coin **value** (resale, scaled by enhancement); **weight /
@@ -1352,4 +1369,18 @@ Source: GitHub Actions**.
       per leg (no reallocation), tier-gated (finer trims on high; core always drawn). Covered by
       `test/items.test.js` (incl. an on-leg / no-ground-clip stride invariant) + `test/e2e/worn-boots.spec.js`
       (a real-browser screenshot of distinct boots mid-stride) — Task 30
+- [x] **Distinct worn cloaks** — each **cloak** item shows as its own real draping cloak instead of the
+      old single flat box on a pivot that swung **through the legs** on sharp turns: a plain tapered
+      **cape** + neck clasp, a hooded **mantle** with a shawl collar (rare/non-set), an overlapping
+      dragonscale **scaled** cloak with a fanged clasp (Dragonscale), an ornate gold-hemmed **regal**
+      mantle with tassels (epic), or a feathered **winged** cloak that flares at the shoulders
+      (legendary). A pure, tested `cloakArchetype(def)` selector maps every cloak item to one of five
+      archetypes + a material (from its `cloak` metadata, or inferred from set/rarity), sharing the set
+      motif with the rest of the suit. Each cloak is a **tapered, segmented cloth drape** + clasp hung
+      from a back pivot **behind the hips**; the billow is a **pure, dt-driven, frame-rate-independent**
+      updater (`cloakBillowStep`) whose pivot is **clamped so the drape only ever trails behind** — so it
+      reacts to movement/turns **without scything through the legs or feet**. Built once (no
+      reallocation), tier-gated (per-frame sway + finer folds on high; core drape always drawn). Covered
+      by `test/items.test.js` (incl. the pure billow updater + a behind-the-legs sway invariant) +
+      `test/e2e/worn-cloaks.spec.js` (a real-browser screenshot of distinct cloaks draping mid-turn) — Task 31
 - [ ] Puzzles (levers, plates, gated doors)

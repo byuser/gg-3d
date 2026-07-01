@@ -50,6 +50,76 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-07-01] — Task 31 — Worn cloaks: a real draping cloak per item
+
+Seventh of the **worn-equipment appearance overhaul** (Tasks 25–35): the cloak. Each
+`cloak` item now renders as a distinct, real draping cloak — a tapered, segmented cloth
+drape with a neck clasp, hung from a back pivot behind the hips and billowing with
+motion — instead of the old single flat box on a pivot that swung **through the legs**
+on sharp turns.
+
+### Added
+
+- **Per-item procedural cloak archetypes.** The old single flat box (`_buildWornGear`,
+  a `0.78 × 1.15 × 0.05` plank whose pivot rotated ±0.5 rad) is replaced by **five**
+  distinct drapes, chosen by the item def and built from layered primitives (a few
+  vertical fold panels + a clasp/collar + set/material trim): a plain tapered **cape**
+  with a round neck clasp (default), a hooded **mantle** with a shawl collar + a hood
+  lump (rare/non-set), an overlapping dragonscale **scaled** cloak with climbing scale
+  rows + a fanged clasp (Dragonscale), an ornate gold-hemmed **regal** mantle with a
+  raised collar + hanging tassels (epic), and a feathered **winged** cloak that flares
+  out at the shoulders (legendary). Built from the proven mesh/material helpers, so
+  they're **headless-safe**.
+- **`cloakArchetype(def)` selector** (`src/data/items.js`) — a **pure, total,
+  deterministic** function mapping every `cloak` item to a `{ archetype, material }`
+  pair. Each cloak opts in via new `cloak: { archetype, material }` metadata; any cloak
+  def without it still resolves a sensible drape from its **set** (Dragonscale → scaled)
+  and **rarity** (legendary → winged, epic → regal, rare → mantle, else cape), then
+  clamps to the known archetype/material lists so the result is always one the builder
+  can draw. Coordinated with `bootArchetype`/`beltArchetype`/`gloveArchetype`/
+  `pauldronArchetype`/`chestArchetype`/`helmetArchetype` (shared dragonscale material +
+  set motif) so a full **Dragonscale** suit reads as one. Exported on the test seam.
+- **Believable billow that stays behind the legs.** The cloak hangs from a single back
+  pivot at lean-local `(0, 1.5, −0.3)` — **behind the hips** — with all of its
+  low-hanging geometry at group-local z ≤ 0. The per-frame sway is now a **pure,
+  dt-driven, frame-rate-independent** updater `cloakBillowStep(cur, moving, walkPhase,
+  turn, dt)` that trails the drape **backward** on the move, banks it side-to-side, and
+  reacts to sharp **turns** — **clamped so the pivot's x-rotation never goes below 0**
+  (never forward). Because the drape is structurally behind the pivot and the billow can
+  only trail it further back, the cloak **can't scythe through the legs or feet at any
+  frame**. Time-based exponential smoothing (`1 − e^(−rate·dt)`) makes it look identical
+  at any frame rate and **freeze exactly when the game pauses** (update stops calling it).
+- **Tier-gated** (`wornDetailFor().cloak` / `.cloakSway`). The cloak is part of the core
+  silhouette (**always built**, like the gloves/boots); only the per-frame billow + the
+  finer fold panels/trims are dropped on the low tier so phones keep their budget (the
+  drape then hangs straight behind).
+- **Task 31 tests** — `test/items.test.js` gains the cloak-archetype selector suite
+  (validity / on-theme distinctness / set-motif sharing / pure-total inference /
+  determinism), a pre-build-once-under-the-shared-pivot + no-leak-across-equip-churn
+  check, the core-silhouette + tier-gate, a shows-exactly-the-equipped-archetype check,
+  a **pure/clamped/pause-correct/frame-rate-independent billow-updater** suite, and a
+  **behind-the-legs + above-the-feet sway invariant** (every drape part, swept across the
+  whole clamped sway range, stays behind the leg envelope and above the feet). Suite
+  73 → 83; **Vitest 420 → 430**.
+- **`test/e2e/worn-cloaks.spec.js`** — a real-browser Playwright spec that boots the
+  built site, equips several cloaks, turns Lily's back to the lens, holds a steady
+  **mid-turn** billow pose, frames a 3/4 rear view of her back and **screenshots distinct
+  cloaks draping behind her**, asserting each maps to its archetype, the drape shapes
+  visibly differ, and there are no console errors (with the shared `GG_LOCAL_BABYLON`
+  route hook for offline sandboxes). Registered as the `worn-cloaks-desktop` project in
+  `playwright.config.js`.
+
+### Changed
+
+- **`refreshWornGear` reveals the equipped cloak archetype** under the single back pivot
+  and paints it by rarity/set, hiding the other four groups — the pre-built groups are
+  toggled, never reallocated, so equip/unequip churn can't leak. `p.gearShown.cloak` /
+  `p.gearShown.cloakArchetype` are exposed for tests/debugging. `g.cloak` (a single mesh)
+  is replaced by `g.cloaks`, an archetype-keyed record (`{ cape, mantle, scaled, regal,
+  winged }`, each `{ node, mats, meshes }`), matching the boots/gloves structure;
+  `_animateCloak` now takes `dt` and delegates to the pure `cloakBillowStep`. No
+  `SAVE_VERSION` change (cloaks are transient visuals).
+
 ## [2026-07-01] — Task 30 — Worn boots: a distinct real pair of boots per item
 
 Sixth of the **worn-equipment appearance overhaul** (Tasks 25–35): the feet. Each

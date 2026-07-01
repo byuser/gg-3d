@@ -1,7 +1,13 @@
 # Task 31 — Worn cloaks
 
 > Part of the [Good Game 3D backlog](../TODO.md). Shared rules + Definition of Done live there.
-- **Status:** `[ ]`
+- **Status:** `[x]` 2026-07-01 — Shipped: five distinct per-item cloak archetypes
+  (cape / mantle / scaled / regal / winged) via the pure `cloakArchetype(def)` selector,
+  built once under a shared back pivot as tapered segmented cloth drapes; the billow is
+  now a pure, dt-driven, frame-rate-independent `cloakBillowStep` clamped so the drape
+  only ever trails BEHIND — it reacts to movement/turns without scything through the
+  legs/feet. Vitest 420 → 430; new `test/e2e/worn-cloaks.spec.js` screenshot. No
+  `SAVE_VERSION` change (visual only).
 - **Depends on:** Task 12 (the `cloak` slot), Task 3, Task 4, Task 5 (`_animateCloak`).
   Shared bar above.
 - **Goal.** The cloak is a **flat box on a pivot** (`_buildWornGear` ~1234-1242) that
