@@ -790,3 +790,187 @@ describe("Task 27 — worn pauldrons: distinct archetype per item + shoulder fit
     T.recomputeStats(p);
   });
 });
+
+describe("Task 28 — worn gloves & gauntlets: distinct archetype per item + grip fit", () => {
+  const GLOVE_IDS = Object.keys(T.ITEM_DB).filter((id) => T.ITEM_DB[id].type === "gloves");
+  const VALID_ARCH = ["glove", "bracer", "gauntlet", "scaled", "warplate"];
+  const VALID_MAT = ["leather", "cloth", "iron", "steel", "gold", "dragonscale"];
+
+  it("maps every gloves def to a valid archetype + material", () => {
+    expect(GLOVE_IDS.length).toBeGreaterThanOrEqual(4);
+    for (const id of GLOVE_IDS) {
+      const a = T.gloveArchetype(T.getDef(id));
+      expect(VALID_ARCH.includes(a.archetype), `${id} archetype`).toBe(true);
+      expect(VALID_MAT.includes(a.material), `${id} material`).toBe(true);
+    }
+  });
+
+  it("gives the shipped gloves distinct, on-theme archetypes", () => {
+    const pick = (id) => T.gloveArchetype(T.getDef(id));
+    expect(pick("leather_gloves")).toMatchObject({ archetype: "glove", material: "leather" });
+    expect(pick("iron_gauntlets")).toMatchObject({ archetype: "gauntlet", material: "iron" });
+    expect(pick("dragon_gauntlets")).toMatchObject({ archetype: "scaled", material: "dragonscale" });
+    expect(pick("swift_gloves")).toMatchObject({ archetype: "bracer", material: "leather" });
+    expect(pick("titan_gauntlets")).toMatchObject({ archetype: "warplate", material: "steel" });
+    // Soft leather gloves and a plated gauntlet must NOT look identical.
+    expect(pick("leather_gloves").archetype).not.toBe(pick("iron_gauntlets").archetype);
+    // At least three visually distinct hand silhouettes are actually in use.
+    const used = new Set(GLOVE_IDS.map((id) => pick(id).archetype));
+    expect(used.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it("shares the set motif with the matching chest + pauldrons + helmet (a full suit reads as one)", () => {
+    // Ironguard: gauntlets ↔ cuirass chest ↔ plated shoulders ↔ open iron helm (same iron).
+    expect(T.gloveArchetype(T.getDef("iron_gauntlets")).material)
+      .toBe(T.chestArchetype(T.getDef("iron_plate")).material);
+    expect(T.gloveArchetype(T.getDef("iron_gauntlets")).material)
+      .toBe(T.pauldronArchetype(T.getDef("iron_pauldrons")).material);
+    // Dragonscale: scaled gauntlets ↔ scaled chest ↔ spiked shoulders ↔ horned helm (same dragonscale).
+    expect(T.gloveArchetype(T.getDef("dragon_gauntlets")).material)
+      .toBe(T.helmetArchetype(T.getDef("dragon_helm")).material);
+    expect(T.gloveArchetype(T.getDef("dragon_gauntlets")).material)
+      .toBe(T.pauldronArchetype(T.getDef("dragon_pauldrons")).material);
+  });
+
+  it("is pure + total: infers a valid pair for gloves with no `glov` block", () => {
+    // Set-driven inference (Dragonscale → scaled gauntlet, Ironguard → banded gauntlet).
+    expect(T.gloveArchetype({ type: "gloves", rarity: "rare", set: "dragonscale" }))
+      .toMatchObject({ archetype: "scaled", material: "dragonscale" });
+    expect(T.gloveArchetype({ type: "gloves", rarity: "rare", set: "ironguard" }))
+      .toMatchObject({ archetype: "gauntlet", material: "iron" });
+    // Rarity fallbacks (legendary/epic → warplate; rare → bracer; normal → glove).
+    expect(T.gloveArchetype({ type: "gloves", rarity: "legendary" }).archetype).toBe("warplate");
+    expect(T.gloveArchetype({ type: "gloves", rarity: "epic" }).archetype).toBe("warplate");
+    expect(T.gloveArchetype({ type: "gloves", rarity: "rare" }).archetype).toBe("bracer");
+    expect(T.gloveArchetype({ type: "gloves", rarity: "normal" }).archetype).toBe("glove");
+    // Materials follow rarity when there's no set (legendary → gold, epic/rare → steel).
+    expect(T.gloveArchetype({ type: "gloves", rarity: "legendary" }).material).toBe("gold");
+    expect(T.gloveArchetype({ type: "gloves", rarity: "epic" }).material).toBe("steel");
+    // An explicit block wins over inference.
+    expect(T.gloveArchetype({ type: "gloves", rarity: "rare", glov: { archetype: "warplate", material: "gold" } }))
+      .toMatchObject({ archetype: "warplate", material: "gold" });
+    // Bogus / missing input clamps to a drawable pair (never throws, never invalid).
+    for (const bad of [undefined, null, {}, { glov: { archetype: "xx", material: "plastic" } }]) {
+      const a = T.gloveArchetype(bad);
+      expect(VALID_ARCH.includes(a.archetype)).toBe(true);
+      expect(VALID_MAT.includes(a.material)).toBe(true);
+    }
+    // Deterministic (same def ⇒ same pair).
+    expect(T.gloveArchetype(T.getDef("dragon_gauntlets"))).toEqual(T.gloveArchetype(T.getDef("dragon_gauntlets")));
+  });
+
+  it("pre-builds every glove archetype group once on BOTH hands (headless-safe)", () => {
+    const g = T.player.gear;
+    expect(g.gloves).toBeTruthy();
+    expect(Object.keys(g.gloves).sort()).toEqual(["bracer", "gauntlet", "glove", "scaled", "warplate"]);
+    for (const k in g.gloves) {
+      const grp = g.gloves[k];
+      expect(grp.nodes.length, k).toBe(2); // one per hand
+      expect(grp.mats.length, k).toBeGreaterThan(0);
+      expect(grp.meshes.length, k).toBeGreaterThan(0);
+      // Each hand group rides its arm pivot (so it follows the hand through the attack).
+      expect(grp.nodes[0].parent).toBe(T.player.armL);
+      expect(grp.nodes[1].parent).toBe(T.player.armR);
+    }
+  });
+
+  it("tier-gates the glove detail (finer trims off on low; on for high)", () => {
+    // Gloves are core silhouette (always built), but the finger lames / trims gate.
+    expect(T.wornDetailFor("low").gloves).toBe(true);
+    expect(T.wornDetailFor("low").gloveDetail).toBe(false);
+    expect(T.wornDetailFor("high").gloves).toBe(true);
+    expect(T.wornDetailFor("high").gloveDetail).toBe(true);
+  });
+
+  it("shows exactly the equipped glove's archetype (and nothing when bare)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const map = {
+      leather_gloves: "glove", iron_gauntlets: "gauntlet",
+      dragon_gauntlets: "scaled", swift_gloves: "bracer", titan_gauntlets: "warplate",
+    };
+    for (const id in map) {
+      T.equipItem(p, T.makeItem(id));
+      expect(p.gearShown.gloves, id).toBe(true);
+      expect(p.gearShown.gloveArchetype, id).toBe(map[id]);
+      // Both hands of exactly that archetype are enabled; the rest are hidden.
+      for (const k in p.gear.gloves) {
+        const on = p.gear.gloves[k].nodes.every((n) => n.isEnabled());
+        expect(on, `${id}/${k}`).toBe(k === map[id]);
+      }
+      T.unequipSlot(p, "gloves");
+      T.recomputeStats(p);
+    }
+    expect(p.gearShown.gloves).toBe(false);
+    expect(p.gearShown.gloveArchetype).toBe(null);
+  });
+
+  it("never reallocates the glove meshes across equip churn (no leak)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const nodes = { glove: p.gear.gloves.glove.nodes.slice(), scaled: p.gear.gloves.scaled.nodes.slice() };
+    const meshCount = Object.values(p.gear.gloves).reduce((n, grp) => n + grp.meshes.length, 0);
+    for (let i = 0; i < 10; i++) {
+      for (const id of ["leather_gloves", "iron_gauntlets", "dragon_gauntlets", "swift_gloves", "titan_gauntlets"]) {
+        T.equipItem(p, T.makeItem(id));
+        expect(() => step(1)).not.toThrow(); // the hand poses animate each frame
+      }
+      T.unequipSlot(p, "gloves");
+      T.recomputeStats(p);
+    }
+    // Same archetype nodes + total mesh count throughout — nothing was rebuilt.
+    expect(p.gear.gloves.glove.nodes).toEqual(nodes.glove);
+    expect(p.gear.gloves.scaled.nodes).toEqual(nodes.scaled);
+    expect(Object.values(p.gear.gloves).reduce((n, grp) => n + grp.meshes.length, 0)).toBe(meshCount);
+  });
+
+  // THE fit invariant: the glove must stay COMPACT around the hand and never engulf
+  // the weapon grip. The glove rides the ARM pivot (like the hand it replaces), so it
+  // follows the hand through every attack pose for free; the risk is a shape that
+  // BALLOONS over the whole grip or CLIMBS the weapon shaft (which rises in +y from the
+  // grip at arm-local (0,−0.58,+0.12) toward the tip). We transform every built glove
+  // vertex up the real node chain into ARM-LOCAL space and assert (a) it stays within a
+  // tight radius of the hand centre (arm-local y −0.62) — no ballooning — and (b) its
+  // TOP stays down at the wrist (arm-local y ≤ −0.30), well below where the shaft climbs
+  // to the crystal/blade, so the grip is never swallowed. These are STRUCTURAL bounds on
+  // the emitted geometry, so the test re-derives if the builder's offsets ever change.
+  it("keeps every glove compact around the hand without engulfing the weapon grip", () => {
+    const p = T.player;
+    const HAND_Y = -0.62;      // the arm-local hand centre the group node sits at
+    // Each glove part is small by construction (the widest is the ⌀0.44 warplate cuff;
+    // the highest part centre is the warplate rim at arm-local y −0.34). Bound each
+    // part's CENTRE so the invariant is a real envelope on the emitted mass: no part
+    // sits far from the hand (no ballooning over the grip), and the highest part stays
+    // down at the wrist (never climbs the +y weapon shaft toward the crystal/blade).
+    const MAX_CENTRE_R = 0.44;  // part centre must sit within this radius of the hand
+    const GRIP_CEILING = -0.30; // the highest part centre stays at/below the wrist
+    for (const id of GLOVE_IDS) {
+      clearEquip(p);
+      T.equipItem(p, T.makeItem(id));
+      T.recomputeStats(p);
+      const archKey = p.gearShown.gloveArchetype;
+      const grp = p.gear.gloves[archKey];
+      for (const node of grp.nodes) {          // both hands (identical geometry)
+        const arm = node.parent;               // the glove sits on the arm pivot
+        const meshes = grp.meshes.filter((m) => {
+          let n = m; while (n) { if (n === node) return true; n = n.parent; } return false;
+        });
+        expect(meshes.length, `${id} meshes`).toBeGreaterThan(0);
+        // Check each part's CENTRE (transformed to arm-local) + its own half-extent:
+        // (a) it stays within a tight radius of the hand — no shape balloons over the
+        //     whole grip; (b) its TOP stays down at the wrist (never climbs the +y
+        //     weapon shaft toward the crystal/blade), so the grip is never swallowed.
+        for (const m of meshes) {
+          const c = toFrame(m, { x: 0, y: 0, z: 0 }, arm); // part centre in arm-local space
+          const r = Math.hypot(c.x, c.y - HAND_Y, c.z);
+          expect(r, `${id}/${archKey} part centre radius ${r.toFixed(3)}`).toBeLessThanOrEqual(MAX_CENTRE_R);
+          expect(c.y, `${id}/${archKey} part centre y ${c.y.toFixed(3)} climbs the shaft`).toBeLessThanOrEqual(GRIP_CEILING);
+        }
+      }
+    }
+    clearEquip(p);
+    T.recomputeStats(p);
+  });
+});

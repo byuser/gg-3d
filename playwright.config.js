@@ -273,6 +273,15 @@ export default defineConfig({
       testMatch: /worn-pauldrons\.spec\.js/,
       use: { ...devices["Desktop Chrome"] },
     },
+    // Worn gloves & gauntlets (Task 28): boot the built site, equip several gloves and
+    // screenshot Lily's right hand + the wand grip it holds, asserting each maps to its
+    // archetype, the shapes visibly differ, and the glove wraps the grip (rather than
+    // swallowing it). Needs a real WebGL canvas, so it runs at desktop.
+    {
+      name: "worn-gloves-desktop",
+      testMatch: /worn-gloves\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",
