@@ -1,0 +1,412 @@
+[
+  {
+    "n": 2,
+    "slug": "story-missions",
+    "file": "todo/task-2-story-missions.md",
+    "title": "Main story line with missions + side quests",
+    "short": "Main story line with missions + side quests",
+    "status": "`[x]` 2026-06-21",
+    "depends": "none (builds on the existing `Quests` system)",
+    "group": null
+  },
+  {
+    "n": 3,
+    "slug": "hifi-models",
+    "file": "todo/task-3-hifi-models.md",
+    "title": "Higher‑fidelity models (character, monsters, trees, stones, environment)",
+    "short": "Higher‑fidelity models",
+    "status": "`[x]` 2026-06-21",
+    "depends": "best done **after Task 4** (lighting) so materials read well",
+    "group": null
+  },
+  {
+    "n": 4,
+    "slug": "shadows-lighting",
+    "file": "todo/task-4-shadows-lighting.md",
+    "title": "More + more‑realistic shadows & lighting",
+    "short": "More + more‑realistic shadows & lighting",
+    "status": "`[x]` 2026-06-21",
+    "depends": "none (do **before** Task 3 ideally)",
+    "group": null
+  },
+  {
+    "n": 5,
+    "slug": "animation",
+    "file": "todo/task-5-animation.md",
+    "title": "More + higher‑quality animation (actions + environment)",
+    "short": "More + higher‑quality animation",
+    "status": "`[x]` 2026-06-22",
+    "depends": "lighter if done **after Task 3** (animates the better models)",
+    "group": null
+  },
+  {
+    "n": 6,
+    "slug": "sound-ambience",
+    "file": "todo/task-6-sound-ambience.md",
+    "title": "More sound effects + per‑location background ambience",
+    "short": "More sound effects + per‑location background ambience",
+    "status": "`[x]` 2026-06-22",
+    "depends": "none (slots onto zones + the existing `Sfx`/`Music`)",
+    "group": null
+  },
+  {
+    "n": 7,
+    "slug": "russian-i18n",
+    "file": "todo/task-7-russian-i18n.md",
+    "title": "Russian language support (selectable at start + in pause settings)",
+    "short": "Russian language support",
+    "status": "`[x]` 2026-06-21",
+    "depends": "none. **Recommended FIRST** so later tasks add bilingual strings as they go (see Golden Rule 9)",
+    "group": null
+  },
+  {
+    "n": 8,
+    "slug": "changelog-split",
+    "file": "todo/task-8-changelog-split.md",
+    "title": "Extract the changelog into its own `CHANGELOG.md`",
+    "short": "Extract the changelog into its own `CHANGELOG.md`",
+    "status": "`[x]` 2026-06-22",
+    "depends": "none. **Do this first** — it is cheap, unblocks every later run (no more 100‑line diffs to `TODO.md` just to log a release), and large projects with good reviews universally keep history out of the planning doc",
+    "group": null
+  },
+  {
+    "n": 9,
+    "slug": "modularize-toolchain",
+    "file": "todo/task-9-modularize-toolchain.md",
+    "title": "Modularize the codebase + a production build/test/CI toolchain for agentic edits",
+    "short": "Modularize the codebase + a production build/test/CI toolchain for agentic edits",
+    "status": "`[x]` 2026-06-22",
+    "depends": "none, but it is **foundational** — doing it early makes every later task smaller, more targeted, and safer to edit/build/test autonomously",
+    "group": null
+  },
+  {
+    "n": 10,
+    "slug": "bug-fixes",
+    "file": "todo/task-10-bug-fixes.md",
+    "title": "Fix logical, code & UI bugs (pathing, resource caps, pickup, collision, projectiles, swing) + a deeper test net",
+    "short": "Fix logical, code & UI bugs",
+    "status": "`[x]` 2026-06-22",
+    "depends": "none. Lighter to land **after Task 9** (smaller modules = surgical fixes), but must not wait on it",
+    "group": null
+  },
+  {
+    "n": 11,
+    "slug": "art-direction",
+    "file": "todo/task-11-art-direction.md",
+    "title": "Brighter, more cheerful art direction + a larger visible play area",
+    "short": "Brighter, more cheerful art direction + a larger visible play area",
+    "status": "`[x]` 2026-06-22",
+    "depends": "plays best **with/after Task 4** (lighting) since exposure/tone mapping interact; coordinate the two",
+    "group": null
+  },
+  {
+    "n": 12,
+    "slug": "item-equipment",
+    "file": "todo/task-12-item-equipment.md",
+    "title": "Deep item & equipment system (Skyrim‑grade) with visible worn gear + a real inventory",
+    "short": "Deep item & equipment system",
+    "status": "`[x]` 2026-06-23",
+    "depends": "none; pairs naturally with **Task 14** (skills/levels share the stat‑recompute pipeline) — keep the data layer compatible",
+    "group": null
+  },
+  {
+    "n": 13,
+    "slug": "minimap-worldmap",
+    "file": "todo/task-13-minimap-worldmap.md",
+    "title": "Minimap + full‑screen world map with locations, NPCs, search & a guided waypoint",
+    "short": "Minimap + full‑screen world map with locations, NPCs, search & a guided waypoint",
+    "status": "`[x]` 2026-06-23",
+    "depends": "none (reads `ZONES`/`LOCATIONS`/`NPC_DATA`); complements the story tracker from Task 2",
+    "group": null
+  },
+  {
+    "n": 14,
+    "slug": "skills-leveling",
+    "file": "todo/task-14-skills-leveling.md",
+    "title": "Skill & leveling system (Skyrim‑grade) with 3‑skill fusion, a quick‑access bar & boss‑only skills",
+    "short": "Skill & leveling system",
+    "status": "`[x]` 2026-06-23",
+    "depends": "pairs with **Task 12** (shared stat pipeline); benefits from the Task 13 HUD for the toolbar. Keep save schema coordinated with Task 12",
+    "group": null
+  },
+  {
+    "n": 15,
+    "slug": "cloud-saves",
+    "file": "todo/task-15-cloud-saves.md",
+    "title": "Cloud saves to Google Drive (manual + 5‑min autosave via `appDataFolder`, rolling 1‑hour history)",
+    "short": "Cloud saves to Google Drive",
+    "status": "`[x]` 2026-06-23",
+    "depends": "the existing `serializeGame`/`applySave` + `SAVE_VERSION`; do it **after** any task that changes the save schema (so the cloud format is stable)",
+    "group": null
+  },
+  {
+    "n": 16,
+    "slug": "responsive-hud",
+    "file": "todo/task-16-responsive-hud.md",
+    "title": "Responsive, mobile‑first HUD & menu overhaul (auto‑fit at any resolution; one‑thumb combat; drag‑and‑drop skill slots)",
+    "short": "Responsive, mobile‑first HUD & menu overhaul",
+    "status": "`[x]` 2026-06-25",
+    "depends": "none directly, but it **touches** the minimap/map button (Task 13), the skill quick‑bar + `SkillsUI` (Task 14), the audio mixer (Task 6) and the cloud‑saves controls (Task 15). Pairs naturally with **Task 20** (map) — both rework HUD chrome — and **Task 18** (save management UI lives in the same menus). Best done **before** Task 20 so the map button removal and minimap‑tap entry point are settled first",
+    "group": null
+  },
+  {
+    "n": 17,
+    "slug": "session-persistence",
+    "file": "todo/task-17-session-persistence.md",
+    "title": "Durable session persistence (progress + Google sign‑in survive reload and desktop⇄mobile mode switches)",
+    "short": "Durable session persistence",
+    "status": "`[x]` 2026-06-25",
+    "depends": "the existing `serializeGame`/`applySave` + `localStorage` prefs (Tasks 9/15). Coordinate with **Task 18** (save management) and **Task 15** (cloud auth) — they share the persistence layer. Do this **before/with** Task 18",
+    "group": null
+  },
+  {
+    "n": 18,
+    "slug": "save-slots",
+    "file": "todo/task-18-save-slots.md",
+    "title": "Cloud‑saves browser fix + multiple manual save slots with full management (rename / delete / load)",
+    "short": "Cloud‑saves browser fix + multiple manual save slots with full management",
+    "status": "`[x]` 2026-06-25",
+    "depends": "the save layer (Tasks 9/15) and **Task 17** (durable session) — build this **after/with** Task 17 so slots and the auto‑session share one store. Coordinate `SAVE_VERSION` with any task that changes the schema",
+    "group": null
+  },
+  {
+    "n": 19,
+    "slug": "score-to-xp",
+    "file": "todo/task-19-score-to-xp.md",
+    "title": "Replace the score system with the experience (XP) system",
+    "short": "Replace the score system with the experience",
+    "status": "`[x]` 2026-06-25",
+    "depends": "the **XP/leveling** layer (Task 14, `src/data/skills.js`: `xpToNext`/`gainXp`/`player.progress`). None else",
+    "group": null
+  },
+  {
+    "n": 20,
+    "slug": "map-fixes",
+    "file": "todo/task-20-map-fixes.md",
+    "title": "Map subsystem fixes (fit‑to‑screen full map, un‑mirror the minimap, arrow‑shaped target pointer, fully readable labels)",
+    "short": "Map subsystem fixes",
+    "status": "`[x]` 2026-06-25",
+    "depends": "the map layer (Task 13: `WorldMap`/`WorldMapUI`, `drawZoneScene`, `mmPlayer`, `resolveWaypoint`, the compass). Pairs with **Task 16** (HUD chrome — the map button is removed there and the map opens from the minimap tap)",
+    "group": null
+  },
+  {
+    "n": 21,
+    "slug": "unified-inventory",
+    "file": "todo/task-21-unified-inventory.md",
+    "title": "Unified inventory for potions & ingredients (30 slots, drag‑and‑drop potion slotting, sellable items, dedicated alchemist NPC)",
+    "short": "Unified inventory for potions & ingredients",
+    "status": "`[x]` 2026-06-25",
+    "depends": "the item/inventory system (Task 12: `Inventory`/`invAdd`/`invCap`/ the tabbed bag), the potion belt + materials (`POTION_SLOTS`, `player.potions`, `player.materials`), the Shop (Task 12/`POTION_STOCK`), and the drag utility from **Task 16**. Coordinate `SAVE_VERSION` with Tasks 18/19",
+    "group": null
+  },
+  {
+    "n": 22,
+    "slug": "environment-rewrite",
+    "file": "todo/task-22-environment-rewrite.md",
+    "title": "Environment rewrite: stable resource generation + natural road‑edge teleporters",
+    "short": "Environment rewrite: stable resource generation + natural road‑edge teleporters",
+    "status": "`[x]` 2026-06-25",
+    "depends": "the world/zone systems (`buildWorld`, `setupZoneContent`, `ZoneManager`, `ResourceNode`, `populateAdventure`/`populateWildResources`, `CONFIG.maxResourceNodes`, the portal layout + hub `roadLanes`). None else",
+    "group": null
+  },
+  {
+    "n": 23,
+    "slug": "persist-drive-signin",
+    "file": "todo/task-23-persist-drive-signin.md",
+    "title": "Persist Google Drive sign-in across reloads (true silent re-auth; no unprompted dialog)",
+    "short": "Persist Google Drive sign-in across reloads",
+    "status": "`[x]` 2026-06-30",
+    "depends": "Task 15 (Google Drive cloud saves — `CloudSave`/`CloudUI`/ `makeGoogleDriveClient`) and Task 17 (durable session — the `Session` cookie/hint store, `silentAuthDecision`, `signInSilent`). None else",
+    "group": null
+  },
+  {
+    "n": 24,
+    "slug": "russian-morphology",
+    "file": "todo/task-24-russian-morphology.md",
+    "title": "Russian grammatical morphology (Android-style declensions, gender & plural agreement)",
+    "short": "Russian grammatical morphology",
+    "status": "`[x]` 2026-07-01",
+    "depends": "Task 7 (the i18n layer — `LOCALES` / `t()` / `interp()` / `plural()` in `src/core/i18n.js`, the `RU` data-table dictionary + resolvers). None else",
+    "group": null
+  },
+  {
+    "n": 25,
+    "slug": "worn-helmets",
+    "file": "todo/task-25-worn-helmets.md",
+    "title": "Worn helmets: a distinct, real-looking helm per item (not one rarity-tinted dome)",
+    "short": "Worn helmets: a distinct, real-looking helm per item",
+    "status": "`[x]` 2026-07-01",
+    "depends": "Task 12 (the worn-gear system + the `helmet` slot), Task 3 (models/materials), Task 4 (lighting). Honours the shared bar above (Tasks 25–35)",
+    "group": null
+  },
+  {
+    "n": 26,
+    "slug": "worn-chest",
+    "file": "todo/task-26-worn-chest.md",
+    "title": "Worn chest pieces: layered breastplates & robes per item",
+    "short": "Worn chest pieces: layered breastplates & robes per item",
+    "status": "`[x]` 2026-07-01",
+    "depends": "Task 12 (the `breastplate` slot), Task 3, Task 4. Shared bar above",
+    "group": null
+  },
+  {
+    "n": 27,
+    "slug": "worn-pauldrons",
+    "file": "todo/task-27-worn-pauldrons.md",
+    "title": "Worn pauldrons: shoulder armour that sits on the shoulder (not in the chest)",
+    "short": "Worn pauldrons: shoulder armour that sits on the shoulder",
+    "status": "`[x]` 2026-07-01",
+    "depends": "Task 12 (the `pauldrons` slot), Task 3, Task 4. Shared bar above",
+    "group": null
+  },
+  {
+    "n": 28,
+    "slug": "worn-gloves",
+    "file": "todo/task-28-worn-gloves.md",
+    "title": "Worn gloves & gauntlets",
+    "short": "Worn gloves & gauntlets",
+    "status": "`[x]` 2026-07-01",
+    "depends": "Task 12 (the `gloves` slot), Task 3, Task 4. Shared bar above",
+    "group": null
+  },
+  {
+    "n": 29,
+    "slug": "worn-belts",
+    "file": "todo/task-29-worn-belts.md",
+    "title": "Worn belts",
+    "short": "Worn belts",
+    "status": "`[x]` 2026-07-01",
+    "depends": "Task 12 (the `belt` slot), Task 3, Task 4. Shared bar above",
+    "group": null
+  },
+  {
+    "n": 30,
+    "slug": "worn-boots",
+    "file": "todo/task-30-worn-boots.md",
+    "title": "Worn boots",
+    "short": "Worn boots",
+    "status": "`[ ]`",
+    "depends": "Task 12 (the `boots` slot), Task 3, Task 4. Shared bar above",
+    "group": null
+  },
+  {
+    "n": 31,
+    "slug": "worn-cloaks",
+    "file": "todo/task-31-worn-cloaks.md",
+    "title": "Worn cloaks",
+    "short": "Worn cloaks",
+    "status": "`[ ]`",
+    "depends": "Task 12 (the `cloak` slot), Task 3, Task 4, Task 5 (`_animateCloak`). Shared bar above",
+    "group": null
+  },
+  {
+    "n": 32,
+    "slug": "held-weapons",
+    "file": "todo/task-32-held-weapons.md",
+    "title": "Held weapons: real wand / bow / staff / sword / axe / dagger in hand",
+    "short": "Held weapons: real wand / bow / staff / sword / axe / dagger in hand",
+    "status": "`[ ]`",
+    "depends": "Task 12 (weapon items + the two hand slots), Task 3, Task 4, and Task 34 (the attacks the weapon moves with — pair them). Shared bar above",
+    "group": null
+  },
+  {
+    "n": 33,
+    "slug": "visible-jewelry",
+    "file": "todo/task-33-visible-jewelry.md",
+    "title": "Visible jewelry: necklace + rings on the character (additive)",
+    "short": "Visible jewelry: necklace + rings on the character",
+    "status": "`[ ]`",
+    "depends": "Task 12 (the `necklace` + `ring1`/`ring2` slots), Task 3, Task 4. Shared bar above. **Net-new scope** (jewelry currently renders no worn mesh)",
+    "group": null
+  },
+  {
+    "n": 34,
+    "slug": "attack-animations",
+    "file": "todo/task-34-attack-animations.md",
+    "title": "Rewrite weapon firing & melee attack animations from scratch (MMORPG-grade)",
+    "short": "Rewrite weapon firing & melee attack animations from scratch",
+    "status": "`[ ]`",
+    "depends": "Task 5 (the `Swing` state machine) and Task 10 (the impact-frame fix) — this **replaces** them; Task 32 (the weapon meshes it animates); the `Projectile` / `Hazard` combat system. Pairs with Task 32 (build them together)",
+    "group": null
+  },
+  {
+    "n": 35,
+    "slug": "loadout-fit",
+    "file": "todo/task-35-loadout-fit.md",
+    "title": "Full-loadout fit & clipping integration (no stray textures across all gear + the new attacks)",
+    "short": "Full-loadout fit & clipping integration",
+    "status": "`[ ]`",
+    "depends": "the worn-category tasks (25–33) **and** the combat-animation rewrite (Task 34) — this is the **final integration pass** that runs after them. Builds on the named **fit table** each category task introduces",
+    "group": null
+  },
+  {
+    "n": 36,
+    "slug": "control-layout",
+    "file": "todo/task-36-control-layout.md",
+    "title": "Customizable on-screen control layout (drag any control anywhere; saved + restored)",
+    "short": "Customizable on-screen control layout",
+    "status": "`[x]` 2026-06-30",
+    "depends": "Task 16 (the responsive HUD + the reusable Pointer-Events drag controller / `dragSlotReducer`, `src/game.js` ~5503-5710) and **Task 39** (the HUD region/layer system — do this **after** Task 39 so custom positions build on non-overlapping defaults). Coordinate `SAVE_VERSION` with any task that changes the schema",
+    "group": null
+  },
+  {
+    "n": 37,
+    "slug": "fullscreen-setting",
+    "file": "todo/task-37-fullscreen-setting.md",
+    "title": "Exit/enter fullscreen control in the settings menu",
+    "short": "Exit/enter fullscreen control in the settings menu",
+    "status": "`[x]` 2026-06-30",
+    "depends": "Task 16 (the `Fullscreen` module — `toggle` / `active` / `supported` / `lockLandscape` / `unlockOrientation`, `src/game.js` ~10622-10686; the `#fsBtn` HUD button). None else",
+    "group": null
+  },
+  {
+    "n": 38,
+    "slug": "npc-home-zones",
+    "file": "todo/task-38-npc-home-zones.md",
+    "title": "Fix: NPCs are only talkable in the hub — spawn quest-givers in their home zones",
+    "short": "Fix: NPCs are only talkable in the hub",
+    "status": "`[x]` 2026-06-30",
+    "depends": "the world/zone + quest systems (`setupZoneContent` / `populateAdventure`, `QuestGiver` / `Dialogue`, `NPC_DATA` / `LOCATIONS`, `ZoneManager`). None else",
+    "group": null
+  },
+  {
+    "n": 39,
+    "slug": "collision-free-hud",
+    "file": "todo/task-39-collision-free-hud.md",
+    "title": "Collision-free HUD: a real region/layer system so no widget or button overlaps",
+    "short": "Collision-free HUD: a real region/layer system so no widget or button overlaps",
+    "status": "`[x]` 2026-06-30",
+    "depends": "Task 16 (the HUD markup + z-index tiers + the touch action arc). Pairs with **Task 36** (do this **before** the free-form control editor so custom positions start from clean regions). None else",
+    "group": null
+  },
+  {
+    "n": 40,
+    "slug": "travelling-vendors",
+    "file": "todo/task-40-travelling-vendors.md",
+    "title": "Travelling vendors in every land: merchant, blacksmith & apothecary reachable outside the hub",
+    "short": "Travelling vendors in every land: merchant, blacksmith & apothecary reachable outside the hub",
+    "status": "`[ ]`",
+    "depends": "Task 38 (the zone-aware NPC spawn this generalizes — `spawnZoneNpcs` / `questGiversForZone` / `landmarkZone`, the `zone` field on `LOCATIONS`, `src/game.js` ~4798-4865), Task 12 (the `Shop` / gear economy and the `Merchant` / `Blacksmith`), Task 21 (the `Alchemist` apothecary vendor + sellable consumables), Task 22 (the road-edge zone entrances the camp is placed beside), and Tasks 13/20 (the minimap + world-map markers and the guided waypoint). All shipped",
+    "group": null
+  },
+  {
+    "n": 41,
+    "slug": "drive-primary-saves",
+    "file": "todo/task-41-drive-primary-saves.md",
+    "title": "Retire file saves; make Google Drive the primary, user-friendly save path",
+    "short": "Retire file saves; make Google Drive the primary, user-friendly save path",
+    "status": "`[ ]`",
+    "depends": "Task 15 (Google Drive cloud saves — `CloudSave` / `CloudUI` / `makeGoogleDriveClient`), Task 17 (the durable auto-resume session + the `SaveSlots` base) and Task 18 (the `SaveSlots` / `SavesUI` *Manage Saves* screen, where file export/import currently lives). **Pairs with / best done with or after Task 23** (persist Google sign-in across reloads — the silent re-auth that makes \"stay signed in\" actually work). Coordinate `SAVE_VERSION` with any schema-changing task (e.g. Task 36)",
+    "group": null
+  },
+  {
+    "n": 42,
+    "slug": "fast-e2e",
+    "file": "todo/task-42-fast-e2e.md",
+    "title": "Make the Playwright E2E suite fast & robust (de‑flake slow specs, deterministic waits, reuse the build, rebalance sharding)",
+    "short": "Make the Playwright E2E suite fast & robust",
+    "status": "`[ ]`",
+    "depends": "Task 9 (the Vite build + the Vitest/Playwright pipeline + the staged `.github/workflows/ci.yml`) and Task 16 (the **Galaxy S24 Ultra** device profiles the specs run under). Independent of the worn‑gear/animation family (Tasks 25–35) and of Tasks 40/41. **Best done early** — it shortens every later run's verify/CI loop",
+    "group": null
+  }
+]
