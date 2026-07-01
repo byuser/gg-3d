@@ -311,8 +311,8 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "obj.lairBoss": "the lair boss",
       "obj.doneMark": " ✓",
       // ---- guidance / story flow ----
-      "guide.turnin": "Return to {giver} to turn in",
-      "guide.accept": "Speak with {giver} at {place}",
+      "guide.turnin": "Return to {icon} {giver} to turn in",
+      "guide.accept": "Speak with {icon} {giver} at {place}",
       "guide.whereSuffix": " · {where}",
       "place.meadowgate": "Meadowgate",
       "quest.kindMission": "Mission",
@@ -412,8 +412,8 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "log.now": "<b>Chapter {n}: {title}</b><br>{text}",
       "log.allDone": "The castle stands and the Ancient Dragon is slain — the vale is saved! 🏰🐉",
       "log.chapterRow": "{icon} Chapter {n}: {title}",
-      "log.returnTo": " — return to {giver}",
-      "log.speakAt": "Speak with {giver} at {place}",
+      "log.returnTo": " — return to {icon} {giver}",
+      "log.speakAt": "Speak with {icon} {giver} at {place}",
       "log.sideNone": "None yet — visit the ❗ folk for optional bounties &amp; errands.",
       "log.sideFrom": "from {icon} {name}{ret} · reward {reward}",
       "log.sideReturn": " · return to turn in",
@@ -750,17 +750,17 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "label.castleComplete": "🏰 Замок достроен",
       // ---- objectives ----
       "obj.hunt": "Победите сладости — {have}/{need}",
-      "obj.gather": "Соберите {icon} {label} — {have}/{need}",
-      "obj.reach": "Дойдите до {name}",
-      "obj.talk": "Поговорите с {icon} {name}",
-      "obj.defeatBoss": "Одолейте 👑 {boss} в {zone}",
-      "obj.build": "Возведите {part} на 🏰 Замковом холме",
+      "obj.gather": "Соберите {icon} {label:acc} — {have}/{need}",
+      "obj.reach": "Дойдите до {name:gen}",
+      "obj.talk": "Поговорите с {icon} {name:ins}",
+      "obj.defeatBoss": "Одолейте 👑 {boss:acc} в {zone:pre}",
+      "obj.build": "Возведите {part:acc} на 🏰 Замковом холме",
       "obj.defeatDragon": "Сразите 🐉 Древнего Дракона",
       "obj.lairBoss": "босса логова",
       "obj.doneMark": " ✓",
       // ---- guidance / story flow ----
-      "guide.turnin": "Вернитесь к {giver}, чтобы сдать",
-      "guide.accept": "Поговорите с {giver} в {place}",
+      "guide.turnin": "Вернитесь к {icon} {giver:dat}, чтобы сдать",
+      "guide.accept": "Поговорите с {icon} {giver:ins} {prep} {place:pre}",
       "guide.whereSuffix": " · {where}",
       "place.meadowgate": "Лугоград",
       "quest.kindMission": "Задание",
@@ -799,11 +799,14 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "toast.beltFull": "Пояс зелий полон (3 вида)",
       "toast.bagFull": "Сумка полна",
       "toast.crafted": "🛠️ Создано: {icon} {name}",
+      // {label} is count-agreed at the call site (2 камня / 5 камней).
       "toast.gathered": "{icon} +{n} {label}",
       "toast.summonMinions": "👹 Тиран призывает прислужников!",
       "toast.incomingBombs": "💣 Летят бомбы!",
       "toast.hydraSplits": "🦠 Гидра делится!",
-      "toast.partRaised": "🏰 {part} возведена!",
+      // {verb} agrees with the part's gender/number via select() at the call
+      // site: возведён / возведена / возведено / возведены.
+      "toast.partRaised": "🏰 {part} {verb}!",
       "toast.castleComplete": "🐉 Замок достроен... ДРАКОН пробуждается!",
       "toast.dragonDives": "🐉 Дракон пикирует!",
       "toast.dragonBreath": "🔥 Дыхание дракона!",
@@ -817,10 +820,11 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "toast.forged": "🔨 {name} выковано!",
       "toast.questAccepted": "📜 {kind}: {title}",
       "toast.questComplete": "✅ {title} — выполнено! {bits}",
-      "toast.reached": "📍 Достигнуто: {name}",
+      "toast.reached": "📍 Достигнуто: {name:gen}",
       "toast.chapterBegin": "📖 Глава {n}: {title}",
       "toast.lairIntro": "⚔️ {intro}",
-      "toast.bossDefeated": "👑 {boss} повержен! Выпало: {item}!",
+      // {verb} agrees with the boss's gender: повержен / повержена.
+      "toast.bossDefeated": "👑 {boss} {verb}! Выпало: {item}!",
       "toast.pickedUp": "✨ Подобрано: {item}!",
       "toast.bagFullDrop": "Сумка полна — что-нибудь выбросьте!",
       "toast.coinPickup": "🪙 +{n}",
@@ -860,8 +864,8 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "log.now": "<b>Глава {n}: {title}</b><br>{text}",
       "log.allDone": "Замок стоит, а Древний Дракон повержен — долина спасена! 🏰🐉",
       "log.chapterRow": "{icon} Глава {n}: {title}",
-      "log.returnTo": " — вернитесь к {giver}",
-      "log.speakAt": "Поговорите с {giver} в {place}",
+      "log.returnTo": " — вернитесь к {icon} {giver:dat}",
+      "log.speakAt": "Поговорите с {icon} {giver:ins} {prep} {place:pre}",
       "log.sideNone": "Пока ничего — навестите ❗ людей ради необязательных наград и поручений.",
       "log.sideFrom": "от {icon} {name}{ret} · награда {reward}",
       "log.sideReturn": " · вернитесь, чтобы сдать",
@@ -930,11 +934,13 @@ import { ZONE_BY_ID } from "../data/zones.js";
       "map.routeVia": "Путь: {path}",
       "map.activeWaypoint": "Цель: {name}",
       "map.kind.zone": "Край", "map.kind.location": "Место", "map.kind.npc": "Персонаж",
-      "map.guideSet": "🧭 Веду вас к: {name}.",
+      "map.guideSet": "🧭 Веду вас к цели: {name}.",
       "map.guideCleared": "Метка снята.",
       "map.arrived": "🏁 Вы на месте: {name}.",
       "map.compassTo": "{name} · {dist}м",
-      "map.compassPortal": "Идите через {kind} в {zone} · {dist}м",
+      // {prep} + {zone:acc} agree at the call site (в Хрустальные пещеры / на
+      // Морозную тропу) — motion "to" governs the accusative.
+      "map.compassPortal": "Идите через {kind} {prep} {zone:acc} · {dist}м",
       "portalKind.path": "тропу", "portalKind.bridge": "мост", "portalKind.cave": "пещеру",
     },
   };
@@ -1127,10 +1133,267 @@ import { ZONE_BY_ID } from "../data/zones.js";
     effect: { nova: "Вспышка", volley: "Залп", buff: "Аура", heal: "Исцеление" },
   };
 
-  // {placeholder} interpolation; missing params are left intact so a bad key is
-  // visible rather than silently blanked.
+  // =========================================================================
+  // RUSSIAN GRAMMATICAL MORPHOLOGY (Task 24) — Android-style declensions,
+  // gender & number agreement. Russian is heavily inflected: a noun dropped
+  // into a sentence must take the case its verb/preposition governs, and the
+  // verbs/adjectives that describe it must agree in gender + number. English
+  // has none of this, so the whole layer collapses to identity for `en` (a
+  // noun-ref there is just its plain English display name, and select/agree
+  // pick the simple one/other forms). Everything here is a PURE function of
+  // (lemma + metadata + case/number/gender) — no DOM, headless-safe.
+  //
+  // Model (per the task hint): a noun is `{ g, animate?, forms }`, where `g`
+  // is gender ("m" | "f" | "n" | "pl" for pluralia-tantum like Стены/Башни)
+  // and `forms` gives the six cases (nom/gen/dat/acc/ins/pre). Multi-word
+  // adjective+noun names (zones, locations, bosses) are irregular, so they
+  // carry EXPLICIT `forms`; simple single nouns (materials, relics) may omit
+  // `forms` and fall back to `declineRegular`. A completeness test (mirroring
+  // the untranslated-key gate) fails the build if an interpolated RU noun
+  // lacks its gender/case metadata.
+  // =========================================================================
+  const CASES = ["nom", "gen", "dat", "acc", "ins", "pre"];
+  const GENDERS = ["m", "f", "n", "pl"];
+
+  // Rule-based decliner for a single REGULAR Russian noun (hard/soft stems).
+  // Used as the fallback when an override form is absent, and directly for the
+  // regular vocabulary (materials, relics). Returns the lemma unchanged for
+  // patterns it doesn't recognise, so it never throws or blanks.
+  function declineRegular(lemma, g, animate, gcase) {
+    if (!lemma || gcase === "nom") return lemma;
+    const low = lemma.toLowerCase();
+    const last = low.slice(-1);
+    const stem = lemma.slice(0, -1);
+    if (g === "m") {
+      // -й / -ь soft-stem masculine (Гамлорд is hard; король/камень are soft-ish).
+      if (last === "й") {
+        const s = stem;
+        switch (gcase) {
+          case "gen": return s + "я";
+          case "dat": return s + "ю";
+          case "acc": return animate ? s + "я" : lemma;
+          case "ins": return s + "ем";
+          case "pre": return s + "е";
+        }
+      }
+      if (last === "ь") {
+        // Soft masculine. Fugitive-vowel nouns in -ень drop the е before the
+        // ending (Камень → Камн-); this regularises the common pattern. Genuine
+        // irregulars still ship explicit forms and never reach here.
+        let s = stem; // stem without the soft sign, e.g. "Камен"
+        if (low.slice(-3) === "ень") s = stem.slice(0, -2) + "н"; // Камен → Камн
+        switch (gcase) {
+          case "gen": return s + "я";
+          case "dat": return s + "ю";
+          case "acc": return animate ? s + "я" : lemma;
+          case "ins": return s + "ем";
+          case "pre": return s + "е";
+        }
+      }
+      // Hard-consonant masculine (Кристалл, Гамлорд…).
+      switch (gcase) {
+        case "gen": return lemma + "а";
+        case "dat": return lemma + "у";
+        case "acc": return animate ? lemma + "а" : lemma;
+        case "ins": return lemma + "ом";
+        case "pre": return lemma + "е";
+      }
+    }
+    if (g === "f") {
+      if (last === "а") {
+        switch (gcase) {
+          case "gen": return stem + "ы";
+          case "dat": return stem + "е";
+          case "acc": return stem + "у";
+          case "ins": return stem + "ой";
+          case "pre": return stem + "е";
+        }
+      }
+      if (last === "я") {
+        switch (gcase) {
+          case "gen": return stem + "и";
+          case "dat": return stem + "е";
+          case "acc": return stem + "ю";
+          case "ins": return stem + "ей";
+          case "pre": return stem + "е";
+        }
+      }
+      if (last === "ь") {
+        switch (gcase) {
+          case "gen": return stem + "и";
+          case "dat": return stem + "и";
+          case "acc": return lemma;
+          case "ins": return stem + "ью";
+          case "pre": return stem + "и";
+        }
+      }
+    }
+    if (g === "n") {
+      if (last === "о") {
+        switch (gcase) {
+          case "gen": return stem + "а";
+          case "dat": return stem + "у";
+          case "acc": return lemma;
+          case "ins": return stem + "ом";
+          case "pre": return stem + "е";
+        }
+      }
+      if (last === "е") {
+        switch (gcase) {
+          case "gen": return stem + "я";
+          case "dat": return stem + "ю";
+          case "acc": return lemma;
+          case "ins": return stem + "ем";
+          case "pre": return stem + "и";
+        }
+      }
+    }
+    return lemma; // pluralia-tantum / unknown pattern: caller supplies forms.
+  }
+
+  // Explicit case forms for the interpolated Russian nouns, grouped by the same
+  // ids the data tables use. Multi-word names are irregular → full `forms`.
+  // A material also carries `count` = { one, few, many } for count agreement in
+  // "+{n} {label}" toasts (2 камня / 5 камней), and `acc` for "Gather {label}".
+  const RU_NOUNS = {
+    zone: {
+      meadow: { g: "f", forms: { nom: "Долина Лугоград", gen: "Долины Лугоград", dat: "Долине Лугоград", acc: "Долину Лугоград", ins: "Долиной Лугоград", pre: "Долине Лугоград" }, loc: "в" },
+      forest: { g: "f", forms: { nom: "Глубь Шепчущего леса", gen: "Глуби Шепчущего леса", dat: "Глуби Шепчущего леса", acc: "Глубь Шепчущего леса", ins: "Глубью Шепчущего леса", pre: "Глуби Шепчущего леса" }, loc: "в" },
+      shore: { g: "n", forms: { nom: "Соляное побережье", gen: "Соляного побережья", dat: "Соляному побережью", acc: "Соляное побережье", ins: "Соляным побережьем", pre: "Соляном побережье" }, loc: "на" },
+      peaks: { g: "f", forms: { nom: "Морозная тропа", gen: "Морозной тропы", dat: "Морозной тропе", acc: "Морозную тропу", ins: "Морозной тропой", pre: "Морозной тропе" }, loc: "на" },
+      caverns: { g: "pl", forms: { nom: "Хрустальные пещеры", gen: "Хрустальных пещер", dat: "Хрустальным пещерам", acc: "Хрустальные пещеры", ins: "Хрустальными пещерами", pre: "Хрустальных пещерах" }, loc: "в" },
+      thicket: { g: "f", forms: { nom: "Колючая чаща", gen: "Колючей чащи", dat: "Колючей чаще", acc: "Колючую чащу", ins: "Колючей чащей", pre: "Колючей чаще" }, loc: "в" },
+    },
+    location: {
+      village: { g: "f", forms: { nom: "Деревня Лугоград", gen: "Деревни Лугоград", dat: "Деревне Лугоград", acc: "Деревню Лугоград", ins: "Деревней Лугоград", pre: "Деревне Лугоград" }, loc: "в" },
+      apothecary: { g: "f", forms: { nom: "Аптека Лугограда", gen: "Аптеки Лугограда", dat: "Аптеке Лугограда", acc: "Аптеку Лугограда", ins: "Аптекой Лугограда", pre: "Аптеке Лугограда" }, loc: "в" },
+      grove: { g: "f", forms: { nom: "Роща Шепчущего леса", gen: "Рощи Шепчущего леса", dat: "Роще Шепчущего леса", acc: "Рощу Шепчущего леса", ins: "Рощей Шепчущего леса", pre: "Роще Шепчущего леса" }, loc: "в" },
+      seaside: { g: "m", forms: { nom: "Соляной берег", gen: "Соляного берега", dat: "Соляному берегу", acc: "Соляной берег", ins: "Соляным берегом", pre: "Соляном берегу" }, loc: "на" },
+      mountain: { g: "m", forms: { nom: "Морозный перевал", gen: "Морозного перевала", dat: "Морозному перевалу", acc: "Морозный перевал", ins: "Морозным перевалом", pre: "Морозном перевале" }, loc: "на" },
+      ruins: { g: "pl", forms: { nom: "Затонувшие руины", gen: "Затонувших руин", dat: "Затонувшим руинам", acc: "Затонувшие руины", ins: "Затонувшими руинами", pre: "Затонувших руинах" }, loc: "в" },
+      castle: { g: "m", forms: { nom: "Замковый холм", gen: "Замкового холма", dat: "Замковому холму", acc: "Замковый холм", ins: "Замковым холмом", pre: "Замковом холме" }, loc: "на" },
+    },
+    castlePart: {
+      foundation: { g: "n", forms: { nom: "Основание", gen: "Основания", dat: "Основанию", acc: "Основание", ins: "Основанием", pre: "Основании" } },
+      walls: { g: "pl", forms: { nom: "Стены", gen: "Стен", dat: "Стенам", acc: "Стены", ins: "Стенами", pre: "Стенах" } },
+      towers: { g: "pl", forms: { nom: "Башни", gen: "Башен", dat: "Башням", acc: "Башни", ins: "Башнями", pre: "Башнях" } },
+      gate: { g: "f", forms: { nom: "Надвратная башня", gen: "Надвратной башни", dat: "Надвратной башне", acc: "Надвратную башню", ins: "Надвратной башней", pre: "Надвратной башне" } },
+      keep: { g: "f", forms: { nom: "Цитадель", gen: "Цитадели", dat: "Цитадели", acc: "Цитадель", ins: "Цитаделью", pre: "Цитадели" } },
+    },
+    material: {
+      wood: { g: "n", lemma: "Дерево", count: { one: "дерево", few: "дерева", many: "дерева" }, forms: { nom: "Дерево", acc: "Дерево", gen: "Дерева" } },
+      stone: { g: "m", lemma: "Камень", count: { one: "камень", few: "камня", many: "камней" }, forms: { nom: "Камень", acc: "Камень", gen: "Камня" } },
+      water: { g: "f", lemma: "Вода", count: { one: "вода", few: "воды", many: "воды" }, forms: { nom: "Вода", acc: "Воду", gen: "Воды" } },
+      herb: { g: "f", lemma: "Трава", count: { one: "трава", few: "травы", many: "трав" }, forms: { nom: "Трава", acc: "Траву", gen: "Травы" } },
+      fiber: { g: "n", lemma: "Волокно", count: { one: "волокно", few: "волокна", many: "волокон" }, forms: { nom: "Волокно", acc: "Волокно", gen: "Волокна" } },
+      crystal: { g: "m", lemma: "Кристалл", count: { one: "кристалл", few: "кристалла", many: "кристаллов" }, forms: { nom: "Кристалл", acc: "Кристалл", gen: "Кристалла" } },
+    },
+    // Bosses are animate: одолеть + animate acc = genitive form; the verb
+    // "повержен" agrees in gender. Names are multi-word → explicit forms.
+    boss: {
+      charger: { g: "m", animate: true, forms: { nom: "Желейный король", gen: "Желейного короля", acc: "Желейного короля", pre: "Желейном короле" } },
+      caster: { g: "m", animate: true, forms: { nom: "Шоколадный властелин", gen: "Шоколадного властелина", acc: "Шоколадного властелина", pre: "Шоколадном властелине" } },
+      summoner: { g: "m", animate: true, forms: { nom: "Леденцовый тиран", gen: "Леденцового тирана", acc: "Леденцового тирана", pre: "Леденцовом тиране" } },
+      stomper: { g: "m", animate: true, forms: { nom: "Кексовый колосс", gen: "Кексового колосса", acc: "Кексового колосса", pre: "Кексовом колоссе" } },
+      bomber: { g: "m", animate: true, forms: { nom: "Военачальник-карамель", gen: "Военачальника-карамель", acc: "Военачальника-карамель", pre: "Военачальнике-карамель" } },
+      splitter: { g: "f", animate: true, forms: { nom: "Желатиновая гидра", gen: "Желатиновой гидры", acc: "Желатиновую гидру", pre: "Желатиновой гидре" } },
+    },
+    lairBoss: {
+      caverns: { g: "m", animate: true, forms: { nom: "Подземельный Гамлорд", gen: "Подземельного Гамлорда", acc: "Подземельного Гамлорда", pre: "Подземельном Гамлорде" } },
+      thicket: { g: "f", animate: true, forms: { nom: "Колючая Гидра", gen: "Колючей Гидры", acc: "Колючую Гидру", pre: "Колючей Гидре" } },
+    },
+    dragon: {
+      ancient: { g: "m", animate: true, forms: { nom: "Древний Дракон", gen: "Древнего Дракона", dat: "Древнему Дракону", acc: "Древнего Дракона", ins: "Древним Драконом", pre: "Древнем Драконе" } },
+    },
+    // NPCs are animate proper names; "talk with {npc}" governs the instrumental
+    // (Поговорите с Мэром Сливой). Only the cases actually used are provided;
+    // the rest fall back to the nominative display name.
+    npc: {
+      mayor: { g: "m", animate: true, forms: { nom: "Мэр Слива", gen: "Мэра Сливы", dat: "Мэру Сливе", acc: "Мэра Сливу", ins: "Мэром Сливой", pre: "Мэре Сливе" } },
+      alchemist: { g: "f", animate: true, forms: { nom: "Аптекарь Мириэль", gen: "Аптекаря Мириэль", dat: "Аптекарю Мириэль", acc: "Аптекаря Мириэль", ins: "Аптекарем Мириэль", pre: "Аптекаре Мириэль" } },
+      herbalist: { g: "f", animate: true, forms: { nom: "Мудрая Ива", gen: "Мудрой Ивы", dat: "Мудрой Иве", acc: "Мудрую Иву", ins: "Мудрой Ивой", pre: "Мудрой Иве" } },
+      fisher: { g: "m", animate: true, forms: { nom: "Старый Брин", gen: "Старого Брина", dat: "Старому Брину", acc: "Старого Брина", ins: "Старым Брином", pre: "Старом Брине" } },
+      smith2: { g: "f", animate: true, forms: { nom: "Праматерь-кузнец Това", gen: "Праматери-кузнеца Товы", dat: "Праматери-кузнецу Тове", acc: "Праматерь-кузнеца Тову", ins: "Праматерью-кузнецом Товой", pre: "Праматери-кузнеце Тове" } },
+      hermit: { g: "m", animate: true, forms: { nom: "Отшельник", gen: "Отшельника", dat: "Отшельнику", acc: "Отшельника", ins: "Отшельником", pre: "Отшельнике" } },
+    },
+    relic: {
+      relic_foundation: { g: "m", forms: { nom: "Камень основания", gen: "Камня основания", dat: "Камню основания", acc: "Камень основания", ins: "Камнем основания", pre: "Камне основания" } },
+      relic_walls: { g: "pl", forms: { nom: "Руны стен", gen: "Рун стен", dat: "Рунам стен", acc: "Руны стен", ins: "Рунами стен", pre: "Рунах стен" } },
+      relic_towers: { g: "m", forms: { nom: "Кристалл башен", gen: "Кристалла башен", dat: "Кристаллу башен", acc: "Кристалл башен", ins: "Кристаллом башен", pre: "Кристалле башен" } },
+      relic_gate: { g: "m", forms: { nom: "Ключ от золотых врат", gen: "Ключа от золотых врат", dat: "Ключу от золотых врат", acc: "Ключ от золотых врат", ins: "Ключом от золотых врат", pre: "Ключе от золотых врат" } },
+      relic_keep: { g: "f", forms: { nom: "Печать дракона", gen: "Печати дракона", dat: "Печати дракона", acc: "Печать дракона", ins: "Печатью дракона", pre: "Печати дракона" } },
+    },
+  };
+
+  // Resolve one grammatical form of a noun-metadata entry: explicit override →
+  // regular-noun decliner (from `lemma`) → nominative → "".
+  function ruForm(meta, gcase) {
+    if (!meta) return "";
+    const c = gcase || "nom";
+    if (meta.forms && meta.forms[c] != null) return meta.forms[c];
+    const base = meta.lemma || (meta.forms && meta.forms.nom) || "";
+    if (c === "nom") return base;
+    return declineRegular(base, meta.g, !!meta.animate, c);
+  }
+
+  // ICU-style gender/number `select`: pick the form for a grammatical gender
+  // ("m"/"f"/"n"/"pl"). English callers pass a single string (or {other}) and
+  // get it back unchanged, so shared templates stay simple. Russian: agreement
+  // verbs/adjectives, e.g. select("f", { m:"возведён", f:"возведена",
+  // n:"возведено", pl:"возведены" }).
+  function select(gender, forms) {
+    if (typeof forms === "string") return forms;
+    if (I18N.locale !== "ru") return forms.other != null ? forms.other : (forms.m != null ? forms.m : forms.n);
+    if (forms[gender] != null) return forms[gender];
+    return forms.m != null ? forms.m : (forms.n != null ? forms.n : (forms.other || ""));
+  }
+
+  // Number agreement for count nouns — an alias of `plural()` named for the
+  // "{n} <thing>" call sites (2 камня / 5 камней). English: one/other.
+  function agree(n, forms) { return plural(n, forms); }
+
+  // A locale-aware reference to a data-table noun. The call site passes the
+  // already-resolved *display name* (English in `en` mode, the RU nominative in
+  // `ru` mode — from the existing tZoneName/tLairBossName/… resolvers), plus the
+  // (group,id) so interp() can look up the RU case forms. In English, interp
+  // substitutes the display name and ignores any `:case` tag; in Russian it
+  // declines via the metadata. Falls back to the display name if the noun has
+  // no morphology entry, so nothing ever blanks.
+  function nounRef(group, id, display) {
+    const meta = RU_NOUNS[group] && RU_NOUNS[group][id];
+    return { __noun: true, group, id, meta: meta || null, en: display != null ? display : "", g: meta ? meta.g : null };
+  }
+  // Directly decline a data-table noun to a case string (for non-template use);
+  // `display` is the resolved name used as the English/non-metadata fallback.
+  function declineNoun(group, id, gcase, display) {
+    if (I18N.locale === "ru") {
+      const meta = RU_NOUNS[group] && RU_NOUNS[group][id];
+      if (meta) return ruForm(meta, gcase);
+    }
+    return display != null ? display : "";
+  }
+  // The gender of a data-table noun (for select()-based agreement at call sites).
+  function nounGender(group, id) {
+    const meta = RU_NOUNS[group] && RU_NOUNS[group][id];
+    return meta ? meta.g : "m";
+  }
+
+  // {placeholder} interpolation with optional grammatical case tags. A plain
+  // {x} substitutes params.x as before (backward-compatible). A tagged
+  // {x:case} (case ∈ nom/gen/dat/acc/ins/pre) declines the param when it is a
+  // noun-ref (RU) — otherwise it substitutes the value and drops the tag, so an
+  // English template written as {name} and a Russian one as {name:acc} share
+  // the same param. Missing params are left intact so a bad key stays visible.
   function interp(s, p) {
-    return s.replace(/\{(\w+)\}/g, (m, k) => (p && p[k] != null) ? String(p[k]) : m);
+    return s.replace(/\{(\w+)(?::(\w+))?\}/g, (m, k, gcase) => {
+      if (!p || p[k] == null) return m;
+      const v = p[k];
+      if (v && typeof v === "object" && v.__noun) {
+        if (I18N.locale === "ru" && v.meta) return ruForm(v.meta, gcase || "nom");
+        return v.en != null ? String(v.en) : "";
+      }
+      return String(v);
+    });
   }
   // The core lookup: current locale → English fallback → the key itself.
   function t(key, params) {
@@ -1218,7 +1481,9 @@ import { ZONE_BY_ID } from "../data/zones.js";
   };
 
 export {
-  I18N, LOCALES, LOCALE_KEY, RU, _ruGroup, _ruStory, interp, localGet, localSet, plural, t,
+  I18N, LOCALES, LOCALE_KEY, RU, RU_NOUNS, CASES, GENDERS, _ruGroup, _ruStory, interp,
+  declineRegular, ruForm, select, agree, nounRef, declineNoun, nounGender,
+  localGet, localSet, plural, t,
   tCastlePartDesc, tCastlePartName, tChapterBlurb, tChapterTitle, tDragonName, tField, tFlat,
   tItemDesc, tItemName, tLairBossIntro, tLairBossName, tLocationName, tMaterialLabel,
   tNpcIntro, tNpcName, tPotionLabel, tQuestStory, tQuestTitle, tQuestWhere, tRarityLabel,

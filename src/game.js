@@ -62,6 +62,7 @@ import {
   tRelicName, tResourceLabel, tSlotLabel, tAffixLabel, tSetName, tStoryEndingText, tStoryEndingTitle,
   tStoryIntroText, tStoryIntroTitle, tZoneName,
   tElementLabel, tEffectLabel, tSkillName, tSkillDesc,
+  RU_NOUNS, CASES, GENDERS, declineRegular, ruForm, select, agree, nounRef, declineNoun, nounGender,
 } from "./core/i18n.js";
 
   // ---- i18n resolvers that read runtime systems (relocated from the i18n
@@ -74,6 +75,44 @@ import {
     if (boss.archId) return tFlat("boss", boss.archId, (BOSS_ARCH_BY_ID[boss.archId] || {}).name || boss.name);
     return boss.name;
   }
+
+  // ---- Russian grammatical agreement bridges (Task 24) --------------------
+  // Past-tense verbs that describe an interpolated noun must agree with its
+  // gender/number; select() picks the form (English collapses to `other`).
+  // "<part> raised" — возведён / возведена / возведено / возведены.
+  const AGREE_RAISED = { other: "raised", m: "возведён", f: "возведена", n: "возведено", pl: "возведены" };
+  // "<boss> defeated" — повержен / повержена / повержены.
+  const AGREE_DEFEATED = { other: "defeated", m: "повержен", f: "повержена", n: "повержено", pl: "повержены" };
+
+  // Resolve a live Boss/Dragon to its morphology (group, id) so it can be
+  // declined (accusative for "defeat X") and agreed with (gender for "X was
+  // defeated"). Mirrors bossDisplayName's dispatch.
+  function bossNounKey(boss) {
+    if (!boss) return null;
+    if (boss.isDragon) return { group: "dragon", id: "ancient" };
+    if (boss.lairZoneId && RU_NOUNS.lairBoss[boss.lairZoneId]) return { group: "lairBoss", id: boss.lairZoneId };
+    if (boss.archId && RU_NOUNS.boss[boss.archId]) return { group: "boss", id: boss.archId };
+    return null;
+  }
+  const bossNounRef = (boss) => { const k = bossNounKey(boss); return k ? nounRef(k.group, k.id, bossDisplayName(boss)) : bossDisplayName(boss); };
+  const bossGender = (boss) => { const k = bossNounKey(boss); return k ? nounGender(k.group, k.id) : "m"; };
+
+  // A material's bag/gather label agreed to a count (2 камня / 5 камней) in RU;
+  // English uses the plain label. `n` omitted → nominative singular.
+  function materialLabel(id, n) {
+    const meta = RU_NOUNS.material[id];
+    if (I18N.locale === "ru" && meta && meta.count && n != null) return agree(n, meta.count);
+    return tMaterialLabel(id);
+  }
+  // A noun-ref for a material, so objectives can request its accusative.
+  const materialRef = (id) => nounRef("material", id, tMaterialLabel(id));
+  // A noun-ref for a place that is either a zone or a location.
+  const placeRef = (id) => LOCATION_BY_ID[id]
+    ? nounRef("location", id, tLocationName(id))
+    : (ZONE_BY_ID[id] ? nounRef("zone", ZONE_BY_ID[id].id, tZoneName(ZONE_BY_ID[id])) : id);
+  // The Russian locative preposition a zone takes ("в"/"на"); English is blank
+  // (the template supplies "to"). Used by the map compass ("go … в/на <zone>").
+  const zonePrep = (id) => (I18N.locale === "ru" && RU_NOUNS.zone[id] && RU_NOUNS.zone[id].loc) ? RU_NOUNS.zone[id].loc : "";
 
   // A visible crash handler — far better than a blank canvas if anything fails.
   function showFatal(msg) {
@@ -2662,7 +2701,7 @@ import {
       spawnImpact(this.state, this.root.position, "#cfe0b0", { y: 0.8, count: 7, spread: 3 });
       // A surface-matched harvest cue: pickaxe ring for rock/crystal, a softer chop otherwise.
       Sfx.play((this.def.mat === "stone" || this.def.mat === "crystal") ? "mine" : "gather");
-      toast(t("toast.gathered", { icon: MATERIALS[this.def.mat].icon, n, label: tMaterialLabel(this.def.mat) }));
+      toast(t("toast.gathered", { icon: MATERIALS[this.def.mat].icon, n, label: materialLabel(this.def.mat, n) }));
       this.respawn = this.def.respawn;
       if (this.data) this.data.respawn = this.respawn;   // persist depletion (Task 22)
       this.body.setEnabled(false);
@@ -2879,7 +2918,7 @@ import {
       if (n) { n.setEnabled(true); n.scaling.setAll(0.01); n._pop = 1; }
       spawnImpact(this.state, this.root.position, "#ffd34e", { y: 4, count: 16, spread: 6, up: 4 });
       Sfx.play("enhance");
-      toast(t("toast.partRaised", { part: tCastlePartName(part.id) }));
+      toast(t("toast.partRaised", { part: nounRef("castlePart", part.id, tCastlePartName(part.id)), verb: select(nounGender("castlePart", part.id), AGREE_RAISED) }));
       Quests.onBuild(part.id); // advance any "build this part" mission
       if (this.built.length >= CASTLE_PARTS.length) this._complete();
       return true;
@@ -6464,13 +6503,12 @@ import {
     objectiveText(q) {
       const o = q.obj, p = this.progress(q), done = p.have >= p.need;
       const dm = done ? t("obj.doneMark") : "";
-      const placeName = (id) => LOCATION_BY_ID[id] ? tLocationName(id) : (ZONE_BY_ID[id] ? tZoneName(ZONE_BY_ID[id]) : id);
       if (o.type === "hunt") return t("obj.hunt", { have: p.have, need: p.need });
-      if (o.type === "gather") { const m = MATERIALS[o.target] || {}; return t("obj.gather", { icon: m.icon || "", label: tMaterialLabel(o.target), have: p.have, need: p.need }); }
-      if (o.type === "reach") return t("obj.reach", { name: placeName(o.target) }) + dm;
-      if (o.type === "talk") { const n = NPC_BY_ID[o.target] || {}; return t("obj.talk", { icon: n.icon || "", name: tNpcName(o.target) }) + dm; }
-      if (o.type === "defeat_boss") { const z = ZONE_BY_ID[o.target] || {}; return t("obj.defeatBoss", { boss: tLairBossName(o.target), zone: tZoneName(z) }) + dm; }
-      if (o.type === "build") return t("obj.build", { part: tCastlePartName(o.target) }) + dm;
+      if (o.type === "gather") { const m = MATERIALS[o.target] || {}; return t("obj.gather", { icon: m.icon || "", label: materialRef(o.target), have: p.have, need: p.need }); }
+      if (o.type === "reach") return t("obj.reach", { name: placeRef(o.target) }) + dm;
+      if (o.type === "talk") { const n = NPC_BY_ID[o.target] || {}; return t("obj.talk", { icon: n.icon || "", name: nounRef("npc", o.target, tNpcName(o.target)) }) + dm; }
+      if (o.type === "defeat_boss") { const z = ZONE_BY_ID[o.target] || {}; return t("obj.defeatBoss", { boss: nounRef("lairBoss", o.target, tLairBossName(o.target)), zone: nounRef("zone", z.id, tZoneName(z)) }) + dm; }
+      if (o.type === "build") return t("obj.build", { part: nounRef("castlePart", o.target, tCastlePartName(o.target)) }) + dm;
       if (o.type === "defeat_dragon") return t("obj.defeatDragon") + dm;
       return "";
     },
@@ -6510,8 +6548,7 @@ import {
         this.reached[locId] = true;
         // Announce only when an active reach mission was just satisfied.
         if (this.active.some((id) => { const q = QUEST_BY_ID[id]; return q && q.obj.type === "reach" && q.obj.target === locId; })) {
-          const nm = LOCATION_BY_ID[locId] ? tLocationName(locId) : (ZONE_BY_ID[locId] ? tZoneName(ZONE_BY_ID[locId]) : locId);
-          toast(t("toast.reached", { name: nm }));
+          toast(t("toast.reached", { name: placeRef(locId) }));
         }
       }
       updateQuestTracker(this);
@@ -6598,8 +6635,20 @@ import {
     },
 
     // ---- Presentation helpers ----
-    giverLabel(npcId) { const n = NPC_BY_ID[npcId] || {}; return `${n.icon || ""} ${tNpcName(npcId)}`; },
-    npcPlace(npcId) { const n = NPC_BY_ID[npcId]; const l = n && LOCATION_BY_ID[n.loc]; return l ? tLocationName(n.loc) : t("place.meadowgate"); },
+    // The giver's icon and a case-declinable noun-ref (RU: dative after "к",
+    // instrumental after "с"; English collapses to the plain name).
+    giverIcon(npcId) { return (NPC_BY_ID[npcId] || {}).icon || ""; },
+    giverRef(npcId) { return nounRef("npc", npcId, tNpcName(npcId)); },
+    // The NPC's home location as a declinable noun-ref + its RU preposition
+    // (в/на). Falls back to Meadowgate (a plain string) when the NPC has no loc.
+    npcPlaceRef(npcId) {
+      const n = NPC_BY_ID[npcId]; const l = n && LOCATION_BY_ID[n.loc];
+      return l ? nounRef("location", n.loc, tLocationName(n.loc)) : t("place.meadowgate");
+    },
+    npcPlacePrep(npcId) {
+      const n = NPC_BY_ID[npcId]; const meta = n && RU_NOUNS.location[n.loc];
+      return (I18N.locale === "ru" && meta && meta.loc) ? meta.loc : "";
+    },
     _whereSuffix(m) { return m.where ? t("guide.whereSuffix", { where: tQuestWhere(m) }) : ""; },
 
     // The one guided step shown in the HUD tracker — always the live main line.
@@ -6611,10 +6660,10 @@ import {
         return Object.assign(base, { state: "do", text: Quests.objectiveText(m) + this._whereSuffix(m) });
       if (Quests.isActive(m.id)) {
         if (Quests.isComplete(m))
-          return Object.assign(base, { state: "turnin", text: t("guide.turnin", { giver: this.giverLabel(m.npc) }) });
+          return Object.assign(base, { state: "turnin", text: t("guide.turnin", { icon: this.giverIcon(m.npc), giver: this.giverRef(m.npc) }) });
         return Object.assign(base, { state: "do", text: Quests.objectiveText(m) + this._whereSuffix(m) });
       }
-      return Object.assign(base, { state: "accept", text: t("guide.accept", { giver: this.giverLabel(m.npc), place: this.npcPlace(m.npc) }) });
+      return Object.assign(base, { state: "accept", text: t("guide.accept", { icon: this.giverIcon(m.npc), giver: this.giverRef(m.npc), prep: this.npcPlacePrep(m.npc), place: this.npcPlaceRef(m.npc) }) });
     },
 
     // ---- Beats ----
@@ -7026,7 +7075,8 @@ import {
           ? t("map.compassTo", { name: WorldMapUI.targetName(this.state.waypoint), dist })
           : t("map.compassPortal", {
               kind: t("portalKind." + ((g.portal && g.portal.kind) || "path")),
-              zone: tZoneName(ZONE_BY_ID[g.nextZone]), dist });
+              prep: zonePrep(g.nextZone),
+              zone: nounRef("zone", g.nextZone, tZoneName(ZONE_BY_ID[g.nextZone])), dist });
       }
     },
 
@@ -7430,10 +7480,10 @@ import {
       if (resolved) { icon = "✅"; cls = "mdone"; }
       else if (active) {
         icon = complete ? "✓" : "📜"; cls = complete ? "mcurrent" : "";
-        body = `<div class="qm-obj">${Quests.objectiveText(m)}${complete && m.npc ? t("log.returnTo", { giver: Story.giverLabel(m.npc) }) : ""}</div>`;
+        body = `<div class="qm-obj">${Quests.objectiveText(m)}${complete && m.npc ? t("log.returnTo", { icon: Story.giverIcon(m.npc), giver: Story.giverRef(m.npc) }) : ""}</div>`;
       } else if (isCurrent) {
         icon = "❗"; cls = "mcurrent";
-        body = `<div class="qm-obj">${m.npc ? t("log.speakAt", { giver: Story.giverLabel(m.npc), place: Story.npcPlace(m.npc) }) : Quests.objectiveText(m)}</div>`;
+        body = `<div class="qm-obj">${m.npc ? t("log.speakAt", { icon: Story.giverIcon(m.npc), giver: Story.giverRef(m.npc), prep: Story.npcPlacePrep(m.npc), place: Story.npcPlaceRef(m.npc) }) : Quests.objectiveText(m)}</div>`;
       } else { icon = "🔒"; cls = "mlocked"; }
       return `<div class="quest-mission ${cls}"><span class="qm-title">${icon} ${tQuestTitle(m)}</span>${body}</div>`;
     },
@@ -8143,7 +8193,7 @@ import {
       hideBossBar();
       if (state.boss === m) state.boss = null;
       Sfx.play("boss_death");
-      toast(t("toast.bossDefeated", { boss: bossDisplayName(m), item: tItemName(getDef(rareId)) }));
+      toast(t("toast.bossDefeated", { boss: bossNounRef(m), verb: select(bossGender(m), AGREE_DEFEATED), item: tItemName(getDef(rareId)) }));
       return;
     }
     state.waveStats.kills++;
@@ -11622,6 +11672,9 @@ import {
       tItemName, tItemDesc, tZoneName, tQuestTitle, tQuestStory, tNpcName, tNpcIntro,
       tRarityLabel, tMaterialLabel, tResourceLabel, tRelicName, tCastlePartName,
       tChapterTitle, tWeatherLabel, tDragonName, bossDisplayName, tLairBossName,
+      // ---- Russian grammatical morphology (Task 24) ----
+      RU_NOUNS, CASES, GENDERS, declineRegular, ruForm, select, agree, nounRef, declineNoun, nounGender,
+      materialLabel, materialRef, placeRef, zonePrep, bossNounRef, bossGender, AGREE_RAISED, AGREE_DEFEATED,
       // ---- Adventure systems ----
       MATERIALS, MATERIAL_IDS, RELICS, CASTLE_PARTS, CRAFT_RECIPES, NPC_DATA, QUEST_BY_ID,
       MONSTER_ABILITIES, RESOURCE_KINDS, abilitiesForWave,
