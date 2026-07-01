@@ -186,7 +186,7 @@ describe("Task 12 — visible worn gear", () => {
     const g = T.player.gear;
     for (const k of ["helmet", "chest", "gloves", "boots"]) expect(g[k], k).toBeTruthy();
     // headless detects as the high tier → pauldrons/belt/cloak present
-    expect(g.pauldrons && g.belt && g.cloak).toBeTruthy();
+    expect(g.pauls && g.belt && g.cloak).toBeTruthy();
   });
 
   it("tier-gates the lighter pieces + cloak sway", () => {
@@ -203,7 +203,7 @@ describe("Task 12 — visible worn gear", () => {
     const p = T.player;
     clearEquip(p);
     T.recomputeStats(p);
-    const refs = [p.gear.helmet, p.gear.chest, p.gear.cloak, p.gear.boots[0], p.gear.pauldrons[1]];
+    const refs = [p.gear.helmet, p.gear.chest, p.gear.cloak, p.gear.boots[0], p.gear.pauls.plated.nodes[1]];
     expect(p.gearShown.helmet).toBe(false);
     for (let i = 0; i < 12; i++) {
       // hammer equip/unequip
@@ -219,7 +219,7 @@ describe("Task 12 — visible worn gear", () => {
       p.gear.chest,
       p.gear.cloak,
       p.gear.boots[0],
-      p.gear.pauldrons[1],
+      p.gear.pauls.plated.nodes[1],
     ]).toEqual(refs);
   });
 
@@ -547,5 +547,246 @@ describe("Task 26 — worn chest pieces: distinct archetype per item", () => {
       try { return p.gear.chests[k].node.isEnabled(); } catch (e) { return false; }
     });
     expect(enabled).toEqual(["dragonscale"]);
+  });
+});
+
+// --- Task 27: worn pauldrons sit ON the shoulder (no inward clip) -----------
+// A faithful TRS/YXZ node transform so the shoulder-fit invariant can compute a
+// pauldron vertex's LEAN-space position by walking the real built node chain
+// (mesh → group → shoulder pivot → arm), exactly as Babylon composes it
+// (world = parent.world · T · Ry · Rx · Rz · S). Lets the test read the ACTUAL
+// geometry the builder emitted, so it re-derives if the offsets ever change.
+function applyTRS(node, v) {
+  const s = node.scaling || { x: 1, y: 1, z: 1 };
+  let x = v.x * (s.x == null ? 1 : s.x);
+  let y = v.y * (s.y == null ? 1 : s.y);
+  let z = v.z * (s.z == null ? 1 : s.z);
+  const r = node.rotation || { x: 0, y: 0, z: 0 };
+  const rz = r.z || 0, rx = r.x || 0, ry = r.y || 0;
+  // Rz
+  let nx = x * Math.cos(rz) - y * Math.sin(rz);
+  let ny = x * Math.sin(rz) + y * Math.cos(rz);
+  x = nx; y = ny;
+  // Rx
+  let ny2 = y * Math.cos(rx) - z * Math.sin(rx);
+  let nz2 = y * Math.sin(rx) + z * Math.cos(rx);
+  y = ny2; z = nz2;
+  // Ry
+  let nx3 = x * Math.cos(ry) + z * Math.sin(ry);
+  let nz3 = -x * Math.sin(ry) + z * Math.cos(ry);
+  x = nx3; z = nz3;
+  const pos = node.position || { x: 0, y: 0, z: 0 };
+  return { x: x + (pos.x || 0), y: y + (pos.y || 0), z: z + (pos.z || 0) };
+}
+// Transform a mesh-local point up the parent chain until (and excluding) `stop`.
+function toFrame(mesh, point, stop) {
+  let v = point, n = mesh;
+  while (n && n !== stop) { v = applyTRS(n, v); n = n.parent; }
+  return v;
+}
+
+describe("Task 27 — worn pauldrons: distinct archetype per item + shoulder fit", () => {
+  const PAULDRON_IDS = Object.keys(T.ITEM_DB).filter((id) => T.ITEM_DB[id].type === "pauldrons");
+  const VALID_ARCH = ["cap", "plated", "spiked", "ornate", "winged"];
+  const VALID_MAT = ["leather", "cloth", "iron", "steel", "gold", "dragonscale"];
+
+  it("maps every pauldron def to a valid archetype + material", () => {
+    expect(PAULDRON_IDS.length).toBeGreaterThanOrEqual(4);
+    for (const id of PAULDRON_IDS) {
+      const a = T.pauldronArchetype(T.getDef(id));
+      expect(VALID_ARCH.includes(a.archetype), `${id} archetype`).toBe(true);
+      expect(VALID_MAT.includes(a.material), `${id} material`).toBe(true);
+    }
+  });
+
+  it("gives the shipped pauldrons distinct, on-theme archetypes", () => {
+    const pick = (id) => T.pauldronArchetype(T.getDef(id));
+    expect(pick("leather_pauldrons")).toMatchObject({ archetype: "cap", material: "leather" });
+    expect(pick("iron_pauldrons")).toMatchObject({ archetype: "plated", material: "iron" });
+    expect(pick("dragon_pauldrons")).toMatchObject({ archetype: "spiked", material: "dragonscale" });
+    expect(pick("storm_pauldrons")).toMatchObject({ archetype: "winged", material: "steel" });
+    // Leather spaulders and dragonscale spaulders must NOT look identical.
+    expect(pick("leather_pauldrons").archetype).not.toBe(pick("dragon_pauldrons").archetype);
+    // At least three visually distinct shoulder silhouettes are actually in use.
+    const used = new Set(PAULDRON_IDS.map((id) => pick(id).archetype));
+    expect(used.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it("shares the set motif with the matching chest + helmet (a full suit reads as one)", () => {
+    // Ironguard: plated shoulders ↔ cuirass chest ↔ open iron helm (same iron).
+    expect(T.pauldronArchetype(T.getDef("iron_pauldrons")).material)
+      .toBe(T.chestArchetype(T.getDef("iron_plate")).material);
+    // Dragonscale: spiked shoulders ↔ scaled chest ↔ horned helm (same dragonscale).
+    expect(T.pauldronArchetype(T.getDef("dragon_pauldrons")).material)
+      .toBe(T.helmetArchetype(T.getDef("dragon_helm")).material);
+  });
+
+  it("is pure + total: infers a valid pair for pauldrons with no `paul` block", () => {
+    // Set-driven inference (Dragonscale → spiked scale, Ironguard → banded plated).
+    expect(T.pauldronArchetype({ type: "pauldrons", rarity: "rare", set: "dragonscale" }))
+      .toMatchObject({ archetype: "spiked", material: "dragonscale" });
+    expect(T.pauldronArchetype({ type: "pauldrons", rarity: "rare", set: "ironguard" }))
+      .toMatchObject({ archetype: "plated", material: "iron" });
+    // Rarity fallbacks (legendary/epic → winged; rare → ornate; normal → cap).
+    expect(T.pauldronArchetype({ type: "pauldrons", rarity: "legendary" }).archetype).toBe("winged");
+    expect(T.pauldronArchetype({ type: "pauldrons", rarity: "epic" }).archetype).toBe("winged");
+    expect(T.pauldronArchetype({ type: "pauldrons", rarity: "rare" }).archetype).toBe("ornate");
+    expect(T.pauldronArchetype({ type: "pauldrons", rarity: "normal" }).archetype).toBe("cap");
+    // An explicit block wins over inference.
+    expect(T.pauldronArchetype({ type: "pauldrons", rarity: "rare", paul: { archetype: "winged", material: "gold" } }))
+      .toMatchObject({ archetype: "winged", material: "gold" });
+    // Bogus / missing input clamps to a drawable pair (never throws, never invalid).
+    for (const bad of [undefined, null, {}, { paul: { archetype: "xx", material: "plastic" } }]) {
+      const a = T.pauldronArchetype(bad);
+      expect(VALID_ARCH.includes(a.archetype)).toBe(true);
+      expect(VALID_MAT.includes(a.material)).toBe(true);
+    }
+    // Deterministic (same def ⇒ same pair).
+    expect(T.pauldronArchetype(T.getDef("dragon_pauldrons"))).toEqual(T.pauldronArchetype(T.getDef("dragon_pauldrons")));
+  });
+
+  it("pre-builds every pauldron archetype group once on BOTH shoulders (headless-safe)", () => {
+    const g = T.player.gear;
+    expect(g.pauls).toBeTruthy();
+    expect(Object.keys(g.pauls).sort()).toEqual(["cap", "ornate", "plated", "spiked", "winged"]);
+    for (const k in g.pauls) {
+      const grp = g.pauls[k];
+      expect(grp.nodes.length, k).toBe(2); // one per shoulder
+      expect(grp.mats.length, k).toBeGreaterThan(0);
+      expect(grp.meshes.length, k).toBeGreaterThan(0);
+    }
+    // The shoulder pivots (the fit fix) are built once, parented to the arms.
+    expect(T.player.shoulderPivots.length).toBe(2);
+    expect(T.player.shoulderPivots[0].arm).toBe(T.player.armL);
+    expect(T.player.shoulderPivots[1].arm).toBe(T.player.armR);
+  });
+
+  it("tier-gates the pauldrons (omitted entirely on low; detail on high)", () => {
+    expect(T.wornDetailFor("low").pauldrons).toBe(false);
+    expect(T.wornDetailFor("low").pauldronDetail).toBe(false);
+    expect(T.wornDetailFor("high").pauldrons).toBe(true);
+    expect(T.wornDetailFor("high").pauldronDetail).toBe(true);
+  });
+
+  it("shows exactly the equipped pauldron's archetype (and nothing when bare)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const map = {
+      leather_pauldrons: "cap", iron_pauldrons: "plated",
+      dragon_pauldrons: "spiked", storm_pauldrons: "winged",
+    };
+    for (const id in map) {
+      T.equipItem(p, T.makeItem(id));
+      expect(p.gearShown.pauldrons, id).toBe(true);
+      expect(p.gearShown.pauldronArchetype, id).toBe(map[id]);
+      // Both shoulders of exactly that archetype are enabled; the rest are hidden.
+      for (const k in p.gear.pauls) {
+        const on = p.gear.pauls[k].nodes.every((n) => n.isEnabled());
+        expect(on, `${id}/${k}`).toBe(k === map[id]);
+      }
+      T.unequipSlot(p, "pauldrons");
+      T.recomputeStats(p);
+    }
+    expect(p.gearShown.pauldrons).toBe(false);
+    expect(p.gearShown.pauldronArchetype).toBe(null);
+  });
+
+  it("never reallocates the pauldron meshes / pivots across equip churn (no leak)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const pivots = p.shoulderPivots.map((s) => s.pivot);
+    const nodes = { cap: p.gear.pauls.cap.nodes.slice(), spiked: p.gear.pauls.spiked.nodes.slice() };
+    const meshCount = Object.values(p.gear.pauls).reduce((n, grp) => n + grp.meshes.length, 0);
+    for (let i = 0; i < 10; i++) {
+      for (const id of ["leather_pauldrons", "iron_pauldrons", "dragon_pauldrons", "storm_pauldrons"]) {
+        T.equipItem(p, T.makeItem(id));
+        expect(() => step(1)).not.toThrow(); // animates the shoulders each frame
+      }
+      T.unequipSlot(p, "pauldrons");
+      T.recomputeStats(p);
+    }
+    // Same pivots + archetype nodes + mesh count throughout — nothing was rebuilt.
+    expect(p.shoulderPivots.map((s) => s.pivot)).toEqual(pivots);
+    expect(p.gear.pauls.cap.nodes).toEqual(nodes.cap);
+    expect(p.gear.pauls.spiked.nodes).toEqual(nodes.spiked);
+    expect(Object.values(p.gear.pauls).reduce((n, grp) => n + grp.meshes.length, 0)).toBe(meshCount);
+  });
+
+  // THE core fit invariant: the shoulder mesh must stay OUTSIDE the torso envelope
+  // at every sampled attack phase (no inward clip into the chest/neck). We pose the
+  // arms to each phase, settle the real per-frame shoulder animation, then transform
+  // every built pauldron's extent up the real node chain into LEAN space and check the
+  // innermost x on its own side. The fix anchors the pauldrons to the torso and drives
+  // only the arm's forward/back PITCH onto them — pitch is a rotation about X, so the
+  // x-extent is INVARIANT across poses. The test asserts BOTH properties: (a) the
+  // innermost x is identical at every pose (structural clip-freedom, the actual fix —
+  // the old sphere rode the arm's roll and dived to x≈0.03 on the melee strike), and
+  // (b) it stays clear of the torso surface. The torso is a cylinder (top⌀0.45) on
+  // lean-x 0; at shoulder height its half-width ≈0.23, so we require x ≥ 0.20.
+  it("keeps both shoulder pieces outside the torso envelope through idle/walk/attack", () => {
+    const p = T.player;
+    const arm = { L: p.armL, R: p.armR };
+    // Sampled poses: [armL{x,z}, armR{x,z}] covering idle, walk (both arm phases),
+    // the melee wind-up/strike/recover (the big +z roll on armR is the old offender)
+    // and the ranged strike + the gather chop (which swings armL up).
+    const POSES = [
+      { name: "idle",          L: { x: 0.08, z: 0.08 },  R: { x: 0.08, z: -0.08 } },
+      { name: "walk_fwdL",     L: { x: -0.68, z: 0.14 }, R: { x: 0.68, z: -0.14 } },
+      { name: "walk_fwdR",     L: { x: 0.68, z: 0.14 },  R: { x: -0.68, z: -0.14 } },
+      { name: "melee_windup",  L: { x: 0.08, z: 0.08 },  R: { x: 0.8, z: -0.7 } },
+      { name: "melee_strike",  L: { x: 0.08, z: 0.08 },  R: { x: -1.5, z: 1.2 } },
+      { name: "melee_recover", L: { x: 0.08, z: 0.08 },  R: { x: -0.5, z: 0.4 } },
+      { name: "ranged_strike", L: { x: 0.08, z: 0.08 },  R: { x: -1.9, z: 0.0 } },
+      { name: "gather_strike", L: { x: 1.3, z: 0.08 },   R: { x: 0.08, z: -0.08 } },
+    ];
+    // Local extent samples of a shoulder cap group (a hull around the caps — the
+    // dominant mass; thin decorative spikes sit further outboard than this box).
+    const EXT = [];
+    for (const dx of [-0.24, -0.12, 0, 0.24]) for (const dy of [-0.22, 0, 0.22]) for (const dz of [-0.24, 0, 0.24]) EXT.push({ x: dx, y: dy, z: dz });
+    const MIN_CLEAR = 0.20; // torso half-width at the shoulder ≈0.23; keep clear of it
+    // Settle the shoulder animation (a frame-rate-independent lerp) for a pose.
+    const settle = (pose) => {
+      arm.L.rotation.x = pose.L.x; arm.L.rotation.z = pose.L.z;
+      arm.R.rotation.x = pose.R.x; arm.R.rotation.z = pose.R.z;
+      for (let k = 0; k < 8; k++) p._animatePauldrons();
+    };
+    // Innermost lean-x of one side's group (on its own side: L at -x, R at +x).
+    const innerXof = (grp, node, sideSign) => {
+      const meshes = grp.meshes.filter((m) => {
+        let n = m; while (n) { if (n === node) return true; n = n.parent; } return false;
+      });
+      expect(meshes.length).toBeGreaterThan(0);
+      let innerMost = Infinity;
+      for (const m of meshes) for (const e of EXT) innerMost = Math.min(innerMost, toFrame(m, e, p.lean).x * sideSign);
+      return innerMost;
+    };
+
+    // Every shipped archetype (winged is the widest — the worst case).
+    for (const id of ["storm_pauldrons", "dragon_pauldrons", "iron_pauldrons", "leather_pauldrons"]) {
+      clearEquip(p);
+      T.equipItem(p, T.makeItem(id));
+      T.recomputeStats(p);
+      const archKey = p.gearShown.pauldronArchetype;
+      const grp = p.gear.pauls[archKey];
+      // Baseline (idle) innermost x per side.
+      settle(POSES[0]);
+      const baseL = innerXof(grp, grp.nodes[0], -1);
+      const baseR = innerXof(grp, grp.nodes[1], 1);
+      for (const pose of POSES) {
+        settle(pose);
+        const iL = innerXof(grp, grp.nodes[0], -1);
+        const iR = innerXof(grp, grp.nodes[1], 1);
+        // (a) pose-independence — the attack never moves the piece inward at all.
+        expect(iL, `${id}/${archKey} L @${pose.name} moved (${iL.toFixed(3)} vs ${baseL.toFixed(3)})`).toBeCloseTo(baseL, 6);
+        expect(iR, `${id}/${archKey} R @${pose.name} moved (${iR.toFixed(3)} vs ${baseR.toFixed(3)})`).toBeCloseTo(baseR, 6);
+        // (b) both shoulders stay clear of the torso surface, on their own side.
+        expect(iL, `${id}/${archKey} L @${pose.name} innerX=${iL.toFixed(3)}`).toBeGreaterThanOrEqual(MIN_CLEAR);
+        expect(iR, `${id}/${archKey} R @${pose.name} innerX=${iR.toFixed(3)}`).toBeGreaterThanOrEqual(MIN_CLEAR);
+      }
+    }
+    clearEquip(p);
+    T.recomputeStats(p);
   });
 });
