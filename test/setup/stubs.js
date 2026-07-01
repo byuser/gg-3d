@@ -145,7 +145,9 @@ export function makeNode() {
     parent: null,
     dispose() {},
     setParent() {},
-    setEnabled() {},
+    _enabled: true,
+    setEnabled(v) { this._enabled = v !== false; },
+    isEnabled() { return this._enabled !== false; },
     addShadowCaster() {},
     getAbsolutePosition() {
       return this.position;

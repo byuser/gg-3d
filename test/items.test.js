@@ -417,3 +417,135 @@ describe("Task 25 — worn helmets: distinct archetype per item", () => {
     expect(p.gear.helms.crown.node).toBe(groups.crown);
   });
 });
+
+describe("Task 26 — worn chest pieces: distinct archetype per item", () => {
+  const CHEST_IDS = Object.keys(T.ITEM_DB).filter((id) => T.ITEM_DB[id].type === "breastplate");
+  const VALID_ARCH = ["vest", "cuirass", "plate", "dragonscale", "robe"];
+  const VALID_MAT = ["leather", "cloth", "iron", "steel", "gold", "dragonscale"];
+
+  it("maps every breastplate def to a valid archetype + material", () => {
+    expect(CHEST_IDS.length).toBeGreaterThanOrEqual(4);
+    for (const id of CHEST_IDS) {
+      const a = T.chestArchetype(T.getDef(id));
+      expect(VALID_ARCH.includes(a.archetype), `${id} archetype`).toBe(true);
+      expect(VALID_MAT.includes(a.material), `${id} material`).toBe(true);
+    }
+  });
+
+  it("gives the shipped breastplates distinct, on-theme archetypes", () => {
+    const pick = (id) => T.chestArchetype(T.getDef(id));
+    expect(pick("leather_vest")).toMatchObject({ archetype: "vest", material: "leather" });
+    expect(pick("iron_plate")).toMatchObject({ archetype: "cuirass", material: "iron" });
+    expect(pick("aegis_plate")).toMatchObject({ archetype: "plate", material: "steel" });
+    expect(pick("dragonscale_plate")).toMatchObject({ archetype: "dragonscale", material: "dragonscale" });
+    expect(pick("phoenix_plate")).toMatchObject({ archetype: "plate", material: "gold" });
+    // A leather vest and a dragonscale plate must NOT look identical.
+    expect(pick("leather_vest").archetype).not.toBe(pick("dragonscale_plate").archetype);
+    // At least three visually distinct chest silhouettes are actually in use.
+    const used = new Set(CHEST_IDS.map((id) => pick(id).archetype));
+    expect(used.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it("shares the set motif with the matching helmet (a full suit reads as one)", () => {
+    // Ironguard: cuirass chest ↔ open iron helm (same iron material).
+    expect(T.chestArchetype(T.getDef("iron_plate")).material)
+      .toBe(T.helmetArchetype(T.getDef("iron_helm")).material);
+    // Dragonscale: scaled chest ↔ horned helm (same dragonscale material).
+    expect(T.chestArchetype(T.getDef("dragonscale_plate")).material)
+      .toBe(T.helmetArchetype(T.getDef("dragon_helm")).material);
+  });
+
+  it("is pure + total: infers a valid pair for chests with no `chest` block", () => {
+    // Set-driven inference (Dragonscale → scaled plate, Ironguard → banded cuirass).
+    expect(T.chestArchetype({ type: "breastplate", rarity: "rare", set: "dragonscale" }))
+      .toMatchObject({ archetype: "dragonscale", material: "dragonscale" });
+    expect(T.chestArchetype({ type: "breastplate", rarity: "rare", set: "ironguard" }))
+      .toMatchObject({ archetype: "cuirass", material: "iron" });
+    // Rarity fallbacks (legendary/epic/rare → ornate plate; normal → vest).
+    expect(T.chestArchetype({ type: "breastplate", rarity: "legendary" }).archetype).toBe("plate");
+    expect(T.chestArchetype({ type: "breastplate", rarity: "epic" }).archetype).toBe("plate");
+    expect(T.chestArchetype({ type: "breastplate", rarity: "normal" }).archetype).toBe("vest");
+    // An explicit cloth robe def resolves to the robe archetype.
+    expect(T.chestArchetype({ type: "breastplate", rarity: "rare", chest: { archetype: "robe", material: "cloth" } }))
+      .toMatchObject({ archetype: "robe", material: "cloth" });
+    // Bogus / missing input clamps to a drawable pair (never throws, never invalid).
+    for (const bad of [undefined, null, {}, { chest: { archetype: "xx", material: "plastic" } }]) {
+      const a = T.chestArchetype(bad);
+      expect(VALID_ARCH.includes(a.archetype)).toBe(true);
+      expect(VALID_MAT.includes(a.material)).toBe(true);
+    }
+    // Deterministic (same def ⇒ same pair).
+    expect(T.chestArchetype(T.getDef("aegis_plate"))).toEqual(T.chestArchetype(T.getDef("aegis_plate")));
+  });
+
+  it("pre-builds every chest archetype mesh group once (headless-safe), each with materials", () => {
+    const g = T.player.gear;
+    expect(g.chests).toBeTruthy();
+    expect(Object.keys(g.chests).sort()).toEqual(["cuirass", "dragonscale", "plate", "robe", "vest"]);
+    for (const k in g.chests) {
+      expect(g.chests[k].node, k).toBeTruthy();
+      expect(g.chests[k].mats.length, k).toBeGreaterThan(0);
+    }
+  });
+
+  it("tier-gates the chest trim detail (simpler shell on low)", () => {
+    expect(T.wornDetailFor("low").chestDetail).toBe(false);
+    expect(T.wornDetailFor("high").chestDetail).toBe(true);
+  });
+
+  it("shows exactly the equipped breastplate's archetype (and nothing when bare)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const map = {
+      leather_vest: "vest", iron_plate: "cuirass", aegis_plate: "plate",
+      dragonscale_plate: "dragonscale", phoenix_plate: "plate",
+    };
+    for (const id in map) {
+      T.equipItem(p, T.makeItem(id));
+      expect(p.gearShown.breastplate, id).toBe(true);
+      expect(p.gearShown.chestArchetype, id).toBe(map[id]);
+      T.unequipSlot(p, "breastplate");
+      T.recomputeStats(p);
+    }
+    expect(p.gearShown.breastplate).toBe(false);
+    expect(p.gearShown.chestArchetype).toBe(null);
+  });
+
+  it("never reallocates the chest meshes across equip churn (no leak)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const anchor = p.gear.chest;
+    const groups = {
+      vest: p.gear.chests.vest.node,
+      cuirass: p.gear.chests.cuirass.node,
+      dragonscale: p.gear.chests.dragonscale.node,
+    };
+    // Hammer through every breastplate many times (animates + renders each frame).
+    for (let i = 0; i < 10; i++) {
+      for (const id of ["leather_vest", "iron_plate", "aegis_plate", "dragonscale_plate", "phoenix_plate"]) {
+        T.equipItem(p, T.makeItem(id));
+        expect(() => step(1)).not.toThrow();
+      }
+      T.unequipSlot(p, "breastplate");
+      T.recomputeStats(p);
+    }
+    // Same anchor + archetype nodes throughout — nothing was rebuilt.
+    expect(p.gear.chest).toBe(anchor);
+    expect(p.gear.chests.vest.node).toBe(groups.vest);
+    expect(p.gear.chests.cuirass.node).toBe(groups.cuirass);
+    expect(p.gear.chests.dragonscale.node).toBe(groups.dragonscale);
+  });
+
+  it("only ever shows one chest archetype group at a time", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.equipItem(p, T.makeItem("dragonscale_plate"));
+    T.recomputeStats(p);
+    const enabled = Object.keys(p.gear.chests).filter((k) => {
+      try { return p.gear.chests[k].node.isEnabled(); } catch (e) { return false; }
+    });
+    expect(enabled).toEqual(["dragonscale"]);
+  });
+});

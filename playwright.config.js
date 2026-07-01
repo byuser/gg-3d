@@ -256,6 +256,14 @@ export default defineConfig({
       testMatch: /worn-helmets\.spec\.js/,
       use: { ...devices["Desktop Chrome"] },
     },
+    // Worn chest pieces (Task 26): boot the built site, equip several breastplates
+    // and screenshot Lily's torso, asserting each maps to its archetype and the
+    // shapes visibly differ. Needs a real WebGL canvas, so it runs at desktop.
+    {
+      name: "worn-chests-desktop",
+      testMatch: /worn-chests\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",
