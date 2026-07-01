@@ -538,10 +538,13 @@ rings), the **compare-vs-equipped deltas**, the **visible worn gear** (core silh
 high-tier extras, **tier-gated**, toggled with **no mesh reallocation** across
 equip/unequip), the **tabbed inventory** (filter / sort / potion consume), the **v7
 save round-trip** of affixes + the new slots **plus migration** from an older (v6) file,
-and Task 25's **distinct worn helmets** (the `helmetArchetype` selector is pure + total — every
-helmet def → a valid archetype + material — every archetype group builds once, the equipped
-helmet shows its own shape, and equip churn never reallocates the helm meshes; a Playwright
-`worn-helmets.spec.js` screenshots three+ distinct helmets worn on a real canvas),
+and the **distinct worn gear** selectors — Task 25's helmets, Task 26's chests and Task 27's
+pauldrons (`helmetArchetype` / `chestArchetype` / `pauldronArchetype` are each pure + total — every
+def → a valid archetype + material — every archetype group builds once, the equipped item shows its
+own shape, and equip churn never reallocates the meshes; the pauldron suite adds a **shoulder-fit
+invariant** proving the shoulder mesh's inner reach is pose-independent and never enters the torso
+through idle/walk/attack; Playwright `worn-{helmets,chests,pauldrons}.spec.js` screenshot the
+distinct pieces worn on a real canvas — the pauldrons mid-attack, confirming no chest penetration),
 and the **skill & leveling** suite (`test/skills.test.js`) that locks in Task 14: the
 **XP curve + focus math** (pure), **level-up** grants (health + focus + auto-learned skills),
 **focus regen + cooldown** ticking, the **quick-bar** assign (deduplicated) + **activate**
@@ -779,6 +782,18 @@ whole thing is unit-testable without a GPU:
   builder pre-builds all five groups once under the torso anchor and `refreshWornGear` reveals the
   equipped one (rarity recolour/sheen via `paint()`, set motif). It seats on the torso clear of the
   neck, arms, belt and pauldrons, and drops its finer straps/lames on the low tier.
+- **Distinct worn pauldrons (Task 27).** Each **pauldrons** item renders as its own real shoulder
+  piece — a soft leather **cap**, a segmented **iron** cap with lames (Ironguard), an overlapping
+  **dragonscale** cap with swept spines (Dragonscale), a trimmed **ornate** plate, or a flared
+  **winged** great-pauldron with an upswept fin — instead of the old plain sphere that dived into the
+  chest. A pure, tested selector `pauldronArchetype(def)` maps every `pauldrons` item (via its
+  `paul:{ archetype, material }` metadata, or inferred from set/rarity) to one of five archetypes + a
+  material, sharing the **Ironguard**/**Dragonscale** motif with the matching helmet + chest. The fix
+  for the old inward clip is the anchor: each shoulder gets its own pivot **on the torso** (not the
+  arm), seated just outside the torso, whose forward/back **pitch** follows the arm through the attack
+  while its **roll is ignored** — so, since pitch never changes the piece's x-extent, the shoulder cap
+  can never reach into the chest at any pose. Built once per shoulder (no reallocation) and tier-gated
+  (omitted entirely on the low tier).
 - **Persistence.** `SAVE_VERSION` 7 stores `{ id, lvl, aff }` per instance across the bag + all 12
   slots; older saves (no affixes / no new slots) load with clean defaults.
 - **Value / weight.** Items carry a coin **value** (resale, scaled by enhancement); **weight /
@@ -1241,4 +1256,15 @@ Source: GitHub Actions**.
       tier-gated straps/lames, seated clear of the neck/arms/belt/pauldrons and **no mesh reallocation**
       on equip. Covered by `test/items.test.js` + `test/e2e/worn-chests.spec.js` (a real-browser
       screenshot of distinct chests worn) — Task 26
+- [x] **Distinct worn pauldrons** — each **pauldrons** item shows as its own real shoulder piece that
+      sits **on** the shoulder instead of the old plain sphere that clipped into the chest: a soft
+      leather **cap**, a segmented **iron** cap with lames (Ironguard), an overlapping **dragonscale**
+      cap with swept spines (Dragonscale), a trimmed **ornate** plate, or a flared **winged**
+      great-pauldron. A pure, tested `pauldronArchetype(def)` selector maps every pauldrons item to one
+      of five archetypes + a material (from its `paul` metadata, or inferred from set/rarity), sharing
+      the set motif with the helmet + chest. The fix for the inward clip: each shoulder rides its own
+      pivot **on the torso** whose forward/back **pitch** follows the arm while its **roll is ignored**,
+      so the piece's inner reach is pose-independent and can never enter the chest. Built once per
+      shoulder (no reallocation), tier-gated (omitted on low). Covered by `test/items.test.js` (incl. a
+      shoulder-fit invariant) + `test/e2e/worn-pauldrons.spec.js` (a real-browser screenshot mid-attack) — Task 27
 - [ ] Puzzles (levers, plates, gated doors)

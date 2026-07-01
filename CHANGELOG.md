@@ -50,6 +50,79 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-07-01] — Task 27 — Worn pauldrons: shoulder armour that sits on the shoulder
+
+Third of the **worn-equipment appearance overhaul** (Tasks 25–35): the shoulders. Each
+`pauldrons` item now renders as a distinct, real shoulder piece **seated on the shoulder
+joint** instead of the old plain sphere that clipped inward into the torso/chest.
+
+### Added
+
+- **Per-item procedural pauldron archetypes.** The single sphere on each arm
+  (`_buildWornGear`) is replaced by **five** distinct shoulder pieces, chosen by the item
+  def and built per shoulder from layered primitives: a soft rounded leather **cap** (+ a
+  rolled trim), a segmented **iron** cap over stacked **lames** with a rivet ridge
+  (Ironguard), an overlapping **dragonscale** cap with climbing scales + a fan of
+  swept-back gold **spines** (Dragonscale), a polished trimmed **ornate** plate with a gold
+  rim + a boss stud + a lame skirt (rare), and a flared **winged** great-pauldron with a
+  broad plate + an upswept fin (epic/legendary). Built from the proven mesh/material
+  helpers, so they're **headless-safe**.
+- **`pauldronArchetype(def)` selector** (`src/data/items.js`) — a **pure, total,
+  deterministic** function mapping every `pauldrons` item to a `{ archetype, material }`
+  pair. Each pauldrons opts in via new `paul: { archetype, material }` metadata; any
+  pauldrons without it still resolves a sensible pair from its **set** (Dragonscale →
+  spiked scale, Ironguard → banded plated) and **rarity** (legendary/epic → winged, rare →
+  ornate, else cap), then clamps to the known archetype/material lists so the result is
+  always one the builder can draw. Coordinated with `chestArchetype`/`helmetArchetype`
+  (shared iron/steel/dragonscale materials + matching set motifs) so a full
+  **Ironguard**/**Dragonscale** suit reads as one. Exported on the test seam.
+- **`test/e2e/worn-pauldrons.spec.js`** — a real-browser Playwright spec that boots the
+  built site, equips several pauldrons, **holds Lily in the melee strike pose** (the phase
+  whose arm roll used to swing the old sphere across the chest), frames a close-up of her
+  shoulder + chest and **screenshots distinct pauldrons worn mid-attack**, asserting each
+  maps to its archetype, the shapes visibly differ, and there's no chest penetration (with
+  the shared `GG_LOCAL_BABYLON` route hook for offline sandboxes).
+
+### Fixed
+
+- **Pauldrons no longer dive into the chest.** The old caps were plain spheres parented to
+  the **arm pivot**, so the melee strike's big cross-body arm roll (armR.z → +1.2) swung
+  them across the torso (inner reach dropped to lean-x ≈ 0.03, deep inside the chest). The
+  fix re-anchors each shoulder to its own pivot **on the torso** (`lean`), seated just
+  outside the torso surface; `_animatePauldrons()` drives that pivot to follow a fraction
+  of the arm's forward/back **pitch** (so the cap still swings with the attack) while its
+  **roll is ignored**. Because pitch is a rotation about the X axis, it never changes the
+  piece's x-extent — so the shoulder cap's inner reach is **pose-independent** and can
+  never enter the chest at any idle/walk/attack pose.
+
+### Changed
+
+- **`refreshWornGear` reveals the equipped pauldron's archetype (on both shoulders).** All
+  five archetype groups are pre-built **once** per shoulder under the two stable shoulder
+  pivots (`_buildPauldrons`); equipping enables only the matching pair — so leather caps
+  and dragonscale spaulders never both show, and **no pauldron mesh is ever reallocated**
+  (the no-leak contract holds). The active pair is recoloured/sheened by **rarity**
+  (`paint()`), with the set motif carried on Ironguard/Dragonscale. The active archetype is
+  tracked on `player.gearShown.pauldronArchetype` (observable for tests).
+- **Tier-gating.** `wornDetailFor(tier)` gains a **`pauldronDetail`** knob; the low tier
+  still omits the pauldrons entirely (a clean omission — the equip stats still apply, only
+  the mesh is skipped), and above it drops the finer lames/spines/skirts.
+
+### Tests
+
+- **`test/items.test.js`**: +9 cases (suite **37 → 46**; Vitest total **384 → 393**) —
+  the selector is valid + total for every pauldrons def, gives the shipped pieces distinct
+  on-theme archetypes, shares the set motif with the matching chest + helmet,
+  infers/clamps for pauldrons with no `paul` block, is deterministic, pre-builds every
+  archetype group on both shoulders with materials + meshes, tier-gates the pauldrons,
+  shows exactly the equipped pauldron's archetype (and nothing when bare), never
+  reallocates the meshes/pivots across equip churn, and — the core fit invariant —
+  transforms every built shoulder mesh up the real node chain to prove its innermost
+  lean-x is **identical across idle/walk/attack poses** (structural clip-freedom) and stays
+  clear of the torso surface.
+
+No `SAVE_VERSION` change — worn pauldrons are transient visuals (nothing new persists).
+
 ## [2026-07-01] — Task 26 — Worn chest pieces: layered breastplates & robes per item
 
 Second of the **worn-equipment appearance overhaul** (Tasks 25–35): the chest — the

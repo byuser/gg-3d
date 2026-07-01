@@ -1951,7 +1951,22 @@ change** (visuals/animation are transient).
   helmet/pauldrons so a full set reads as one suit.
 
 ### Task 27 — Worn pauldrons: shoulder armour that sits on the shoulder (not in the chest)
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-07-01 · Replaced the plain sphere on each arm with **five procedural
+  pauldron archetypes** (soft leather **cap**, banded iron **plated** cap w/ lames, overlapping
+  **dragonscale** **spiked** cap w/ swept spines, trimmed **ornate** plate, flared **winged**
+  great-pauldron) chosen per item by a pure, tested `pauldronArchetype(def)` selector (every
+  `pauldrons` def → a valid `{archetype, material}` via new `paul:{}` metadata, else inferred from
+  set/rarity — total + deterministic, coordinated with chest/helmet so an Ironguard/Dragonscale suit
+  reads as one). **Fixed the inward clip at the source**: each shoulder now rides its own pivot **on
+  the torso** (not the arm), seated just outside the torso; `_animatePauldrons()` drives only the
+  arm's forward/back **pitch** onto it (roll ignored) — since pitch never changes x-extent, the
+  shoulder cap's inner reach is **pose-independent** and can never enter the chest. `_buildPauldrons`
+  pre-builds all five groups once **per shoulder**; `refreshWornGear` reveals the equipped pair
+  (rarity recolour/sheen via `paint()`, set motif), tier-gated via `wornDetailFor().pauldronDetail`
+  (low tier still omits pauldrons entirely), never reallocates a mesh (no leak). New Task 27 tests in
+  `test/items.test.js` (+9; suite 37 → 46, Vitest 384 → 393) incl. a **shoulder-fit invariant** +
+  a real-browser `test/e2e/worn-pauldrons.spec.js` screenshotting four distinct pauldrons worn
+  mid-attack (no chest penetration). No `SAVE_VERSION` change (pauldrons are transient visuals).
 - **Depends on:** Task 12 (the `pauldrons` slot), Task 3, Task 4. Shared bar above.
 - **Goal.** Pauldrons are **plain spheres on `armL`/`armR`** (`_buildWornGear`
   ~1205-1214, scale 1.05/0.7/1.05) that **clip inward into the torso/chest**. Make them
