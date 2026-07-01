@@ -540,18 +540,20 @@ high-tier extras, **tier-gated**, toggled with **no mesh reallocation** across
 equip/unequip), the **tabbed inventory** (filter / sort / potion consume), the **v7
 save round-trip** of affixes + the new slots **plus migration** from an older (v6) file,
 and the **distinct worn gear** selectors — Task 25's helmets, Task 26's chests, Task 27's
-pauldrons, Task 28's gloves and Task 29's belts (`helmetArchetype` / `chestArchetype` /
-`pauldronArchetype` / `gloveArchetype` / `beltArchetype` are each pure + total — every def → a valid
+pauldrons, Task 28's gloves, Task 29's belts and Task 30's boots (`helmetArchetype` / `chestArchetype` /
+`pauldronArchetype` / `gloveArchetype` / `beltArchetype` / `bootArchetype` are each pure + total — every def → a valid
 archetype + material — every archetype group builds once, the equipped item shows its own shape, and
 equip churn never reallocates the meshes; the pauldron suite adds a **shoulder-fit invariant**
 proving the shoulder mesh's inner reach is pose-independent and never enters the torso through
 idle/walk/attack, the glove suite adds a **grip-fit invariant** proving every glove part stays
-compact around the hand and below the weapon shaft so it never engulfs the grip, and the belt suite
+compact around the hand and below the weapon shaft so it never engulfs the grip, the belt suite
 adds a **below-chest + clears-legs invariant** proving the belt band sits under the chest envelope
-and, sampled across the stride, never enters a leg; Playwright
-`worn-{helmets,chests,pauldrons,gloves,belts}.spec.js` screenshot the distinct pieces worn on a real
+and, sampled across the stride, never enters a leg, and the boot suite adds an **on-leg /
+no-ground-clip invariant** proving every boot part hugs the foot/shin and, sampled across the full
+stride swing, never dips below the feet it rides on; Playwright
+`worn-{helmets,chests,pauldrons,gloves,belts,boots}.spec.js` screenshot the distinct pieces worn on a real
 canvas — the pauldrons mid-attack confirming no chest penetration, the gloves wrapped around the wand
-grip, the belts seated below the chest hem),
+grip, the belts seated below the chest hem, the boots striding on the feet),
 and the **skill & leveling** suite (`test/skills.test.js`) that locks in Task 14: the
 **XP curve + focus math** (pure), **level-up** grants (health + focus + auto-learned skills),
 **focus regen + cooldown** ticking, the **quick-bar** assign (deduplicated) + **activate**
@@ -826,6 +828,20 @@ whole thing is unit-testable without a GPU:
   legs beneath it — pouches/tassets hang over the thighs. Built once under a single waist anchor (no
   reallocation) and tier-gated (**omitted entirely on the low tier**, like the old cylinder — the
   stats still apply, only the mesh is skipped).
+- **Distinct worn boots (Task 30).** Each **boots** item renders as its own real pair of boots — a
+  soft leather **shoe** with an ankle collar, a tall leather **boot** with a folded-over cuff
+  (rare/non-set), a plated iron **greave** + sabaton with a pointed toe and a knee poleyn (Ironguard),
+  an overlapping dragonscale **sabaton** with scale plates up the shin + a cuff spine (Dragonscale),
+  or an ornate gold-trimmed steel **warboot** with a knee boss + a gold rim (epic/legendary) —
+  instead of the old plain calf cylinder that could intersect the leg or punch through the ground. A
+  pure, tested selector `bootArchetype(def)` maps every `boots` item (via its
+  `boot:{ archetype, material }` metadata, or inferred from set/rarity) to one of five archetypes + a
+  material, sharing the **Ironguard**/**Dragonscale** motif with the matching helmet + chest +
+  pauldrons + gloves + belt. Each boot is built from **layered primitives** (a shaft up the shin + a
+  foot/vamp over the existing shoe + a sole/cuff) and anchored at the **foot** (not the shin midpoint),
+  so it rides the leg's bottom and **strides with the feet without clipping the leg or the ground**.
+  Built once per leg (no reallocation) and tier-gated (finer trims/scale rows dropped on the low
+  tier; the core boot is always drawn).
 - **Persistence.** `SAVE_VERSION` 7 stores `{ id, lvl, aff }` per instance across the bag + all 12
   slots; older saves (no affixes / no new slots) load with clean defaults.
 - **Value / weight.** Items carry a coin **value** (resale, scaled by enhancement); **weight /
@@ -1323,4 +1339,17 @@ Source: GitHub Actions**.
       beneath it. Built once under one waist anchor (no reallocation), tier-gated (omitted entirely on the
       low tier). Covered by `test/items.test.js` (incl. a below-chest + clears-legs invariant) +
       `test/e2e/worn-belts.spec.js` (a real-browser screenshot of distinct belts worn below the chest) — Task 29
+- [x] **Distinct worn boots** — each **boots** item shows as its own real pair of boots instead of the
+      old plain calf cylinder that could intersect the leg or punch through the ground: a soft leather
+      **shoe** + ankle collar, a tall leather **boot** with a folded cuff (rare/non-set), a plated iron
+      **greave** + sabaton (pointed toe + knee poleyn, Ironguard), an overlapping dragonscale **sabaton**
+      (climbing scales + cuff spine, Dragonscale), or an ornate gold-trimmed steel **warboot** (knee boss
+      + gold rim, epic/legendary). A pure, tested `bootArchetype(def)` selector maps every boots item to
+      one of five archetypes + a material (from its `boot` metadata, or inferred from set/rarity), sharing
+      the set motif with the helmet + chest + pauldrons + gloves + belt. Built from layered primitives
+      (shaft + foot/vamp + sole/cuff) and anchored at the **foot** (not the shin midpoint), so it rides
+      the leg's bottom and **strides with the feet without clipping the leg or the ground**. Built once
+      per leg (no reallocation), tier-gated (finer trims on high; core always drawn). Covered by
+      `test/items.test.js` (incl. an on-leg / no-ground-clip stride invariant) + `test/e2e/worn-boots.spec.js`
+      (a real-browser screenshot of distinct boots mid-stride) — Task 30
 - [ ] Puzzles (levers, plates, gated doors)

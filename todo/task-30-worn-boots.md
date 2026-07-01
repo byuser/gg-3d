@@ -1,7 +1,11 @@
 # Task 30 — Worn boots
 
 > Part of the [Good Game 3D backlog](../TODO.md). Shared rules + Definition of Done live there.
-- **Status:** `[ ]`
+- **Status:** `[x]` 2026-07-01 — Shipped: per-item boot archetypes (shoe / boot / greave /
+  sabaton / warboot) built from layered primitives (shaft + foot/vamp + sole/cuff), anchored at the
+  foot so they stride with the feet without clipping the leg or ground; pure `bootArchetype(def)`
+  selector, tier-gated trims, no mesh reallocation on equip; Vitest on-leg/no-ground-clip stride
+  invariant + Playwright mid-stride screenshot spec. No `SAVE_VERSION` change.
 - **Depends on:** Task 12 (the `boots` slot), Task 3, Task 4. Shared bar above.
 - **Goal.** Boots are **plain cylinders on the legs** (`_buildWornGear` ~1225-1232,
   over the existing feet at y ≈ -0.62) that can intersect the legs/ground in the

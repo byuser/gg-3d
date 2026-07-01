@@ -50,6 +50,70 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-07-01] — Task 30 — Worn boots: a distinct real pair of boots per item
+
+Sixth of the **worn-equipment appearance overhaul** (Tasks 25–35): the feet. Each
+`boots` item now renders as a distinct pair of boots — layered primitives (a shaft up
+the shin + a foot/vamp over the existing shoe + a sole/cuff) that ride the leg pivots
+and stride with the feet — instead of one plain calf cylinder that could intersect the
+leg or punch through the ground.
+
+### Added
+
+- **Per-item procedural boot archetypes.** The two plain calf cylinders
+  (`_buildWornGear`, anchored at the shin midpoint, leg-local −0.5) are replaced by
+  **five** distinct boots, chosen by the item def and built from layered primitives (a
+  shaft up the shin + a foot/vamp over the existing shoe + a sole/cuff + set/material
+  trim): a soft leather **shoe** with an ankle collar (default), a tall leather **boot**
+  with a folded-over cuff (rare/non-set), a plated iron **greave** + sabaton with a
+  pointed metal toe + a knee poleyn (Ironguard), an overlapping dragonscale **sabaton**
+  with scale plates climbing the shin + a swept cuff spine (Dragonscale), and an ornate
+  gold-trimmed steel **warboot** with a knee boss + a gold rim (epic/legendary). Built
+  from the proven mesh/material helpers, so they're **headless-safe**.
+- **`bootArchetype(def)` selector** (`src/data/items.js`) — a **pure, total,
+  deterministic** function mapping every `boots` item to a `{ archetype, material }` pair.
+  Each boot opts in via new `boot: { archetype, material }` metadata; any boots def without
+  it still resolves a sensible pair from its **set** (Dragonscale → scaled sabaton,
+  Ironguard → plated greave) and **rarity** (legendary/epic → warboot, rare → boot, else
+  shoe), then clamps to the known archetype/material lists so the result is always one the
+  builder can draw. Coordinated with `beltArchetype`/`gloveArchetype`/`pauldronArchetype`/
+  `chestArchetype`/`helmetArchetype` (shared iron/steel/dragonscale materials + matching
+  set motifs) so a full **Ironguard**/**Dragonscale** suit — helm + cuirass + shoulders +
+  gauntlets + belt + greaves — reads as one. Exported on the test seam.
+- **On-foot fit (no ground clip).** Each boot is anchored at the **foot** (each archetype
+  group node sits at leg-local (0, −0.62, 0.02), the shoe centre) rather than the shin
+  midpoint, so a part's local +y is height above the foot and the whole boot rides the
+  leg's **bottom**. Because the group is rigidly parented to the leg pivot (like the shoe
+  it sits over) and the leg swing only ever **raises** the foot, nothing new dips below the
+  existing shoes — no ground clip. Every part is kept within the shoe's footprint and
+  between the sole and mid-shin, so it hugs the leg without clipping it.
+- **Tier-gated** (`wornDetailFor().boots` / `.bootDetail`). Boots are part of the core
+  silhouette (**always built**, like the gloves/cloak); only the finer trims/scale rows are
+  dropped on the low tier so phones keep their budget.
+- **Task 30 tests** — `test/items.test.js` gains the boot-archetype selector suite
+  (validity/on-theme distinctness/set-motif sharing with chest+pauldrons+gloves+belt+helmet/
+  pure-total inference/determinism), a pre-build-once-per-leg + no-leak-across-equip-churn
+  check, the core-silhouette + tier-gate, a shows-exactly-the-equipped-archetype check, and an
+  **on-leg / no-ground-clip stride invariant** (every boot part centre hugs the foot/shin
+  envelope and, sampled across the full leg-swing range, stays at/above the existing shoe
+  floor so it never dips below the feet it rides on). Suite 64 → 73; **Vitest 411 → 420**.
+- **`test/e2e/worn-boots.spec.js`** — a real-browser Playwright spec that boots the built
+  site, equips several boots, holds Lily in a steady **mid-stride** pose, frames a close-up
+  of her lower legs + feet and **screenshots distinct boots striding on the feet**, asserting
+  each maps to its archetype, the shapes visibly differ, and there are no console errors (with
+  the shared `GG_LOCAL_BABYLON` route hook for offline sandboxes). Registered as the
+  `worn-boots-desktop` project in `playwright.config.js`.
+
+### Changed
+
+- **`refreshWornGear` reveals the equipped boot archetype pair** (both legs) and paints it by
+  rarity/set, hiding the other four groups — the pre-built groups are toggled, never
+  reallocated, so equip/unequip churn can't leak. `p.gearShown.boots` /
+  `p.gearShown.bootArchetype` are exposed for tests/debugging. `g.boots` changed from an array
+  of two cylinders to an archetype-keyed record (`{ shoe, boot, greave, sabaton, warboot }`,
+  each `{ nodes:[L,R], mats, meshes }`), matching the gloves/pauldrons structure. No
+  `SAVE_VERSION` change (boots are transient visuals).
+
 ## [2026-07-01] — Task 29 — Worn belts: a distinct real belt per item
 
 Fifth of the **worn-equipment appearance overhaul** (Tasks 25–35): the waist. Each
