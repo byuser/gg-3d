@@ -185,6 +185,53 @@
     return out;
   }
 
+  // ---- Worn-helmet archetypes (Task 25) ---------------------------------
+  // Each helmet renders as a distinct, real-looking head piece instead of one
+  // rarity-tinted dome. The 3D SHAPE is chosen by a pure, testable selector so the
+  // worn-gear builder (src/game.js `_buildWornGear`) can pre-build every archetype
+  // once and just toggle the matching one on equip. A helmet def opts in via a
+  // `helm: { archetype, material }` block; without it we still resolve a sensible
+  // archetype + material from the item's set / rarity so ANY helmet maps to a valid
+  // pair (the selector never returns something the builder can't draw).
+  //
+  //   archetype: "cap"    soft brimmed cap (leather / cloth)
+  //              "open"   open helm with nasal + cheek guards (iron / steel)
+  //              "great"  full great-helm with a visor slit
+  //              "dragon" horned/finned dragon helm
+  //              "crown"  banded great-crown with points + a gem
+  //   material:  "leather" | "cloth" | "iron" | "steel" | "gold" | "dragonscale"
+  const HELM_ARCHETYPES = ["cap", "open", "great", "dragon", "crown"];
+  const HELM_MATERIALS = ["leather", "cloth", "iron", "steel", "gold", "dragonscale"];
+  // Base tints per material (rarity `paint()` then recolours the built mesh, but a
+  // sensible base keeps the un-painted headless build + any preview readable).
+  const HELM_MATERIAL_TINT = {
+    leather: "#7a5230", cloth: "#8a7a5a", iron: "#9fb0c8",
+    steel: "#c3ccd8", gold: "#e8c057", dragonscale: "#b8603a",
+  };
+  // Resolve a helmet item def to a { archetype, material } pair. Pure + total:
+  // honours an explicit `helm` block, else infers from the item's set (Dragonscale
+  // → dragon helm, Ironguard → open iron helm) and rarity (legendary → crown), and
+  // finally clamps to the known archetype/material lists so the result is always
+  // one the builder can draw.
+  function helmetArchetype(def) {
+    let archetype = "cap";
+    let material = "leather";
+    const h = def && def.helm;
+    if (h && h.archetype) archetype = h.archetype;
+    else if (def && def.set === "dragonscale") archetype = "dragon";
+    else if (def && def.rarity === "legendary") archetype = "crown";
+    else if (def && def.set === "ironguard") archetype = "open";
+    else if (def && (def.rarity === "epic" || def.rarity === "rare")) archetype = "great";
+    if (h && h.material) material = h.material;
+    else if (def && def.set === "dragonscale") material = "dragonscale";
+    else if (def && def.rarity === "legendary") material = "gold";
+    else if (def && (def.set === "ironguard" || def.rarity === "epic")) material = "steel";
+    else if (def && def.rarity === "rare") material = "iron";
+    if (!HELM_ARCHETYPES.includes(archetype)) archetype = "cap";
+    if (!HELM_MATERIALS.includes(material)) material = "leather";
+    return { archetype, material };
+  }
+
   // An item's effective stat block once its enhancement level + affixes are folded
   // in. `haste` (a sub-1 cooldown multiplier) improves *toward* zero, so we scale
   // its distance from 1 instead of the raw value; affix haste then compounds.
@@ -281,8 +328,8 @@
     },
 
     // ----- Armour (normal / buyable) -----
-    leather_cap:    { name: "Leather Cap",    icon: "🧢", type: "helmet",      rarity: "normal", cost: 14, desc: "+15 max health.", stats: { maxHealth: 15 } },
-    iron_helm:      { name: "Iron Helm",      icon: "⛑️", type: "helmet",      rarity: "normal", cost: 30, desc: "+25 health, +4% resist.", stats: { maxHealth: 25, damageReduction: 0.04 }, set: "ironguard" },
+    leather_cap:    { name: "Leather Cap",    icon: "🧢", type: "helmet",      rarity: "normal", cost: 14, desc: "+15 max health.", stats: { maxHealth: 15 }, helm: { archetype: "cap", material: "leather" } },
+    iron_helm:      { name: "Iron Helm",      icon: "⛑️", type: "helmet",      rarity: "normal", cost: 30, desc: "+25 health, +4% resist.", stats: { maxHealth: 25, damageReduction: 0.04 }, set: "ironguard", helm: { archetype: "open", material: "iron" } },
     leather_vest:   { name: "Leather Vest",   icon: "🦺", type: "breastplate", rarity: "normal", cost: 20, desc: "+20 health, +4% resist.", stats: { maxHealth: 20, damageReduction: 0.04 } },
     iron_plate:     { name: "Iron Plate",     icon: "🛡️", type: "breastplate", rarity: "normal", cost: 40, desc: "+35 health, +10% resist.", stats: { maxHealth: 35, damageReduction: 0.1 }, set: "ironguard" },
     leather_boots:  { name: "Leather Boots",  icon: "🥾", type: "boots",       rarity: "normal", cost: 16, desc: "+0.8 move speed.", stats: { moveSpeed: 0.8 } },
@@ -314,7 +361,7 @@
                       weapon: { ranged: false, damage: 3, cooldown: 0.16, multishot: 1, melee: { range: 2.5, arc: 1.4 }, color: "#ff9db0" }, stats: { lifesteal: 1 } },
     thunder_hammer: { name: "Thunder Hammer", icon: "🔨", type: "weapon", rarity: "rare", hands: 2, value: 130, desc: "Two-handed. Crushing, enormous arc.",
                       weapon: { ranged: false, damage: 10, cooldown: 0.85, multishot: 1, melee: { range: 3.6, arc: 2.7 }, color: "#ffd76a" } },
-    dragon_helm:    { name: "Dragon Helm",   icon: "🐲", type: "helmet",      rarity: "rare", value: 80, desc: "+40 health, +10% resist.", stats: { maxHealth: 40, damageReduction: 0.1 }, set: "dragonscale" },
+    dragon_helm:    { name: "Dragon Helm",   icon: "🐲", type: "helmet",      rarity: "rare", value: 80, desc: "+40 health, +10% resist.", stats: { maxHealth: 40, damageReduction: 0.1 }, set: "dragonscale", helm: { archetype: "dragon", material: "dragonscale" } },
     aegis_plate:    { name: "Aegis Plate",   icon: "🛡️", type: "breastplate", rarity: "rare", value: 100, desc: "+55 health, +16% resist.", stats: { maxHealth: 55, damageReduction: 0.16 } },
     winged_boots:   { name: "Winged Boots",  icon: "🪽", type: "boots",       rarity: "rare", value: 80, desc: "+1.4 speed, +5% resist.", stats: { moveSpeed: 1.4, damageReduction: 0.05 } },
     vampiric_ring:  { name: "Vampiric Ring", icon: "🩸", type: "ring",        rarity: "rare", value: 70, desc: "Heal +3 per kill.", stats: { lifesteal: 3 } },
@@ -342,7 +389,7 @@
                       weapon: { ranged: false, damage: 18, cooldown: 0.6, multishot: 1, melee: { range: 4.4, arc: 2.9 }, color: "#ff5d5d" }, stats: { lifesteal: 4 } },
     astral_bow:     { name: "Astral Bow", icon: "🌟", type: "weapon", rarity: "legendary", hands: 2, value: 300, desc: "Two-handed. A 5-arrow piercing storm.",
                       weapon: { ranged: true, shape: "arrow", damage: 5, cooldown: 0.4, multishot: 5, spread: 0.1, pierce: 3, boltSpeed: 46, boltRadius: 0.6, gravity: 6, color: "#a8e0ff", haloColor: "#eaffff" } },
-    crown_eternal:  { name: "Crown Eternal", icon: "👑", type: "helmet", rarity: "legendary", value: 280, desc: "+90 health, +18% resist, +3 damage.", stats: { maxHealth: 90, damageReduction: 0.18, damage: 3 } },
+    crown_eternal:  { name: "Crown Eternal", icon: "👑", type: "helmet", rarity: "legendary", value: 280, desc: "+90 health, +18% resist, +3 damage.", stats: { maxHealth: 90, damageReduction: 0.18, damage: 3 }, helm: { archetype: "crown", material: "gold" } },
     wings_of_dawn:  { name: "Wings of Dawn", icon: "🪽", type: "cloak", rarity: "legendary", value: 300, desc: "+1.6 speed, +35 health, +8% resist.", stats: { moveSpeed: 1.6, maxHealth: 35, damageReduction: 0.08 } },
 
     // ----- Potions / consumables (drag-slotted from the unified bag) -----
@@ -403,4 +450,5 @@ export {
   isMaterial, isStackable, SHOP_STOCK, POTION_STOCK, INGREDIENT_STOCK, ALCHEMIST_STOCK, RARE_DROPS, FEATURED_POOL,
   AFFIXES, RARITY_AFFIX_COUNT, AFFIX_TIER_MULT, itemCategory, affixPoolFor, rollAffixes,
   affixStats, affixMagMult, SETS, setCounts, setBonusStats, activeSets,
+  HELM_ARCHETYPES, HELM_MATERIALS, HELM_MATERIAL_TINT, helmetArchetype,
 };

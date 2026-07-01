@@ -30,6 +30,7 @@ import {
   effectiveStats, EQUIP_SLOTS, WORN_SLOTS, TWO_HANDED, SLOT_META, FISTS, ITEM_DB, getDef, isGear,
   isMaterial, isStackable, SHOP_STOCK, POTION_STOCK, INGREDIENT_STOCK, ALCHEMIST_STOCK, RARE_DROPS, FEATURED_POOL,
   AFFIXES, rollAffixes, affixStats, SETS, setBonusStats, activeSets, itemCategory,
+  HELM_MATERIAL_TINT, helmetArchetype,
 } from "./data/items.js";
 import {
   MATERIALS, MATERIAL_IDS, RESOURCE_KINDS, RELICS, CASTLE_PARTS, CASTLE_PART_BY_ID,
@@ -351,8 +352,8 @@ import {
   // are dropped on the low tier so phones keep their budget. Equip still applies
   // a missing piece's STATS — only its mesh is skipped.
   function wornDetailFor(tier) {
-    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, cloak: true, cloakSway: false };
-    return { pauldrons: true, belt: true, gloves: true, cloak: true, cloakSway: true };
+    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, cloak: true, cloakSway: false, helmDetail: false };
+    return { pauldrons: true, belt: true, gloves: true, cloak: true, cloakSway: true, helmDetail: true };
   }
 
   // ---- Inventory / equipment operations ----------------------------------
@@ -1231,13 +1232,17 @@ import {
       const off = (m) => { try { m.setEnabled(false); } catch (e) {} return m; };
       const tone = "#9fb0c8"; // neutral steel base; refreshWornGear tints by rarity
 
-      // Helmet — a domed cap with a small brim, over the head.
-      const helmMat = emat(scene, "gearHelm", tone, 0.06);
+      // Helmet — a distinct, real-looking head piece per item (Task 25). The
+      // `helmet` anchor stays a single, stable TransformNode (so equip/unequip only
+      // toggles it — no realloc/leak); under it we pre-build EVERY archetype once
+      // and refreshWornGear() enables the one the equipped helmet maps to.
       const helmet = new BABYLON.TransformNode("gearHelmet", scene);
       helmet.parent = this.lean; helmet.position.set(0, 1.88, 0.02);
-      const dome = sphere(scene, "gearHelmDome", 0.66, helmMat); dome.parent = helmet; dome.scaling.set(1, 0.8, 1); cast(dome);
-      const brim = disc(scene, "gearHelmBrim", 0.36, helmMat); brim.parent = helmet; brim.rotation.x = Math.PI / 2; brim.position.y = -0.16;
-      g.helmet = helmet; g.helmetMat = helmMat; off(helmet);
+      g.helmet = helmet; off(helmet);
+      this._buildHelmets(scene, helmet, spec, cast, off);
+      // Back-compat: keep g.helmetMat pointing at a material so any old caller that
+      // paints it still works; refreshWornGear paints the ACTIVE archetype's set.
+      g.helmetMat = g.helms.open.mats[0];
 
       // Breastplate — a shell over the torso.
       const chestMat = emat(scene, "gearChestM", tone, 0.06);
@@ -1295,6 +1300,114 @@ import {
       this.refreshWornGear();
     }
 
+    // Build one procedural mesh group per helmet archetype (Task 25), all parented
+    // to the shared `helmet` anchor and hidden; refreshWornGear() shows the one the
+    // equipped helmet maps to. Each group tracks its own material list so the rarity
+    // recolour/sheen (paint()) can tint the whole helm. Shapes are seated on the
+    // head (anchor at lean-y 1.88, head centre ≈ local y −0.13) so nothing covers
+    // the eyes (local z ≈ +0.25) or the ponytails (local y ≈ +0.14, z −0.06).
+    // Tier-gated: the low tier gets a simpler shell (`spec.helmDetail === false`).
+    _buildHelmets(scene, anchor, spec, cast, off) {
+      const detail = spec.helmDetail !== false; // full trims only above the low tier
+      const g = this.gear;
+      const helms = (g.helms = {});
+      let uid = 0;
+      // A fresh emissive material for a helmet part; base tint by the archetype's
+      // material, tracked so paint() can recolour the whole helm on equip.
+      const hmat = (mats, key, emissive) => {
+        const m = emat(scene, "gearHelm" + key + uid++, HELM_MATERIAL_TINT[key] || "#9fb0c8", emissive == null ? 0.06 : emissive);
+        mats.push(m); return m;
+      };
+      // A shell segment (rounded box) attached to a group node.
+      const shell = (node, name, w, h, d, m) => { const x = box(scene, name, w, h, d, m); x.parent = node; cast(x); return x; };
+      const dome = (node, name, dia, m) => { const x = sphere(scene, name, dia, m); x.parent = node; cast(x); return x; };
+      // Make + register an archetype group under the anchor.
+      const group = (key) => {
+        const node = new BABYLON.TransformNode("helm_" + key, scene);
+        node.parent = anchor; const mats = [];
+        helms[key] = { node, mats }; off(node); return { node, mats };
+      };
+
+      // -- CAP: a soft rounded cap hugging the crown + a small stitched brim. --
+      {
+        const { node, mats } = group("cap");
+        const capM = hmat(mats, "leather", 0.05);
+        const crown = dome(node, "capCrown", 1.06, capM);
+        crown.position.set(0, -0.02, -0.04); crown.scaling.set(1.02, 0.82, 1.08);
+        const brim = disc(scene, "capBrim", 0.42, capM); brim.parent = node; brim.rotation.x = Math.PI / 2; brim.position.set(0, -0.2, 0.18); cast(brim);
+        if (detail) { // a rolled band around the base
+          const band = cyl(scene, "capBand", 1.02, 1.02, 0.14, hmat(mats, "cloth", 0.04)); band.parent = node; band.position.set(0, -0.16, -0.04); band.scaling.z = 1.06; cast(band); }
+      }
+
+      // -- OPEN HELM: a metal skull cap with a nasal bar + hinged cheek guards. --
+      {
+        const { node, mats } = group("open");
+        const steelM = hmat(mats, "iron", 0.06);
+        const cap = dome(node, "openCap", 1.02, steelM); cap.position.set(0, 0.0, -0.04); cap.scaling.set(1.0, 0.9, 1.06);
+        const rim = cyl(scene, "openRim", 1.04, 1.08, 0.12, steelM); rim.parent = node; rim.position.set(0, -0.14, -0.04); rim.scaling.z = 1.05; cast(rim);
+        // Nasal bar down the brow — sits ABOVE the eyes (local y stays > -0.16).
+        const nasal = shell(node, "openNasal", 0.1, 0.34, 0.12, steelM); nasal.position.set(0, -0.16, 0.44); nasal.rotation.x = 0.12;
+        if (detail) {
+          for (const s of [-1, 1]) { // cheek guards down each side of the face
+            const cheek = shell(node, "openCheek", 0.12, 0.34, 0.24, steelM);
+            cheek.position.set(0.34 * s, -0.24, 0.28); cheek.rotation.z = 0.18 * s;
+          }
+          const crest = shell(node, "openCrest", 0.08, 0.14, 0.7, hmat(mats, "gold", 0.14)); crest.position.set(0, 0.34, -0.06); // a low comb ridge
+        }
+      }
+
+      // -- GREAT HELM: a full enclosing helm with a horizontal visor slit. --
+      {
+        const { node, mats } = group("great");
+        const plateM = hmat(mats, "steel", 0.06);
+        const barrel = cyl(scene, "greatBarrel", 1.02, 1.12, 0.66, plateM); barrel.parent = node; barrel.position.set(0, -0.04, -0.02); barrel.scaling.z = 1.02; cast(barrel);
+        const top = dome(node, "greatTop", 1.06, plateM); top.position.set(0, 0.22, -0.02); top.scaling.set(1.0, 0.62, 1.0);
+        // The dark visor slit across the front (a thin recessed band).
+        const slit = shell(node, "greatSlit", 0.62, 0.08, 0.06, emat(scene, "gearHelmSlit" + uid++, "#181c22", 0.0));
+        slit.position.set(0, -0.06, 0.54); mats.push(slit.material);
+        if (detail) {
+          const brow = shell(node, "greatBrow", 0.66, 0.1, 0.12, plateM); brow.position.set(0, 0.06, 0.5); // brow reinforce above the slit
+          const rivet = shell(node, "greatRidge", 0.06, 0.5, 0.12, hmat(mats, "gold", 0.12)); rivet.position.set(0, -0.16, 0.52); // vertical breather ridge
+        }
+      }
+
+      // -- DRAGON HELM: a finned/horned helm — sweeping horns + a scaled crest. --
+      {
+        const { node, mats } = group("dragon");
+        const scaleM = hmat(mats, "dragonscale", 0.08);
+        const cap = dome(node, "dragCap", 1.04, scaleM); cap.position.set(0, 0.0, -0.04); cap.scaling.set(1.02, 0.9, 1.08);
+        const rim = cyl(scene, "dragRim", 1.06, 1.12, 0.12, scaleM); rim.parent = node; rim.position.set(0, -0.14, -0.04); rim.scaling.z = 1.05; cast(rim);
+        const snout = shell(node, "dragSnout", 0.26, 0.2, 0.2, scaleM); snout.position.set(0, -0.18, 0.46); snout.rotation.x = 0.1; // a short brow guard
+        const hornM = hmat(mats, "gold", 0.1);
+        for (const s of [-1, 1]) { // curved horns sweeping up + back off the temples
+          const horn = cone(scene, "dragHorn", 0.2, 0.02, 0.7, hornM); horn.parent = node; cast(horn);
+          horn.position.set(0.34 * s, 0.18, -0.02); horn.rotation.z = 0.7 * s; horn.rotation.x = -0.5;
+          if (detail) { const tip = cone(scene, "dragHornT", 0.09, 0.01, 0.32, hornM); tip.parent = node; cast(tip); tip.position.set(0.56 * s, 0.5, -0.16); tip.rotation.z = 0.95 * s; tip.rotation.x = -0.7; }
+        }
+        if (detail) { // a row of small fins down the centre crest
+          for (let i = 0; i < 3; i++) { const fin = cone(scene, "dragFin", 0.12, 0.01, 0.2 - i * 0.03, hornM); fin.parent = node; cast(fin); fin.position.set(0, 0.3 - i * 0.02, -0.12 - i * 0.16); fin.rotation.x = -0.35; }
+        }
+      }
+
+      // -- CROWN: a banded great-crown with points + a centre gem (legendary). --
+      {
+        const { node, mats } = group("crown");
+        const capM = hmat(mats, "cloth", 0.05);
+        const cap = dome(node, "crownCap", 0.98, capM); cap.position.set(0, 0.02, -0.04); cap.scaling.set(1.0, 0.78, 1.06); // a soft coif under the band
+        const goldM = hmat(mats, "gold", 0.16);
+        const band = cyl(scene, "crownBand", 1.06, 1.06, 0.22, goldM); band.parent = node; band.position.set(0, 0.02, -0.02); band.scaling.z = 1.04; cast(band);
+        const pts = detail ? 8 : 5;
+        for (let i = 0; i < pts; i++) { // a ring of points around the band
+          const a = (i / pts) * Math.PI * 2;
+          const pt = cone(scene, "crownPt", 0.12, 0.01, 0.24, goldM); pt.parent = node; cast(pt);
+          pt.position.set(Math.sin(a) * 0.5, 0.2, Math.cos(a) * 0.5 - 0.02);
+        }
+        // A glowing centre gem at the brow.
+        const gem = BABYLON.MeshBuilder.CreatePolyhedron("crownGem", { type: 1, size: 0.12 }, scene);
+        gem.material = gloss(hmat(mats, "gold", 0.3), 0.2, 0.1); gem.parent = node; gem.position.set(0, 0.04, 0.52); cast(gem);
+      }
+    }
+
     // Show/hide + recolour each worn-gear piece from the live equipment. Pure
     // visual: no allocation (meshes built once), so equipping never leaks. The
     // rarity colour signals power at a glance; legendary/epic get a faint glow.
@@ -1316,7 +1429,26 @@ import {
         if (meshes) for (const m of (Array.isArray(meshes) ? meshes : [meshes])) { try { m.setEnabled(on); } catch (e) {} }
         if (on && mats) paint(Array.isArray(mats) ? mats : [mats], getDef(inst.id));
       };
-      apply("helmet", g.helmet, g.helmetMat);
+      // Helmet: toggle the anchor, then reveal ONLY the archetype the equipped
+      // helmet maps to (Task 25) and paint that group by rarity. The unused
+      // archetype groups stay hidden so a leather cap and a dragon helm never both
+      // show; the anchor object itself never changes (no realloc / leak).
+      {
+        const inst = this.equipment.helmet;
+        const on = !!(inst && inst !== TWO_HANDED);
+        shown.helmet = on;
+        try { g.helmet.setEnabled(on); } catch (e) {}
+        const sel = on ? helmetArchetype(getDef(inst.id)).archetype : null;
+        shown.helmetArchetype = sel; // observable for tests + debugging
+        if (g.helms) {
+          for (const key in g.helms) {
+            const grp = g.helms[key];
+            const show = on && key === sel;
+            try { grp.node.setEnabled(show); } catch (e) {}
+            if (show) paint(grp.mats, getDef(inst.id));
+          }
+        }
+      }
       apply("breastplate", g.chest, g.chestMat);
       apply("belt", g.belt, g.beltMat);
       apply("pauldrons", g.pauldrons, g.pauldronMat);
@@ -11640,6 +11772,9 @@ import {
       // ---- Items & equipment depth (Task 12): affixes, sets, derived stats ----
       AFFIXES, SETS, rollAffixes, affixStats, setBonusStats, activeSets, itemCategory,
       deriveStats, equippedAfter, equipDelta, wornDetailFor, isGear,
+      // ---- Worn helmets: distinct archetype per item (Task 25) ----
+      helmetArchetype,
+
       // ---- Responsive HUD / drag-to-slot / fullscreen (Task 16) ----
       dragSlotReducer, pointerDragSupported, Fullscreen,
       // ---- Customizable on-screen control layout (Task 36) ----
@@ -11711,6 +11846,8 @@ import {
       get zoneManager() { return zoneManager; },
       get waves() { return waveSystem; },
       get player() { return playerRef; },
+      get camera() { return cameraRef; },
+      get scene() { return sceneRef; },
       get state() { return Shop.state; },
       get world() { return worldRef; },
       startGame,
