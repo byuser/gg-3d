@@ -769,6 +769,16 @@ whole thing is unit-testable without a GPU:
   builder pre-builds all five groups once under the head anchor and `refreshWornGear` reveals the
   one that's equipped (rarity recolour/sheen via `paint()`, set motif on Ironguard/Dragonscale). It
   seats on the crown with no face/ponytail clipping and drops its finer trims on the low tier.
+- **Distinct worn chest pieces (Task 26).** Each **breastplate** renders as its own layered torso
+  piece — a laced **leather vest**, a segmented **iron cuirass** (banded lames + gorget), an ornate
+  **aegis plate** (sculpted pectorals + emblem + gold hem), an overlapping **dragonscale** shell
+  with a chest gem, or a flowing cloth **robe** — instead of one rarity-tinted cylinder. A pure,
+  tested selector `chestArchetype(def)` maps every `breastplate` item (via its `chest:{ archetype,
+  material }` metadata, or inferred from set/rarity) to one of five archetypes + a material,
+  coordinated with `helmetArchetype` so a full **Ironguard**/**Dragonscale** suit reads as one; the
+  builder pre-builds all five groups once under the torso anchor and `refreshWornGear` reveals the
+  equipped one (rarity recolour/sheen via `paint()`, set motif). It seats on the torso clear of the
+  neck, arms, belt and pauldrons, and drops its finer straps/lames on the low tier.
 - **Persistence.** `SAVE_VERSION` 7 stores `{ id, lvl, aff }` per instance across the bag + all 12
   slots; older saves (no affixes / no new slots) load with clean defaults.
 - **Value / weight.** Items carry a coin **value** (resale, scaled by enhancement); **weight /
@@ -1220,4 +1230,15 @@ Source: GitHub Actions**.
       `paint()`, set motif on Ironguard/Dragonscale, tier-gated trims, seated with no face/ponytail
       clipping and **no mesh reallocation** on equip. Covered by `test/items.test.js` +
       `test/e2e/worn-helmets.spec.js` (a real-browser screenshot of three+ distinct helmets worn) — Task 25
+- [x] **Distinct worn chest pieces** — each **breastplate** shows as its own layered torso piece instead
+      of one rarity-tinted cylinder: a laced **leather vest**, a segmented **iron cuirass** (banded lames +
+      gorget), an ornate **aegis plate** (sculpted pectorals + emblem + gold hem), an overlapping
+      **dragonscale** shell with a chest gem, or a flowing cloth **robe**. A pure, tested
+      `chestArchetype(def)` selector maps every breastplate item to one of five procedural archetypes + a
+      material (from its `chest` metadata, or inferred from set/rarity), coordinated with the helmet so a
+      full Ironguard/Dragonscale suit reads as one; the builder pre-builds all archetypes once under the
+      torso anchor and reveals the equipped one — rarity recolour/sheen via `paint()`, set motif,
+      tier-gated straps/lames, seated clear of the neck/arms/belt/pauldrons and **no mesh reallocation**
+      on equip. Covered by `test/items.test.js` + `test/e2e/worn-chests.spec.js` (a real-browser
+      screenshot of distinct chests worn) — Task 26
 - [ ] Puzzles (levers, plates, gated doors)

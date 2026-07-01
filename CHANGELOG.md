@@ -50,6 +50,68 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-07-01] — Task 26 — Worn chest pieces: layered breastplates & robes per item
+
+Second of the **worn-equipment appearance overhaul** (Tasks 25–35): the chest — the
+visual anchor of an armour set — now renders as a distinct, layered torso piece per
+item instead of one rarity-tinted z-scaled cylinder.
+
+### Added
+
+- **Per-item procedural chest archetypes.** The single cylinder (`_buildWornGear`) is
+  replaced by **five** distinct, layered torso pieces, chosen by the item def: a laced
+  **leather vest** (rounded shell + collar yoke + a stitched front seam), a segmented
+  **iron cuirass** (breast plate + a central keel + stacked abdominal **lames** +
+  shoulder straps + a gorget), an ornate **aegis plate** (sculpted **pectoral** swells
+  + a gold gorget + hem band + an embossed emblem boss), an overlapping **dragonscale**
+  shell (rows of scales climbing the front + shoulder spines + a glowing sternum gem),
+  and a flowing cloth **robe** (soft bodice + a draped over-mantle + a gold sash). Built
+  from the proven mesh/material helpers, so they're **headless-safe**.
+- **`chestArchetype(def)` selector** (`src/data/items.js`) — a **pure, total,
+  deterministic** function mapping every `breastplate` item to a `{ archetype, material }`
+  pair. Each breastplate opts in via new `chest: { archetype, material }` metadata; any
+  chest without it still resolves a sensible pair from its **set** (Dragonscale → scaled
+  plate, Ironguard → banded cuirass) and **rarity** (legendary/epic/rare → ornate plate,
+  else vest), then clamps to the known archetype/material lists so the result is always
+  one the builder can draw. Coordinated with `helmetArchetype` (shared iron/steel/
+  dragonscale materials + matching set motifs) so a full **Ironguard**/**Dragonscale**
+  suit reads as one. Exported on the test seam.
+- **`test/e2e/worn-chests.spec.js`** — a real-browser Playwright spec that boots the
+  built site, equips several breastplates, frames a close-up of Lily's torso and
+  **screenshots distinct chests worn**, asserting each maps to its archetype and the
+  shapes visibly differ (with the shared `GG_LOCAL_BABYLON` route hook for offline
+  sandboxes).
+
+### Changed
+
+- **`refreshWornGear` reveals the equipped breastplate's archetype.** All five archetype
+  groups are pre-built **once** under a single stable `chest` anchor (`_buildChests`);
+  equipping toggles the anchor and enables only the matching group — so a leather vest
+  and a dragonscale plate never both show, and **no chest mesh is ever reallocated** (the
+  no-leak contract holds). The helmet + chest reveal now share one `applyArch` helper.
+  The active group is recoloured/sheened by **rarity** (`paint()`), with the set motif
+  carried on Ironguard/Dragonscale pieces. The active archetype is tracked on
+  `player.gearShown.chestArchetype` (observable for tests).
+- **Fit + tier-gating.** Chest pieces seat on the torso (`lean`) clear of the **neck**
+  (below the head), the **arms** (inside the shoulder pivots), the **belt** (Task 29,
+  rides just below) and the **pauldrons** (Task 27, out on the shoulders) in idle/walk/
+  attack. `wornDetailFor(tier)` gains a **`chestDetail`** knob that drops the finer
+  straps/laces/lames/emblems on the **low** tier so phones keep a simpler shell.
+
+### Tests
+
+- **`test/items.test.js`**: +9 cases (suite **28 → 37**; Vitest total **375 → 384**) —
+  the selector is valid + total for every breastplate def, gives the shipped pieces
+  distinct on-theme archetypes, shares the set motif with the matching helmet,
+  infers/clamps for chests with no `chest` block (incl. a cloth robe), is deterministic,
+  pre-builds every archetype group with materials, tier-gates the trim detail, shows
+  exactly the equipped breastplate's archetype (and nothing when bare / only one at a
+  time), and never reallocates the chest meshes across equip churn. The Vitest Babylon
+  stub node now tracks `setEnabled`/`isEnabled` so the "one archetype at a time"
+  invariant is checkable headlessly.
+
+No `SAVE_VERSION` change — worn chest pieces are transient visuals (nothing new persists).
+
 ## [2026-07-01] — Task 25 — Worn helmets: a distinct, real-looking helm per item
 
 First of the **worn-equipment appearance overhaul** (Tasks 25–35): equipped gear
