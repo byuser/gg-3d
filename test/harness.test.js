@@ -1311,6 +1311,39 @@ console.log("\n[34] docs — CHANGELOG.md split + structure (no silent regressio
   ok(/\bCHANGELOG\.md\b/.test(todo.split(/^##\s*7\.\s*Changelog/m)[1] || ""), "TODO.md §7 points at CHANGELOG.md");
   const strayLog = (todo.match(/^- \d{4}-\d{2}-\d{2} ·/gm) || []).length;
   ok(strayLog === 0, `TODO.md no longer contains dated changelog entries (found ${strayLog})`);
+
+  // Per-task spec split: the ~3200-line inline backlog was carved into one file
+  // per task under todo/, and §4 became a compact index that links each. Guard
+  // both directions so the split can't silently regress (a task file with no
+  // index row, or an index row with no file).
+  const todoDir = path.join(root, "todo");
+  ok(fs.existsSync(todoDir), "todo/ folder exists");
+  const specFiles = fs.existsSync(todoDir)
+    ? fs.readdirSync(todoDir).filter((f) => /^task-\d+-.+\.md$/.test(f))
+    : [];
+  ok(specFiles.length >= 41, `todo/ has a spec file per task (found ${specFiles.length}, expect ≥ 41)`);
+
+  // Every §4 index row (`| 27 | … | [`todo/task-27-…md`](./todo/task-27-…md) |`)
+  // must link to a file that exists; collect the linked filenames.
+  const linked = [...todo.matchAll(/\]\(\.\/todo\/(task-\d+-[a-z0-9-]+\.md)\)/g)].map((m) => m[1]);
+  const linkedSet = new Set(linked);
+  const missingFile = [...linkedSet].filter((f) => !specFiles.includes(f));
+  ok(missingFile.length === 0, `every §4 index spec link resolves to a file (missing: ${missingFile.join(", ") || "none"})`);
+
+  // …and every spec file is linked from the index (no orphan spec).
+  const orphan = specFiles.filter((f) => !linkedSet.has(f));
+  ok(orphan.length === 0, `every todo/ spec file is linked from the §4 index (orphans: ${orphan.join(", ") || "none"})`);
+
+  // Each spec file is a real task page: H1 title + the shared-rules backlink.
+  const badSpec = specFiles.filter((f) => {
+    const body = fs.readFileSync(path.join(todoDir, f), "utf8");
+    return !/^# Task \d+ — /m.test(body) || !/Part of the \[Good Game 3D backlog\]\(\.\.\/TODO\.md\)/.test(body);
+  });
+  ok(badSpec.length === 0, `every spec file has an H1 title + backlink (malformed: ${badSpec.join(", ") || "none"})`);
+
+  // The hub stays slim now that the bodies moved out (was ~3200 lines).
+  const todoLines = todo.split("\n").length;
+  ok(todoLines < 900, `TODO.md is slimmed to the hub (${todoLines} lines, expect < 900)`);
 }
   });
 });

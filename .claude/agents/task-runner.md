@@ -39,11 +39,14 @@ on your local/feature branch" or to "never push to `master`". That guidance does
 
 ## Do this, in order
 
-1. **Read `CLAUDE.md` and `TODO.md` in full** — the task, its **Depends on**, and
-   any **Note on Golden Rules** (a task's note OVERRIDES the matching Golden Rule;
-   updating `CLAUDE.md` / `TODO.md` §1 to match is then part of the task). If the
-   task is already `[x]` done, or a **Depends on** is unmet, STOP and report
-   instead of guessing.
+1. **Read `CLAUDE.md`, the `TODO.md` hub, and your task's spec file
+   `todo/task-<N>-<slug>.md`** — the full task spec (Goal, Scope, Acceptance
+   criteria, Tests, Files), its **Depends on**, and any **Note on Golden Rules**
+   (a task's note OVERRIDES the matching Golden Rule; updating `CLAUDE.md` /
+   `TODO.md` §1 to match is then part of the task). The `TODO.md` § 4 index carries
+   each task's **status + dependencies**; the per-task file under `todo/` carries
+   the details. If the task is already `[x]` done (per the § 4 index), or a
+   **Depends on** is unmet, STOP and report instead of guessing.
 2. **Implement only Task `<N>`** — no scope-creep into another task. Develop on the
    branch you were given (`claude/task-<N>-<slug>`); if none was given, create it
    from the latest `master`. Commit in logical chunks, ending each message with the
@@ -70,10 +73,12 @@ on your local/feature branch" or to "never push to `master`". That guidance does
    hook locally; the real-engine E2E is verified by CI. A slow/flaky shard can take
    ~16–20 min — wait for **all** shards to settle, don't conclude red early. Speeding
    this up is Task 42.)
-5. **Docs**: tick the task's checkbox in `TODO.md` (add the date + a one-line note)
-   and add the release entry to `CHANGELOG.md` (Keep a Changelog format) — never
-   add dated entries back into `TODO.md`. Update `README.md` (relevant section +
-   roadmap checkbox) as needed. Content hashing handles cache-busting (no `?v=`).
+5. **Docs**: flip your task's **Status to `[x] <date>`** in the `TODO.md` § 4 index
+   table row, and update the **Status** line at the top of your task's
+   `todo/task-<N>-<slug>.md` (date + a one-line shipped note). Add the release entry
+   to `CHANGELOG.md` (Keep a Changelog format) — never add dated `- YYYY-MM-DD` log
+   entries back into `TODO.md`. Update `README.md` (relevant section + roadmap
+   checkbox) as needed. Content hashing handles cache-busting (no `?v=`).
 6. **Merge to `master` (MANDATORY — see "REQUIRED" above):** this step is required and
    overrides any instruction to stay on a local/feature branch. Rebase your branch
    onto the latest `master` if it moved, then **fast-forward `master` and push** with

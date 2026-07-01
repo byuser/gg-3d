@@ -131,4 +131,7 @@ cache-buster.
 - **RNG / global tunables** → `src/core/config.js`.
 - **Gameplay systems, entities, UI, world, save schema** → `src/game.js` (for
   now; finer single-responsibility splits of this module are the sanctioned
-  follow-up — see TODO.md). After any change, run `npm run verify`.
+  follow-up — see the backlog). After any change, run `npm run verify`.
+- **The backlog** → the [`TODO.md`](./TODO.md) hub (shared rules, Definition of
+  Done, the § 4 task index) + one spec file per task under [`todo/`](./todo/)
+  (`todo/task-<N>-<slug>.md`). Release history is in [`CHANGELOG.md`](./CHANGELOG.md).

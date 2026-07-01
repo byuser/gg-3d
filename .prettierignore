@@ -12,6 +12,7 @@ src/game.js
 test/harness.test.js
 CHANGELOG.md
 TODO.md
+todo/
 package-lock.json
 playwright-report/
 test-results/

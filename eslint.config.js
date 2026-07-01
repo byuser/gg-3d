@@ -65,6 +65,10 @@ export default [
       // Workflow runtime's async wrapper (top-level await/return + injected
       // globals like agent()/phase()), so they don't parse as standalone modules.
       ".claude/**",
+      // One-shot Node migration/audit helpers for the per-task backlog split
+      // (todo/split-todo.mjs, todo/build-hub.mjs) — run manually via `node`, not
+      // part of the shipped app or the browser lint surface.
+      "todo/**",
     ],
   },
 ];

@@ -462,7 +462,8 @@ vite.config.js          # build → hashed static bundle in dist/ (Babylon stays
 eslint.config.js .prettierrc.json tsconfig.json   # lint / format / typecheck
 ARCHITECTURE.md         # module map + data flow + toolchain (read this first)
 CHANGELOG.md            # release history (Keep a Changelog format)
-TODO.md                 # agent task backlog + per-task acceptance criteria
+TODO.md                 # agent backlog hub: rules, Definition of Done, task index
+todo/                   # one spec file per backlog task (todo/task-<N>-<slug>.md)
 .github/workflows/      # CI (lint→typecheck→test→build→E2E) + Pages deploy
 public/.nojekyll        # copied into dist/ so Pages serves files as-is
 ```

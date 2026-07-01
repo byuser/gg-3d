@@ -19,8 +19,11 @@ sequential, **one-task-per-subagent** run.
 Follow the orchestrator protocol in `CLAUDE.md` → *Multi-agent orchestration* and
 `TODO.md` § 6.1:
 
-1. **Read** `CLAUDE.md` and `TODO.md` (§ 2 Definition of Done, § 5 Recommended
-   order, the tasks). **Resolve** my shorthand into a concrete, ordered task list:
+1. **Read** `CLAUDE.md` and the `TODO.md` hub (§ 2 Definition of Done, the § 4
+   **task index** — status + Depends on, § 5 Recommended order). Each task's full
+   spec lives in its own file under `todo/task-<N>-<slug>.md`; you don't need to
+   read them all to plan — the § 4 index + § 5 order carry status + dependencies.
+   **Resolve** my shorthand into a concrete, ordered task list:
    - `"N next tasks"` → the next N tasks whose status is `[ ]`, top-to-bottom of
      § 5 Recommended order.
    - `"tasks A, B and C"` → exactly those task numbers, ordered to respect § 5 and
@@ -31,7 +34,8 @@ Follow the orchestrator protocol in `CLAUDE.md` → *Multi-agent orchestration* 
    **`task-runner`** agent — to do **exactly** that task end-to-end on its own
    branch `claude/task-<N>-<slug>` cut from the latest `master`. Each subagent has
    a **fresh, isolated context** and cannot see this chat, so its prompt must tell
-   it to read `CLAUDE.md` + `TODO.md` and do Task `<N>` only.
+   it to read `CLAUDE.md` + the `TODO.md` hub **and its task's spec file
+   `todo/task-<N>-<slug>.md`**, and do Task `<N>` only.
 3. **Wait** for the subagent to fully finish — pipeline green, tests added,
    checkbox ticked, `CHANGELOG.md` updated, **branch merged to `master` and
    pushed**, CI + Pages deploy green. **Merging to `master` after every task is

@@ -3,8 +3,13 @@
 This file is auto-loaded by Claude Code on every run. It holds the **repo-wide
 Golden Rules** and conventions that apply to **all** work in this repository.
 
-- **Task backlog + per-task acceptance criteria + the run prompt:** see
-  [`TODO.md`](./TODO.md). One agentic run completes **exactly one** task there.
+- **Task backlog + the run prompt:** see [`TODO.md`](./TODO.md) — the slim **hub**
+  (shared rules, Definition of Done, workflow, a compact **task index** in § 4,
+  recommended order, run prompts). One agentic run completes **exactly one** task.
+- **Per-task acceptance criteria:** each task's full spec (Status, Depends on,
+  Goal, Scope, Acceptance criteria, Tests, Files, …) lives in its **own file**
+  under [`todo/`](./todo/) — `todo/task-<N>-<slug>.md`. A run reads `CLAUDE.md` +
+  the `TODO.md` hub **and** its task's `todo/` file (not every inline body).
 - **Definition of Done** (the shared per-task gate): see `TODO.md` § 2.
 - **Release history:** see [`CHANGELOG.md`](./CHANGELOG.md) (Keep a Changelog
   format). When a task ships, append its entry **there**, not to `TODO.md`.
@@ -28,7 +33,8 @@ Architecture quick-map (which module to grep): `CONFIG`/`rng`/`setSeed`
 `ZONES`/`HUB_ZONE` (`src/data/zones.js`); the map graph + route-finding
 `findRoute`/`nextZoneStep`/`MAP_TARGETS` (`src/data/worldmap.js`);
 `STORY`/`MISSIONS` (`src/data/story.js`);
-`LOCATIONS`/`NPC_DATA`/`MONSTER_ABILITIES` (`src/data/content.js`); and the
+`LOCATIONS`/`NPC_DATA`/`MONSTER_ABILITIES` (`src/data/content.js`). The backlog
+lives in the `TODO.md` hub + one spec file per task under `todo/`. And the
 runtime — `Player`, `Monster`, `Boss`, `Dragon`, `buildWorld`, `SpawnDirector`,
 `ZoneManager`, `teardownZone`, `DayNight`, `Weather`, `Skills`/`SkillsUI`,
 `WorldMap`/`WorldMapUI` (minimap, world map + guided waypoint),
@@ -163,10 +169,12 @@ that prompt in short form. (Do not write game code yourself.)
    resolved list and flag unmet dependencies before starting.
 2. For each task, **in order, one at a time**, spawn **one** subagent — the
    **`task-runner`** agent (`.claude/agents/task-runner.md`) — via the Agent tool,
-   telling it to read `CLAUDE.md` + `TODO.md` and do **exactly that task** to the
-   § 2 Definition of Done on its own branch `claude/task-<N>-<slug>` cut from the
-   latest `master`. Each subagent has a **fresh, isolated context** and cannot see
-   the orchestrator chat, so put everything it needs in the prompt.
+   telling it to read `CLAUDE.md` + the `TODO.md` hub **and its task's spec file
+   `todo/task-<N>-<slug>.md`**, then do **exactly that task** to the § 2 Definition
+   of Done on its own branch `claude/task-<N>-<slug>` cut from the latest `master`.
+   Each subagent has a **fresh, isolated context** and cannot see the orchestrator
+   chat, so put everything it needs (including the task's `todo/` file path) in the
+   prompt.
 3. **Wait** for that subagent to fully finish — pipeline green, tests added,
    checkbox ticked, `CHANGELOG.md` updated, **branch merged to `master` and
    pushed**, CI + Pages deploy green. **Merging to `master` after every task is

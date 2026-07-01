@@ -38,7 +38,11 @@ const PLAN_SCHEMA = {
         required: ['n', 'slug'],
         properties: {
           n: { type: 'integer', description: 'TODO.md task number' },
-          slug: { type: 'string', description: 'short kebab-case slug for the branch name' },
+          slug: {
+            type: 'string',
+            description:
+              "the task's kebab-case slug (from its Spec filename todo/task-<N>-<slug>.md in the §4 index), used for the branch name + spec-file path",
+          },
           title: { type: 'string' },
         },
       },
@@ -83,20 +87,24 @@ phase('Plan')
 log(`Resolving backlog request: "${request}"`)
 
 const plan = await agent(
-  `Read CLAUDE.md and TODO.md in full. Resolve this batch request into a concrete,
-ordered task list: "${request}".
+  `Read CLAUDE.md and the TODO.md hub — specifically the § 4 "task index" tables
+(each row carries a task's #, short title, Status and Depends on) and § 5
+"Recommended order". Each task's full spec lives in its own file under
+todo/task-<N>-<slug>.md, but you do NOT need to open them to plan — the § 4 index
+gives you status + dependencies and § 5 gives the order. Resolve this batch request
+into a concrete, ordered task list: "${request}".
 
 Rules (from TODO.md § 6.1):
-- "next N tasks" / "do next N" → the next N tasks whose status is [ ] (not started),
-  taken top-to-bottom from TODO.md § 5 "Recommended order".
+- "next N tasks" / "do next N" → the next N tasks whose Status is [ ] (not started)
+  in the § 4 index, taken top-to-bottom from TODO.md § 5 "Recommended order".
 - explicit numbers ("tasks 2, 3 and 5") → exactly those, ordered to respect § 5 and
   each task's "Depends on"; drop any already [x] done into "skipped".
 - "next" / no number → just the first [ ] task.
-For every task you DO include, give its number, a short kebab-case "slug" for the
-branch name (e.g. "responsive-hud"), and its title. If any included task has an
-unmet "Depends on" that cannot be satisfied by reordering within this batch or by
-already-shipped work, set "blocked" with the explanation and return an EMPTY tasks
-array. Do not start any work — only plan.`,
+For every task you DO include, give its number, its kebab-case "slug" (from its
+Spec filename todo/task-<N>-<slug>.md in the § 4 index), and its title. If any
+included task has an unmet "Depends on" that cannot be satisfied by reordering
+within this batch or by already-shipped work, set "blocked" with the explanation
+and return an EMPTY tasks array. Do not start any work — only plan.`,
   { phase: 'Plan', schema: PLAN_SCHEMA, label: 'plan' },
 )
 
@@ -119,13 +127,15 @@ for (let i = 0; i < plan.tasks.length; i++) {
   // One isolated subagent per task. The for-loop + await keeps it STRICTLY
   // sequential, so each task's merge to master lands before the next begins.
   const res = await agent(
-    `Read CLAUDE.md and TODO.md in full, then do EXACTLY Task ${t.n} end-to-end to the
+    `Read CLAUDE.md, the TODO.md hub, and this task's spec file
+"todo/task-${t.n}-${t.slug}.md", then do EXACTLY Task ${t.n} end-to-end to the
 § 2 Definition of Done — no other task, no scope-creep. Work on branch "${branch}"
 cut from the latest master. Add tests; keep the WHOLE pipeline green (lint +
-typecheck + test + build + e2e). Tick Task ${t.n}'s checkbox in TODO.md and add a
-CHANGELOG.md entry. Then MERGE to master: rebase onto the latest master if it moved,
-fast-forward master, and push (this is mandatory — the task must land on master).
-Confirm CI + Pages deploy are green. Report your verdict.`,
+typecheck + test + build + e2e). Flip Task ${t.n}'s Status to [x] in the TODO.md § 4
+index (and its Status line in todo/task-${t.n}-${t.slug}.md) and add a CHANGELOG.md
+entry. Then MERGE to master: rebase onto the latest master if it moved, fast-forward
+master, and push (this is mandatory — the task must land on master). Confirm CI +
+Pages deploy are green. Report your verdict.`,
     { agentType: 'task-runner', phase: 'Run', schema: TASK_SCHEMA, label: `task-${t.n}` },
   )
 
