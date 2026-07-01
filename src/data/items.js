@@ -331,6 +331,60 @@
     return { archetype, material };
   }
 
+  // ---- Worn-glove archetypes (Task 28) ----------------------------------
+  // Each glove/gauntlet renders as a distinct hand piece — the readable hand
+  // armour an MMORPG wraps around the weapon grip — instead of one plain sphere
+  // on each hand. As with the helmets/chests/pauldrons, the 3D SHAPE is chosen by
+  // a pure, testable selector so the worn-gear builder (src/game.js `_buildGloves`)
+  // pre-builds every archetype once (per hand) and just toggles the matching one on
+  // equip. A gloves def opts in via a `glov: { archetype, material }` block; without
+  // it we infer a sensible pair from the item's set / rarity so ANY gloves def maps
+  // to a valid pair the builder can draw.
+  //
+  //   archetype: "glove"    soft cloth/leather glove — a snug cuff + a rounded hand
+  //              "bracer"   a laced leather bracer + a light hand wrap (rare, non-set)
+  //              "gauntlet" a segmented iron gauntlet — banded cuff + knuckle plate
+  //                         + finger lames (iron) — Ironguard
+  //              "scaled"   an overlapping dragonscale gauntlet + a spined cuff
+  //                         (dragonscale) — Dragonscale
+  //              "warplate" an ornate polished plate gauntlet — trimmed cuff + a
+  //                         raised knuckle boss (steel / gold) — epic / legendary
+  //   material:  "leather" | "cloth" | "iron" | "steel" | "gold" | "dragonscale"
+  const GLOVE_ARCHETYPES = ["glove", "bracer", "gauntlet", "scaled", "warplate"];
+  const GLOVE_MATERIALS = ["leather", "cloth", "iron", "steel", "gold", "dragonscale"];
+  // Base tints per material (rarity `paint()` then recolours the built mesh, but a
+  // sensible base keeps the un-painted headless build + any preview readable).
+  const GLOVE_MATERIAL_TINT = {
+    leather: "#6f4a2a", cloth: "#8a7a5a", iron: "#8f9fb6",
+    steel: "#c3ccd8", gold: "#e8c057", dragonscale: "#b8603a",
+  };
+  // Resolve a gloves item def to a { archetype, material } pair. Pure + total:
+  // honours an explicit `glov` block, else infers from the item's set (Dragonscale
+  // → scaled gauntlet, Ironguard → banded gauntlet) and rarity (legendary/epic →
+  // ornate warplate, rare → leather bracer), and finally clamps to the known
+  // archetype/material lists so the result is always one the builder can draw.
+  // Coordinated with pauldronArchetype / chestArchetype / helmetArchetype so a full
+  // set reads as one suit (shared iron/steel/dragonscale materials, matching set
+  // motifs — an Ironguard cuirass + Ironguard shoulders + Ironguard gauntlets).
+  function gloveArchetype(def) {
+    let archetype = "glove";
+    let material = "leather";
+    const gl = def && def.glov;
+    if (gl && gl.archetype) archetype = gl.archetype;
+    else if (def && def.set === "dragonscale") archetype = "scaled";
+    else if (def && def.set === "ironguard") archetype = "gauntlet";
+    else if (def && (def.rarity === "legendary" || def.rarity === "epic")) archetype = "warplate";
+    else if (def && def.rarity === "rare") archetype = "bracer";
+    if (gl && gl.material) material = gl.material;
+    else if (def && def.set === "dragonscale") material = "dragonscale";
+    else if (def && def.set === "ironguard") material = "iron";
+    else if (def && def.rarity === "legendary") material = "gold";
+    else if (def && (def.rarity === "epic" || def.rarity === "rare")) material = "steel";
+    if (!GLOVE_ARCHETYPES.includes(archetype)) archetype = "glove";
+    if (!GLOVE_MATERIALS.includes(material)) material = "leather";
+    return { archetype, material };
+  }
+
   // An item's effective stat block once its enhancement level + affixes are folded
   // in. `haste` (a sub-1 cooldown multiplier) improves *toward* zero, so we scale
   // its distance from 1 instead of the raw value; affix haste then compounds.
@@ -435,8 +489,8 @@
     iron_greaves:   { name: "Iron Greaves",   icon: "🦿", type: "boots",       rarity: "normal", cost: 30, desc: "+0.4 speed, +5% resist.", stats: { moveSpeed: 0.4, damageReduction: 0.05 }, set: "ironguard" },
     leather_pauldrons: { name: "Leather Spaulders", icon: "🎽", type: "pauldrons", rarity: "normal", cost: 16, desc: "+12 max health.", stats: { maxHealth: 12 }, paul: { archetype: "cap", material: "leather" } },
     iron_pauldrons: { name: "Iron Spaulders", icon: "🎽", type: "pauldrons", rarity: "normal", cost: 32, desc: "+18 health, +5% resist.", stats: { maxHealth: 18, damageReduction: 0.05 }, set: "ironguard", paul: { archetype: "plated", material: "iron" } },
-    leather_gloves: { name: "Leather Gloves", icon: "🧤", type: "gloves",     rarity: "normal", cost: 14, desc: "+1 weapon damage.", stats: { damage: 1 } },
-    iron_gauntlets: { name: "Iron Gauntlets", icon: "🧤", type: "gloves",     rarity: "normal", cost: 30, desc: "+12 health, +1 damage.", stats: { maxHealth: 12, damage: 1 }, set: "ironguard" },
+    leather_gloves: { name: "Leather Gloves", icon: "🧤", type: "gloves",     rarity: "normal", cost: 14, desc: "+1 weapon damage.", stats: { damage: 1 }, glov: { archetype: "glove", material: "leather" } },
+    iron_gauntlets: { name: "Iron Gauntlets", icon: "🧤", type: "gloves",     rarity: "normal", cost: 30, desc: "+12 health, +1 damage.", stats: { maxHealth: 12, damage: 1 }, set: "ironguard", glov: { archetype: "gauntlet", material: "iron" } },
     leather_belt:   { name: "Leather Belt",   icon: "🪢", type: "belt",        rarity: "normal", cost: 12, desc: "+10 max health.", stats: { maxHealth: 10 } },
     reinforced_belt:{ name: "Reinforced Belt", icon: "🪢", type: "belt",       rarity: "normal", cost: 28, desc: "+14 health, +3% resist.", stats: { maxHealth: 14, damageReduction: 0.03 }, set: "ironguard" },
     travel_cloak:   { name: "Travelling Cloak", icon: "🧥", type: "cloak",     rarity: "normal", cost: 18, desc: "+0.7 move speed.", stats: { moveSpeed: 0.7 } },
@@ -467,11 +521,11 @@
     titan_pendant:  { name: "Titan Pendant", icon: "💠", type: "necklace",    rarity: "rare", value: 110, desc: "+45 health, +8% resist, +2 damage.", stats: { maxHealth: 45, damageReduction: 0.08, damage: 2 } },
     dragonscale_plate: { name: "Dragonscale Plate", icon: "🐲", type: "breastplate", rarity: "rare", value: 105, desc: "+50 health, +14% resist.", stats: { maxHealth: 50, damageReduction: 0.14 }, set: "dragonscale", chest: { archetype: "dragonscale", material: "dragonscale" } },
     dragon_pauldrons: { name: "Dragonscale Spaulders", icon: "🐲", type: "pauldrons", rarity: "rare", value: 80, desc: "+30 health, +8% resist.", stats: { maxHealth: 30, damageReduction: 0.08 }, set: "dragonscale", paul: { archetype: "spiked", material: "dragonscale" } },
-    dragon_gauntlets: { name: "Dragonscale Gauntlets", icon: "🐲", type: "gloves", rarity: "rare", value: 78, desc: "+18 health, +2 damage.", stats: { maxHealth: 18, damage: 2 }, set: "dragonscale" },
+    dragon_gauntlets: { name: "Dragonscale Gauntlets", icon: "🐲", type: "gloves", rarity: "rare", value: 78, desc: "+18 health, +2 damage.", stats: { maxHealth: 18, damage: 2 }, set: "dragonscale", glov: { archetype: "scaled", material: "dragonscale" } },
     dragon_belt:    { name: "Dragonscale Belt", icon: "🐲", type: "belt",      rarity: "rare", value: 76, desc: "+22 health, +5% resist.", stats: { maxHealth: 22, damageReduction: 0.05 }, set: "dragonscale" },
     dragon_cloak:   { name: "Dragonscale Cloak", icon: "🐲", type: "cloak",    rarity: "rare", value: 90, desc: "+0.8 speed, +6% resist.", stats: { moveSpeed: 0.8, damageReduction: 0.06 }, set: "dragonscale" },
     shadow_cloak:   { name: "Shadow Cloak",  icon: "🌑", type: "cloak",       rarity: "rare", value: 84, desc: "+1.1 speed, +5% resist.", stats: { moveSpeed: 1.1, damageReduction: 0.05 } },
-    swift_gloves:   { name: "Quickhand Gloves", icon: "🤌", type: "gloves",   rarity: "rare", value: 72, desc: "Attack 10% faster.", stats: { haste: 0.9 } },
+    swift_gloves:   { name: "Quickhand Gloves", icon: "🤌", type: "gloves",   rarity: "rare", value: 72, desc: "Attack 10% faster.", stats: { haste: 0.9 }, glov: { archetype: "bracer", material: "leather" } },
 
     // ----- EPIC gear (featured shop / blacksmith showcase) -----
     void_scythe:    { name: "Void Scythe", icon: "🌑", type: "weapon", rarity: "epic", hands: 2, value: 200, desc: "Two-handed. A reaping, life-draining arc.",
@@ -481,7 +535,7 @@
     phoenix_plate:  { name: "Phoenix Plate", icon: "🔥", type: "breastplate", rarity: "epic", value: 180, desc: "+75 health, +20% resist.", stats: { maxHealth: 75, damageReduction: 0.2 }, chest: { archetype: "plate", material: "gold" } },
     seraph_ring:    { name: "Seraph Ring", icon: "💫", type: "ring", rarity: "epic", value: 150, desc: "+3 damage, +5 lifesteal.", stats: { damage: 3, lifesteal: 5 } },
     storm_pauldrons:{ name: "Stormforged Spaulders", icon: "⚡", type: "pauldrons", rarity: "epic", value: 160, desc: "+45 health, +12% resist.", stats: { maxHealth: 45, damageReduction: 0.12 }, paul: { archetype: "winged", material: "steel" } },
-    titan_gauntlets:{ name: "Titan Gauntlets", icon: "🥊", type: "gloves", rarity: "epic", value: 150, desc: "+25 health, +3 damage.", stats: { maxHealth: 25, damage: 3 } },
+    titan_gauntlets:{ name: "Titan Gauntlets", icon: "🥊", type: "gloves", rarity: "epic", value: 150, desc: "+25 health, +3 damage.", stats: { maxHealth: 25, damage: 3 }, glov: { archetype: "warplate", material: "steel" } },
 
     // ----- LEGENDARY gear (the apex featured / blacksmith showcase) -----
     world_ender:    { name: "World-Ender", icon: "💥", type: "weapon", rarity: "legendary", hands: 2, value: 320, desc: "Two-handed. Cataclysmic, sweeping ruin.",
@@ -552,4 +606,5 @@ export {
   HELM_ARCHETYPES, HELM_MATERIALS, HELM_MATERIAL_TINT, helmetArchetype,
   CHEST_ARCHETYPES, CHEST_MATERIALS, CHEST_MATERIAL_TINT, chestArchetype,
   PAULDRON_ARCHETYPES, PAULDRON_MATERIALS, PAULDRON_MATERIAL_TINT, pauldronArchetype,
+  GLOVE_ARCHETYPES, GLOVE_MATERIALS, GLOVE_MATERIAL_TINT, gloveArchetype,
 };
