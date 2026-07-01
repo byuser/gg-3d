@@ -50,6 +50,59 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-07-01] — Task 25 — Worn helmets: a distinct, real-looking helm per item
+
+First of the **worn-equipment appearance overhaul** (Tasks 25–35): equipped gear
+no longer shows on Lily as one rarity-tinted primitive per slot. Helmets lead.
+
+### Added
+
+- **Per-item procedural helmet archetypes.** The single dome+brim (`_buildWornGear`)
+  is replaced by **five** distinct, layered head pieces, chosen by the item def:
+  a soft **leather cap** (rolled band + small brim), an open **iron helm** (skull
+  cap + brow band + **nasal bar** + **cheek guards** + a low comb), a full
+  **great-helm** (barrel + domed top + a dark **visor slit**), a horned
+  **dragon helm** (scaled cap + sweeping **horns** + a centre-crest of fins), and a
+  banded great-**crown** (gold band + a ring of points + a glowing gem). Built from
+  the proven mesh/material helpers, so they're **headless-safe**.
+- **`helmetArchetype(def)` selector** (`src/data/items.js`) — a **pure, total,
+  deterministic** function mapping every `helmet` item to a `{ archetype, material }`
+  pair. Each helmet opts in via new `helm: { archetype, material }` metadata; any
+  helmet without it still resolves a sensible pair from its **set** (Dragonscale →
+  dragon horns, Ironguard → open iron) and **rarity** (legendary → crown, epic/rare
+  → great), then clamps to the known archetype/material lists so the result is always
+  one the builder can draw. Exported on the test seam.
+- **`test/e2e/worn-helmets.spec.js`** — a real-browser Playwright spec that boots the
+  built site, equips several helmets, frames a close-up of Lily and **screenshots
+  three+ distinct helmets worn**, asserting each maps to its archetype and the shapes
+  visibly differ (with the shared `GG_LOCAL_BABYLON` route hook for offline sandboxes).
+
+### Changed
+
+- **`refreshWornGear` reveals the equipped helmet's archetype.** All five archetype
+  groups are pre-built **once** under a single stable `helmet` anchor (`_buildHelmets`);
+  equipping toggles the anchor and enables only the matching group — so a leather cap
+  and a dragon helm never both show, and **no helm mesh is ever reallocated** (the
+  no-leak contract holds). The active group is recoloured/sheened by **rarity**
+  (`paint()`), with the set motif carried on Ironguard/Dragonscale pieces. The active
+  archetype is tracked on `player.gearShown.helmetArchetype` (observable for tests).
+- **Fit + tier-gating.** Helmets seat on the crown at the head anchor with **no
+  face/ponytail clipping** in idle/walk/attack (brow band above the eyes, nasal
+  between them, cheeks outboard). `wornDetailFor(tier)` gains a **`helmDetail`** knob
+  that drops the finer trims (cheek guards, combs, horn tips, extra crown points) on
+  the **low** tier so phones keep a simpler shell.
+
+### Tests
+
+- **`test/items.test.js`**: +7 cases (suite **21 → 28**; Vitest total **368 → 375**) —
+  the selector is valid + total for every helmet def, gives the four shipped helmets
+  four distinct archetypes, infers/clamps for helmets with no `helm` block, is
+  deterministic, pre-builds every archetype group with materials, tier-gates the trim
+  detail, shows exactly the equipped helmet's archetype (and nothing when bare), and
+  never reallocates the helm meshes across equip churn.
+
+No `SAVE_VERSION` change — worn helmets are transient visuals (nothing new persists).
+
 ## [2026-07-01] — Task 24 — Russian grammatical morphology (Android-style declensions, gender & plural agreement)
 
 ### Added

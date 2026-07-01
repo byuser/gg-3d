@@ -536,8 +536,12 @@ category pool, **deterministic** under a seed), the **affix/rarity stat math**
 loadout + **equip rules** (`equippedAfter` mirrors `equipItem` for 2-handed / dual-wield /
 rings), the **compare-vs-equipped deltas**, the **visible worn gear** (core silhouette +
 high-tier extras, **tier-gated**, toggled with **no mesh reallocation** across
-equip/unequip), the **tabbed inventory** (filter / sort / potion consume), and the **v7
+equip/unequip), the **tabbed inventory** (filter / sort / potion consume), the **v7
 save round-trip** of affixes + the new slots **plus migration** from an older (v6) file,
+and Task 25's **distinct worn helmets** (the `helmetArchetype` selector is pure + total — every
+helmet def → a valid archetype + material — every archetype group builds once, the equipped
+helmet shows its own shape, and equip churn never reallocates the helm meshes; a Playwright
+`worn-helmets.spec.js` screenshots three+ distinct helmets worn on a real canvas),
 and the **skill & leveling** suite (`test/skills.test.js`) that locks in Task 14: the
 **XP curve + focus math** (pure), **level-up** grants (health + focus + auto-learned skills),
 **focus regen + cooldown** ticking, the **quick-bar** assign (deduplicated) + **activate**
@@ -757,6 +761,14 @@ whole thing is unit-testable without a GPU:
   equip (`refreshWornGear`) — never reallocated, so it can't leak — parented to the body so it
   animates for free, with a tier-gated billowing cloak. `wornDetailFor(tier)` drops the lightest
   pieces + the per-frame sway on low-end devices.
+- **Distinct worn helmets (Task 25).** Each **helmet** renders as its own real-looking head piece —
+  a soft **leather cap**, an open **iron helm** with a nasal bar + cheek guards, a horned
+  **dragon helm**, or a banded great-**crown** with a gem — instead of one rarity-tinted dome. A
+  pure, tested selector `helmetArchetype(def)` maps every `helmet` item (via its `helm:{ archetype,
+  material }` metadata, or inferred from set/rarity) to one of five archetypes + a material; the
+  builder pre-builds all five groups once under the head anchor and `refreshWornGear` reveals the
+  one that's equipped (rarity recolour/sheen via `paint()`, set motif on Ironguard/Dragonscale). It
+  seats on the crown with no face/ponytail clipping and drops its finer trims on the low tier.
 - **Persistence.** `SAVE_VERSION` 7 stores `{ id, lvl, aff }` per instance across the bag + all 12
   slots; older saves (no affixes / no new slots) load with clean defaults.
 - **Value / weight.** Items carry a coin **value** (resale, scaled by enhancement); **weight /
@@ -1199,4 +1211,13 @@ Source: GitHub Actions**.
       **feature-detected** — on browsers without it (e.g. iOS Safari) the whole Display panel + the HUD
       button are cleanly hidden (no dead control), and the exit/lock promise rejecting never throws.
       Covered by `test/fullscreen-settings.test.js` + a Playwright suite at desktop and the S24 Ultra.
+- [x] **Distinct worn helmets** — each **helmet** shows as its own real-looking head piece instead of
+      one rarity-tinted dome: a soft **leather cap**, an open **iron helm** (nasal bar + cheek guards +
+      comb), a horned **dragon helm**, or a banded great-**crown** with a gem. A pure, tested
+      `helmetArchetype(def)` selector maps every helmet item to one of five procedural archetypes + a
+      material (from its `helm` metadata, or inferred from set/rarity); the builder pre-builds all
+      archetypes once under the head anchor and reveals the equipped one — rarity recolour/sheen via
+      `paint()`, set motif on Ironguard/Dragonscale, tier-gated trims, seated with no face/ponytail
+      clipping and **no mesh reallocation** on equip. Covered by `test/items.test.js` +
+      `test/e2e/worn-helmets.spec.js` (a real-browser screenshot of three+ distinct helmets worn) — Task 25
 - [ ] Puzzles (levers, plates, gated doors)

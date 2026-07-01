@@ -1866,7 +1866,17 @@ category + a unit test for its pure shape/spec helper, and needs **no save-schem
 change** (visuals/animation are transient).
 
 ### Task 25 — Worn helmets: a distinct, real-looking helm per item (not one rarity-tinted dome)
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-07-01 · Replaced the single dome+brim with **five procedural helmet
+  archetypes** (soft leather **cap**, open **iron helm** w/ nasal bar + cheek guards + comb, full
+  **great-helm** w/ visor slit, horned **dragon helm**, banded great-**crown** w/ gem) chosen per item
+  by a pure, tested `helmetArchetype(def)` selector (each `helmet` def → a valid `{archetype, material}`
+  via new `helm:{}` metadata, else inferred from set/rarity — total + deterministic). `_buildHelmets`
+  pre-builds all five groups **once** under the head anchor; `refreshWornGear` reveals the equipped one
+  (rarity recolour/sheen via `paint()`, Ironguard/Dragonscale set motif), seats it on the crown with
+  **no face/ponytail clipping**, tier-gates the finer trims (`wornDetailFor().helmDetail`), and never
+  reallocates a mesh (no leak). New Task 25 tests in `test/items.test.js` (+7; suite 21 → 28, Vitest
+  368 → 375) + a real-browser `test/e2e/worn-helmets.spec.js` screenshotting three+ distinct helmets
+  worn. No `SAVE_VERSION` change (helmets are transient visuals).
 - **Depends on:** Task 12 (the worn-gear system + the `helmet` slot), Task 3
   (models/materials), Task 4 (lighting). Honours the shared bar above (Tasks 25–35).
 - **Goal.** Every helmet renders as the **same dome + brim** (`_buildWornGear`
