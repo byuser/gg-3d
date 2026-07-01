@@ -2033,7 +2033,23 @@ change** (visuals/animation are transient).
   the cuff with the chest's sleeve.
 
 ### Task 29 — Worn belts
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-07-01 · Replaced the plain waist cylinder (which overlapped the chest
+  band) with **five procedural belt archetypes** (plain leather **strap** + square buckle, banded
+  iron **plated** war-belt w/ plate buckle + riveted studs, overlapping dragonscale **scaled** belt
+  w/ fanged clasp + side tasset, leather **pouched** belt w/ round buckle + hanging pouches, ornate
+  gold-trimmed steel **warbelt** w/ gem-set boss buckle + tasset) chosen per item by a pure, tested
+  `beltArchetype(def)` selector (every `belt` def → a valid `{archetype, material}` via new `belt:{}`
+  metadata, else inferred from set/rarity — total + deterministic, coordinated with chest/pauldrons/
+  gloves/helmet so an Ironguard/Dragonscale suit reads as one). `_buildBelt` pre-builds all five
+  groups **once** under a single waist anchor; `refreshWornGear` reveals the equipped one (rarity
+  recolour/sheen via `paint()`, set motif), seated at lean-y 0.72 so the band tucks **below** the
+  chest envelope (≈ lean-y 0.80) without z-fighting it, parented to the torso (never the legs) so the
+  stride swings the legs beneath it, tier-gated via `wornDetailFor().belt` (low tier still omits the
+  belt entirely — a clean omission), never reallocates a mesh (no leak). New Task 29 tests in
+  `test/items.test.js` (+9; suite 55 → 64, Vitest 402 → 411) incl. a **below-chest + clears-legs
+  invariant** (sampled across the stride) + a real-browser `test/e2e/worn-belts.spec.js`
+  screenshotting three distinct belts worn below the chest. No `SAVE_VERSION` change (belts are
+  transient visuals).
 - **Depends on:** Task 12 (the `belt` slot), Task 3, Task 4. Shared bar above.
 - **Goal.** The belt is a **plain cylinder at the waist** (`_buildWornGear`
   ~1197-1203, high-tier only) that **overlaps the chest band**. Make it a real belt.

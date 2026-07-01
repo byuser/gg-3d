@@ -539,15 +539,18 @@ high-tier extras, **tier-gated**, toggled with **no mesh reallocation** across
 equip/unequip), the **tabbed inventory** (filter / sort / potion consume), the **v7
 save round-trip** of affixes + the new slots **plus migration** from an older (v6) file,
 and the **distinct worn gear** selectors — Task 25's helmets, Task 26's chests, Task 27's
-pauldrons and Task 28's gloves (`helmetArchetype` / `chestArchetype` / `pauldronArchetype` /
-`gloveArchetype` are each pure + total — every def → a valid archetype + material — every archetype
-group builds once, the equipped item shows its own shape, and equip churn never reallocates the
-meshes; the pauldron suite adds a **shoulder-fit invariant** proving the shoulder mesh's inner reach
-is pose-independent and never enters the torso through idle/walk/attack, and the glove suite adds a
-**grip-fit invariant** proving every glove part stays compact around the hand and below the weapon
-shaft so it never engulfs the grip; Playwright `worn-{helmets,chests,pauldrons,gloves}.spec.js`
-screenshot the distinct pieces worn on a real canvas — the pauldrons mid-attack confirming no chest
-penetration, the gloves wrapped around the wand grip),
+pauldrons, Task 28's gloves and Task 29's belts (`helmetArchetype` / `chestArchetype` /
+`pauldronArchetype` / `gloveArchetype` / `beltArchetype` are each pure + total — every def → a valid
+archetype + material — every archetype group builds once, the equipped item shows its own shape, and
+equip churn never reallocates the meshes; the pauldron suite adds a **shoulder-fit invariant**
+proving the shoulder mesh's inner reach is pose-independent and never enters the torso through
+idle/walk/attack, the glove suite adds a **grip-fit invariant** proving every glove part stays
+compact around the hand and below the weapon shaft so it never engulfs the grip, and the belt suite
+adds a **below-chest + clears-legs invariant** proving the belt band sits under the chest envelope
+and, sampled across the stride, never enters a leg; Playwright
+`worn-{helmets,chests,pauldrons,gloves,belts}.spec.js` screenshot the distinct pieces worn on a real
+canvas — the pauldrons mid-attack confirming no chest penetration, the gloves wrapped around the wand
+grip, the belts seated below the chest hem),
 and the **skill & leveling** suite (`test/skills.test.js`) that locks in Task 14: the
 **XP curve + focus math** (pure), **level-up** grants (health + focus + auto-learned skills),
 **focus regen + cooldown** ticking, the **quick-bar** assign (deduplicated) + **activate**
@@ -808,6 +811,20 @@ whole thing is unit-testable without a GPU:
   so it follows the hand through every attack, and is kept **compact around the wrist** so the wand
   shaft rises cleanly out of the fist — it never engulfs the grip. Built once per hand (no
   reallocation) and tier-gated (finer finger lames/trims dropped on the low tier).
+- **Distinct worn belts (Task 29).** Each **belt** item renders as its own real belt — a plain
+  leather **strap** with a square buckle, a banded iron **plated** war-belt with a plate buckle +
+  riveted studs (Ironguard), an overlapping dragonscale **scaled** belt with a fanged clasp + a
+  hanging side tasset (Dragonscale), a leather **pouched** adventurer's belt with a round buckle +
+  hanging pouches (rare/non-set), or an ornate gold-trimmed steel **warbelt** with a gem-set boss
+  buckle + a front tasset (epic/legendary) — instead of the old plain cylinder that overlapped the
+  chest band. A pure, tested selector `beltArchetype(def)` maps every `belt` item (via its
+  `belt:{ archetype, material }` metadata, or inferred from set/rarity) to one of five archetypes +
+  a material, sharing the **Ironguard**/**Dragonscale** motif with the matching helmet + chest +
+  pauldrons + gloves. The belt is seated at the **waist below the chest piece** (so the two never
+  z-fight) and parented to the torso (never the legs), so it stays put while the stride swings the
+  legs beneath it — pouches/tassets hang over the thighs. Built once under a single waist anchor (no
+  reallocation) and tier-gated (**omitted entirely on the low tier**, like the old cylinder — the
+  stats still apply, only the mesh is skipped).
 - **Persistence.** `SAVE_VERSION` 7 stores `{ id, lvl, aff }` per instance across the bag + all 12
   slots; older saves (no affixes / no new slots) load with clean defaults.
 - **Value / weight.** Items carry a coin **value** (resale, scaled by enhancement); **weight /
@@ -1293,4 +1310,16 @@ Source: GitHub Actions**.
       per hand (no reallocation), tier-gated (finer lames/trims on high). Covered by
       `test/items.test.js` (incl. a grip-fit invariant) + `test/e2e/worn-gloves.spec.js` (a real-browser
       screenshot of distinct gloves wrapped around the grip) — Task 28
+- [x] **Distinct worn belts** — each **belt** item shows as its own real belt instead of the old plain
+      cylinder that overlapped the chest band: a plain leather **strap** + a square buckle, a banded iron
+      **plated** war-belt (plate buckle + riveted studs, Ironguard), an overlapping dragonscale **scaled**
+      belt (fanged clasp + side tasset, Dragonscale), a leather **pouched** belt (round buckle + hanging
+      pouches, rare/non-set), or an ornate gold-trimmed steel **warbelt** (gem-set boss buckle + tasset,
+      epic/legendary). A pure, tested `beltArchetype(def)` selector maps every belt item to one of five
+      archetypes + a material (from its `belt` metadata, or inferred from set/rarity), sharing the set
+      motif with the helmet + chest + pauldrons + gloves. Seated at the **waist below the chest piece**
+      (so the two never z-fight) and parented to the torso (never the legs), so the stride swings the legs
+      beneath it. Built once under one waist anchor (no reallocation), tier-gated (omitted entirely on the
+      low tier). Covered by `test/items.test.js` (incl. a below-chest + clears-legs invariant) +
+      `test/e2e/worn-belts.spec.js` (a real-browser screenshot of distinct belts worn below the chest) — Task 29
 - [ ] Puzzles (levers, plates, gated doors)

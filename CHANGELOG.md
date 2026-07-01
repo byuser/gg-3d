@@ -50,6 +50,67 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-07-01] — Task 29 — Worn belts: a distinct real belt per item
+
+Fifth of the **worn-equipment appearance overhaul** (Tasks 25–35): the waist. Each
+`belt` item now renders as a distinct belt — a strap + buckle (+ pouches/plates by
+set/material) seated at the waist **below** the chest piece — instead of one plain
+cylinder that overlapped the chest band.
+
+### Added
+
+- **Per-item procedural belt archetypes.** The single waist cylinder
+  (`_buildWornGear`, which sat at lean-y 0.98 and overlapped the cuirass) is replaced by
+  **five** distinct belts, chosen by the item def and built from layered primitives (a
+  waist strap band + a buckle + set/material trim): a plain leather **strap** with a square
+  buckle (default), a banded iron **plated** war-belt with a broad plate buckle + riveted
+  studs (Ironguard), an overlapping dragonscale **scaled** belt with a fanged clasp +
+  climbing scales + a hanging side tasset (Dragonscale), a leather **pouched**
+  adventurer's belt with a round buckle + hanging pouches (rare/non-set), and an ornate
+  gold-trimmed steel **warbelt** with a gem-set boss buckle + a front tasset
+  (epic/legendary). Built from the proven mesh/material helpers, so they're
+  **headless-safe**.
+- **`beltArchetype(def)` selector** (`src/data/items.js`) — a **pure, total,
+  deterministic** function mapping every `belt` item to a `{ archetype, material }` pair.
+  Each belt opts in via new `belt: { archetype, material }` metadata; any belt without it
+  still resolves a sensible pair from its **set** (Dragonscale → scaled clasp, Ironguard →
+  banded plated) and **rarity** (legendary/epic → warbelt, rare → pouched, else strap),
+  then clamps to the known archetype/material lists so the result is always one the builder
+  can draw. Coordinated with `gloveArchetype`/`pauldronArchetype`/`chestArchetype`/
+  `helmetArchetype` (shared iron/steel/dragonscale materials + matching set motifs) so a
+  full **Ironguard**/**Dragonscale** suit — helm + cuirass + shoulders + gauntlets + belt —
+  reads as one. Exported on the test seam.
+- **Below-chest fit.** The belt anchor sits at lean-y 0.72 (below the chest envelope's
+  lowest reach, ≈ lean-y 0.80, the Ironguard cuirass fauld) with every part's top kept
+  ≈ lean-y 0.79, so the band tucks **under** the chest hem and the two never z-fight;
+  pouches/tassets hang **down** over the thighs. The belt is parented to the torso (never
+  the legs), so it is pose-independent — the stride swings the legs beneath it, and the
+  band never enters a leg.
+- **Tier-gated** (`wornDetailFor().belt` / `.beltDetail`). The belt is a light extra,
+  **omitted entirely on the low tier** (a clean omission, like the old cylinder — only the
+  mesh is skipped, the stats still apply); the finer studs/pouches are dropped there too.
+- **Task 29 tests** — `test/items.test.js` gains the belt-archetype selector suite
+  (validity/on-theme distinctness/set-motif sharing with chest+pauldrons+gloves+helmet/
+  pure-total inference/determinism), a pre-build-once-under-one-anchor + no-leak-across-
+  equip-churn check, the tier-gate, a shows-exactly-the-equipped-archetype check, and a
+  **below-chest + clears-legs fit invariant** (every belt part centre stays under the chest
+  envelope and, sampled across a full stride, keeps clear of both leg capsules). Suite
+  55 → 64; **Vitest 402 → 411**.
+- **`test/e2e/worn-belts.spec.js`** — a real-browser Playwright spec that boots the built
+  site, equips several belts under a breastplate, frames a close-up of Lily's waist and
+  **screenshots distinct belts seated below the chest hem**, asserting each maps to its
+  archetype, the shapes visibly differ, and there are no console errors (with the shared
+  `GG_LOCAL_BABYLON` route hook for offline sandboxes). Registered as the
+  `worn-belts-desktop` project in `playwright.config.js`.
+
+### Changed
+
+- **`refreshWornGear` reveals the equipped belt archetype** under the single waist anchor
+  and paints it by rarity/set, hiding the other four groups — the pre-built groups are
+  toggled, never reallocated, so equip/unequip churn can't leak. `p.gearShown.beltArchetype`
+  is exposed for tests/debugging, and the low-tier omission (no `g.belts`) is tolerated. No
+  `SAVE_VERSION` change (belts are transient visuals).
+
 ## [2026-07-01] — Task 28 — Worn gloves & gauntlets: a distinct hand piece per item
 
 Fourth of the **worn-equipment appearance overhaul** (Tasks 25–35): the hands. Each
