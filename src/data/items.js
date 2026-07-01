@@ -499,6 +499,64 @@
     return { archetype, material };
   }
 
+  // ---- Worn-cloak archetypes (Task 31) ----------------------------------
+  // Each cloak renders as a real draping cloak that billows behind the wearer —
+  // a tapered, segmented cloth drape with a neck clasp — instead of the old single
+  // flat box on a pivot that swung THROUGH the legs on sharp turns. As with the
+  // helmets/chests/pauldrons/gloves/belts/boots, the 3D SHAPE is chosen by a pure,
+  // testable selector so the worn-gear builder (src/game.js `_buildCloak`) pre-builds
+  // every archetype once (under the shared back pivot) and just toggles the matching
+  // one on equip. A cloak def opts in via a `cloak: { archetype, material }` block;
+  // without it we infer a sensible drape from the item's set / rarity so ANY cloak
+  // def maps to a valid shape the builder can draw.
+  //
+  //   archetype: "cape"    a simple tapered cloth cape + a round neck clasp — the
+  //                        default (travel_cloak)
+  //              "mantle"  a hooded traveller's mantle — a cape + a shoulder shawl
+  //                        collar + a hood lump at the neck (rare / non-set)
+  //              "scaled"  an overlapping dragonscale cloak — segmented scale panels
+  //                        + a fanged clasp (dragonscale) — Dragonscale
+  //              "regal"   an ornate gold-trimmed royal mantle — a broad shoulder
+  //                        collar + a hemmed drape + tassels (epic)
+  //              "winged"  a feathered/winged cloak that flares out at the shoulders
+  //                        (gold) — legendary (wings_of_dawn)
+  //   material:  "leather" | "cloth" | "iron" | "steel" | "gold" | "dragonscale"
+  const CLOAK_ARCHETYPES = ["cape", "mantle", "scaled", "regal", "winged"];
+  const CLOAK_MATERIALS = ["leather", "cloth", "iron", "steel", "gold", "dragonscale"];
+  // Base tints per material (rarity `paint()` then recolours the built mesh, but a
+  // sensible base keeps the un-painted headless build + any preview readable).
+  const CLOAK_MATERIAL_TINT = {
+    leather: "#6f4a2a", cloth: "#5a6f8a", iron: "#8f9fb6",
+    steel: "#c3ccd8", gold: "#e8c057", dragonscale: "#b8603a",
+  };
+  // Resolve a cloak item def to a { archetype, material } pair. Pure + total:
+  // honours an explicit `cloak` block, else infers from the item's set (Dragonscale
+  // → scaled cloak, Ironguard → hooded mantle) and rarity (legendary → winged, epic
+  // → regal, rare → mantle), and finally clamps to the known archetype/material
+  // lists so the result is always one the builder can draw. Coordinated with the
+  // sibling selectors (boot/belt/glove/pauldron/chest/helmet) so a set shares one
+  // material motif — a Dragonscale cloak reads with the same dragonscale as the rest
+  // of the suit.
+  function cloakArchetype(def) {
+    let archetype = "cape";
+    let material = "cloth";
+    const c = def && def.cloak;
+    if (c && c.archetype) archetype = c.archetype;
+    else if (def && def.set === "dragonscale") archetype = "scaled";
+    else if (def && def.set === "ironguard") archetype = "mantle";
+    else if (def && def.rarity === "legendary") archetype = "winged";
+    else if (def && def.rarity === "epic") archetype = "regal";
+    else if (def && def.rarity === "rare") archetype = "mantle";
+    if (c && c.material) material = c.material;
+    else if (def && def.set === "dragonscale") material = "dragonscale";
+    else if (def && def.set === "ironguard") material = "iron";
+    else if (def && def.rarity === "legendary") material = "gold";
+    else if (def && (def.rarity === "epic" || def.rarity === "rare")) material = "steel";
+    if (!CLOAK_ARCHETYPES.includes(archetype)) archetype = "cape";
+    if (!CLOAK_MATERIALS.includes(material)) material = "cloth";
+    return { archetype, material };
+  }
+
   // An item's effective stat block once its enhancement level + affixes are folded
   // in. `haste` (a sub-1 cooldown multiplier) improves *toward* zero, so we scale
   // its distance from 1 instead of the raw value; affix haste then compounds.
@@ -607,8 +665,8 @@
     iron_gauntlets: { name: "Iron Gauntlets", icon: "🧤", type: "gloves",     rarity: "normal", cost: 30, desc: "+12 health, +1 damage.", stats: { maxHealth: 12, damage: 1 }, set: "ironguard", glov: { archetype: "gauntlet", material: "iron" } },
     leather_belt:   { name: "Leather Belt",   icon: "🪢", type: "belt",        rarity: "normal", cost: 12, desc: "+10 max health.", stats: { maxHealth: 10 }, belt: { archetype: "strap", material: "leather" } },
     reinforced_belt:{ name: "Reinforced Belt", icon: "🪢", type: "belt",       rarity: "normal", cost: 28, desc: "+14 health, +3% resist.", stats: { maxHealth: 14, damageReduction: 0.03 }, set: "ironguard", belt: { archetype: "plated", material: "iron" } },
-    travel_cloak:   { name: "Travelling Cloak", icon: "🧥", type: "cloak",     rarity: "normal", cost: 18, desc: "+0.7 move speed.", stats: { moveSpeed: 0.7 } },
-    guard_cloak:    { name: "Warding Cloak",  icon: "🧥", type: "cloak",       rarity: "normal", cost: 30, desc: "+18 health, +4% resist.", stats: { maxHealth: 18, damageReduction: 0.04 } },
+    travel_cloak:   { name: "Travelling Cloak", icon: "🧥", type: "cloak",     rarity: "normal", cost: 18, desc: "+0.7 move speed.", stats: { moveSpeed: 0.7 }, cloak: { archetype: "cape", material: "leather" } },
+    guard_cloak:    { name: "Warding Cloak",  icon: "🧥", type: "cloak",       rarity: "normal", cost: 30, desc: "+18 health, +4% resist.", stats: { maxHealth: 18, damageReduction: 0.04 }, cloak: { archetype: "mantle", material: "cloth" } },
 
     // ----- Accessories (normal / buyable) -----
     amulet_vigor:   { name: "Amulet of Vigor", icon: "📿", type: "necklace", rarity: "normal", cost: 26, desc: "+25 max health.", stats: { maxHealth: 25 } },
@@ -637,8 +695,8 @@
     dragon_pauldrons: { name: "Dragonscale Spaulders", icon: "🐲", type: "pauldrons", rarity: "rare", value: 80, desc: "+30 health, +8% resist.", stats: { maxHealth: 30, damageReduction: 0.08 }, set: "dragonscale", paul: { archetype: "spiked", material: "dragonscale" } },
     dragon_gauntlets: { name: "Dragonscale Gauntlets", icon: "🐲", type: "gloves", rarity: "rare", value: 78, desc: "+18 health, +2 damage.", stats: { maxHealth: 18, damage: 2 }, set: "dragonscale", glov: { archetype: "scaled", material: "dragonscale" } },
     dragon_belt:    { name: "Dragonscale Belt", icon: "🐲", type: "belt",      rarity: "rare", value: 76, desc: "+22 health, +5% resist.", stats: { maxHealth: 22, damageReduction: 0.05 }, set: "dragonscale", belt: { archetype: "scaled", material: "dragonscale" } },
-    dragon_cloak:   { name: "Dragonscale Cloak", icon: "🐲", type: "cloak",    rarity: "rare", value: 90, desc: "+0.8 speed, +6% resist.", stats: { moveSpeed: 0.8, damageReduction: 0.06 }, set: "dragonscale" },
-    shadow_cloak:   { name: "Shadow Cloak",  icon: "🌑", type: "cloak",       rarity: "rare", value: 84, desc: "+1.1 speed, +5% resist.", stats: { moveSpeed: 1.1, damageReduction: 0.05 } },
+    dragon_cloak:   { name: "Dragonscale Cloak", icon: "🐲", type: "cloak",    rarity: "rare", value: 90, desc: "+0.8 speed, +6% resist.", stats: { moveSpeed: 0.8, damageReduction: 0.06 }, set: "dragonscale", cloak: { archetype: "scaled", material: "dragonscale" } },
+    shadow_cloak:   { name: "Shadow Cloak",  icon: "🌑", type: "cloak",       rarity: "rare", value: 84, desc: "+1.1 speed, +5% resist.", stats: { moveSpeed: 1.1, damageReduction: 0.05 }, cloak: { archetype: "mantle", material: "cloth" } },
     swift_gloves:   { name: "Quickhand Gloves", icon: "🤌", type: "gloves",   rarity: "rare", value: 72, desc: "Attack 10% faster.", stats: { haste: 0.9 }, glov: { archetype: "bracer", material: "leather" } },
 
     // ----- EPIC gear (featured shop / blacksmith showcase) -----
@@ -657,7 +715,7 @@
     astral_bow:     { name: "Astral Bow", icon: "🌟", type: "weapon", rarity: "legendary", hands: 2, value: 300, desc: "Two-handed. A 5-arrow piercing storm.",
                       weapon: { ranged: true, shape: "arrow", damage: 5, cooldown: 0.4, multishot: 5, spread: 0.1, pierce: 3, boltSpeed: 46, boltRadius: 0.6, gravity: 6, color: "#a8e0ff", haloColor: "#eaffff" } },
     crown_eternal:  { name: "Crown Eternal", icon: "👑", type: "helmet", rarity: "legendary", value: 280, desc: "+90 health, +18% resist, +3 damage.", stats: { maxHealth: 90, damageReduction: 0.18, damage: 3 }, helm: { archetype: "crown", material: "gold" } },
-    wings_of_dawn:  { name: "Wings of Dawn", icon: "🪽", type: "cloak", rarity: "legendary", value: 300, desc: "+1.6 speed, +35 health, +8% resist.", stats: { moveSpeed: 1.6, maxHealth: 35, damageReduction: 0.08 } },
+    wings_of_dawn:  { name: "Wings of Dawn", icon: "🪽", type: "cloak", rarity: "legendary", value: 300, desc: "+1.6 speed, +35 health, +8% resist.", stats: { moveSpeed: 1.6, maxHealth: 35, damageReduction: 0.08 }, cloak: { archetype: "winged", material: "gold" } },
 
     // ----- Potions / consumables (drag-slotted from the unified bag) -----
     minor_potion:   { name: "Minor Health Potion", icon: "🧪", type: "potion", rarity: "normal", cost: 8,  desc: "Restore 30 health.", potion: { heal: 30 } },
@@ -723,4 +781,5 @@ export {
   GLOVE_ARCHETYPES, GLOVE_MATERIALS, GLOVE_MATERIAL_TINT, gloveArchetype,
   BELT_ARCHETYPES, BELT_MATERIALS, BELT_MATERIAL_TINT, beltArchetype,
   BOOT_ARCHETYPES, BOOT_MATERIALS, BOOT_MATERIAL_TINT, bootArchetype,
+  CLOAK_ARCHETYPES, CLOAK_MATERIALS, CLOAK_MATERIAL_TINT, cloakArchetype,
 };

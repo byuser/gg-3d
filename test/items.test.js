@@ -186,7 +186,7 @@ describe("Task 12 — visible worn gear", () => {
     const g = T.player.gear;
     for (const k of ["helmet", "chest", "gloves", "boots"]) expect(g[k], k).toBeTruthy();
     // headless detects as the high tier → pauldrons/belt/cloak present
-    expect(g.pauls && g.belt && g.cloak).toBeTruthy();
+    expect(g.pauls && g.belt && g.cloaks).toBeTruthy();
   });
 
   it("tier-gates the lighter pieces + cloak sway", () => {
@@ -203,7 +203,7 @@ describe("Task 12 — visible worn gear", () => {
     const p = T.player;
     clearEquip(p);
     T.recomputeStats(p);
-    const refs = [p.gear.helmet, p.gear.chest, p.gear.cloak, p.gear.boots.shoe.nodes[0], p.gear.pauls.plated.nodes[1]];
+    const refs = [p.gear.helmet, p.gear.chest, p.gear.cloaks.cape.node, p.gear.boots.shoe.nodes[0], p.gear.pauls.plated.nodes[1]];
     expect(p.gearShown.helmet).toBe(false);
     for (let i = 0; i < 12; i++) {
       // hammer equip/unequip
@@ -217,7 +217,7 @@ describe("Task 12 — visible worn gear", () => {
     expect([
       p.gear.helmet,
       p.gear.chest,
-      p.gear.cloak,
+      p.gear.cloaks.cape.node,
       p.gear.boots.shoe.nodes[0],
       p.gear.pauls.plated.nodes[1],
     ]).toEqual(refs);
@@ -1401,6 +1401,219 @@ describe("Task 30 — worn boots: distinct archetype per item + on-leg / no-grou
       }
     }
     p.legL.rotation.x = restX.legL; p.legR.rotation.x = restX.legR;
+    clearEquip(p);
+    T.recomputeStats(p);
+  });
+});
+
+describe("Task 31 — worn cloaks: distinct archetype per item + billow that stays behind the legs", () => {
+  const CLOAK_IDS = Object.keys(T.ITEM_DB).filter((id) => T.ITEM_DB[id].type === "cloak");
+  const VALID_ARCH = ["cape", "mantle", "scaled", "regal", "winged"];
+  const VALID_MAT = ["leather", "cloth", "iron", "steel", "gold", "dragonscale"];
+
+  it("maps every cloak def to a valid archetype + material", () => {
+    expect(CLOAK_IDS.length).toBeGreaterThanOrEqual(3);
+    for (const id of CLOAK_IDS) {
+      const a = T.cloakArchetype(T.getDef(id));
+      expect(VALID_ARCH.includes(a.archetype), `${id} archetype`).toBe(true);
+      expect(VALID_MAT.includes(a.material), `${id} material`).toBe(true);
+    }
+  });
+
+  it("gives the shipped cloaks distinct, on-theme archetypes", () => {
+    const pick = (id) => T.cloakArchetype(T.getDef(id));
+    expect(pick("travel_cloak")).toMatchObject({ archetype: "cape", material: "leather" });
+    expect(pick("dragon_cloak")).toMatchObject({ archetype: "scaled", material: "dragonscale" });
+    expect(pick("wings_of_dawn")).toMatchObject({ archetype: "winged", material: "gold" });
+    // A plain cape and a dragonscale cloak must NOT look identical.
+    expect(pick("travel_cloak").archetype).not.toBe(pick("dragon_cloak").archetype);
+    // The shipped cloaks span at least three distinct silhouettes.
+    const used = new Set(CLOAK_IDS.map((id) => pick(id).archetype));
+    expect(used.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it("shares the set motif with the matching suit (a Dragonscale cloak reads as one)", () => {
+    // Dragonscale: the cloak's dragonscale material matches the rest of the suit.
+    expect(T.cloakArchetype(T.getDef("dragon_cloak")).material)
+      .toBe(T.bootArchetype({ type: "boots", rarity: "rare", set: "dragonscale" }).material);
+    expect(T.cloakArchetype(T.getDef("dragon_cloak")).material)
+      .toBe(T.helmetArchetype(T.getDef("dragon_helm")).material);
+    // Inference from a bare dragonscale cloak also lands on the scaled dragonscale drape.
+    expect(T.cloakArchetype({ type: "cloak", rarity: "rare", set: "dragonscale" }))
+      .toMatchObject({ archetype: "scaled", material: "dragonscale" });
+  });
+
+  it("is pure + total: infers a valid pair for cloaks with no `cloak` block", () => {
+    // Rarity fallbacks (legendary → winged, epic → regal, rare → mantle, else cape).
+    expect(T.cloakArchetype({ type: "cloak", rarity: "legendary" }).archetype).toBe("winged");
+    expect(T.cloakArchetype({ type: "cloak", rarity: "epic" }).archetype).toBe("regal");
+    expect(T.cloakArchetype({ type: "cloak", rarity: "rare" }).archetype).toBe("mantle");
+    expect(T.cloakArchetype({ type: "cloak", rarity: "normal" }).archetype).toBe("cape");
+    // Materials follow rarity when there's no set (legendary → gold, epic/rare → steel).
+    expect(T.cloakArchetype({ type: "cloak", rarity: "legendary" }).material).toBe("gold");
+    expect(T.cloakArchetype({ type: "cloak", rarity: "epic" }).material).toBe("steel");
+    // An explicit block wins over inference.
+    expect(T.cloakArchetype({ type: "cloak", rarity: "rare", cloak: { archetype: "winged", material: "gold" } }))
+      .toMatchObject({ archetype: "winged", material: "gold" });
+    // Bogus / missing input clamps to a drawable pair (never throws, never invalid).
+    for (const bad of [undefined, null, {}, { cloak: { archetype: "zz", material: "plastic" } }]) {
+      const a = T.cloakArchetype(bad);
+      expect(VALID_ARCH.includes(a.archetype)).toBe(true);
+      expect(VALID_MAT.includes(a.material)).toBe(true);
+    }
+    // Deterministic (same def ⇒ same pair).
+    expect(T.cloakArchetype(T.getDef("shadow_cloak"))).toEqual(T.cloakArchetype(T.getDef("shadow_cloak")));
+  });
+
+  it("pre-builds every cloak archetype group once under the shared back pivot (headless-safe)", () => {
+    const g = T.player.gear;
+    expect(g.cloaks).toBeTruthy();
+    expect(Object.keys(g.cloaks).sort()).toEqual(["cape", "mantle", "regal", "scaled", "winged"]);
+    expect(T.player.cloakPivot).toBeTruthy();
+    for (const k in g.cloaks) {
+      const grp = g.cloaks[k];
+      expect(grp.node, k).toBeTruthy();
+      expect(grp.mats.length, k).toBeGreaterThan(0);
+      expect(grp.meshes.length, k).toBeGreaterThan(0);
+      // Every group hangs off the shared pivot (built once, never realloc).
+      expect(grp.node.parent).toBe(T.player.cloakPivot);
+    }
+  });
+
+  it("keeps the cloak in the core silhouette (always built) with tier-gated sway/trims", () => {
+    // Cloak is core (always built like the gloves/boots); the per-frame billow + finer
+    // folds are what gate on the low tier.
+    expect(T.wornDetailFor("low").cloak).toBe(true);
+    expect(T.wornDetailFor("low").cloakSway).toBe(false);
+    expect(T.wornDetailFor("high").cloak).toBe(true);
+    expect(T.wornDetailFor("high").cloakSway).toBe(true);
+  });
+
+  it("shows exactly the equipped cloak's archetype (and nothing when bare)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const map = { travel_cloak: "cape", dragon_cloak: "scaled", wings_of_dawn: "winged", shadow_cloak: "mantle" };
+    for (const id in map) {
+      T.equipItem(p, T.makeItem(id));
+      expect(p.gearShown.cloak, id).toBe(true);
+      expect(p.gearShown.cloakArchetype, id).toBe(map[id]);
+      expect(p.cloakPivot.isEnabled(), `${id} pivot`).toBe(true);
+      // Exactly that archetype group is enabled; the rest are hidden.
+      for (const k in p.gear.cloaks) {
+        expect(p.gear.cloaks[k].node.isEnabled(), `${id}/${k}`).toBe(k === map[id]);
+      }
+      T.unequipSlot(p, "cloak");
+      T.recomputeStats(p);
+    }
+    expect(p.gearShown.cloak).toBe(false);
+    expect(p.gearShown.cloakArchetype).toBe(null);
+    expect(p.cloakPivot.isEnabled()).toBe(false);
+  });
+
+  it("never reallocates the cloak meshes across equip churn (no leak)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const capeNode = p.gear.cloaks.cape.node;
+    const scaledNode = p.gear.cloaks.scaled.node;
+    const meshCount = Object.values(p.gear.cloaks).reduce((n, grp) => n + grp.meshes.length, 0);
+    for (let i = 0; i < 10; i++) {
+      for (const id of ["travel_cloak", "dragon_cloak", "wings_of_dawn"]) {
+        T.equipItem(p, T.makeItem(id));
+        expect(() => step(1)).not.toThrow(); // the cloak billows each frame
+      }
+      T.unequipSlot(p, "cloak");
+      T.recomputeStats(p);
+    }
+    expect(p.gear.cloaks.cape.node).toBe(capeNode);
+    expect(p.gear.cloaks.scaled.node).toBe(scaledNode);
+    expect(Object.values(p.gear.cloaks).reduce((n, grp) => n + grp.meshes.length, 0)).toBe(meshCount);
+  });
+
+  // The billow updater is PURE + dt-driven + pause-correct + frame-rate independent, and
+  // CLAMPED so the drape only ever trails behind (x ≥ 0 — never forward through the legs).
+  it("billows via a pure, clamped, frame-rate-independent updater", () => {
+    const S = T.CLOAK_SWAY;
+    const step1 = (cur, moving, phase, turn, dt) => T.cloakBillowStep(cur, moving, phase, turn, dt);
+    // (a) NEVER forward: across every input the next x stays in [xMin≥0, xMax] and z in ±zMax.
+    expect(S.xMin).toBeGreaterThanOrEqual(0);
+    for (let i = 0; i < 400; i++) {
+      const cur = { x: (Math.random() * 2 - 1) * 2, z: (Math.random() * 2 - 1) * 2 }; // even from a wild state
+      const moving = i % 2 === 0;
+      const phase = Math.random() * 20;
+      const turn = (Math.random() * 2 - 1) * 40; // huge turn rates included
+      // Drive to convergence, then the value must sit inside the clamp cone.
+      let v = cur;
+      for (let k = 0; k < 200; k++) v = step1(v, moving, phase, turn, 0.016);
+      expect(v.x, `x@${i}`).toBeGreaterThanOrEqual(S.xMin - 1e-9);
+      expect(v.x, `x@${i}`).toBeLessThanOrEqual(S.xMax + 1e-9);
+      expect(Math.abs(v.z), `z@${i}`).toBeLessThanOrEqual(S.zMax + 1e-9);
+    }
+    // (b) PURE: same inputs ⇒ same output; no mutation of the passed-in state object.
+    const cur = { x: 0.1, z: -0.05 };
+    const a = step1(cur, true, 1.2, 0.3, 0.016);
+    const b = step1({ x: 0.1, z: -0.05 }, true, 1.2, 0.3, 0.016);
+    expect(a).toEqual(b);
+    expect(cur).toEqual({ x: 0.1, z: -0.05 }); // input untouched
+    // (c) PAUSE-CORRECT: dt = 0 ⇒ no drift toward the target (freezes exactly).
+    const frozen = step1({ x: 0.2, z: 0.1 }, true, 3, 0.5, 0);
+    expect(frozen.x).toBeCloseTo(0.2, 6);
+    expect(frozen.z).toBeCloseTo(0.1, 6);
+    // (d) FRAME-RATE INDEPENDENT: one 32ms step ≈ two 16ms steps toward the same target
+    //     (exponential damping composes), so the look doesn't change with the frame rate.
+    const start = { x: 0, z: 0 };
+    const big = step1(start, true, 0, 0, 0.032);
+    let small = start;
+    small = step1(small, true, 0, 0, 0.016);
+    small = step1(small, true, 0, 0, 0.016);
+    expect(big.x).toBeCloseTo(small.x, 6);
+    // (e) It actually MOVES when driven (a live billow, not a no-op).
+    let live = { x: 0, z: 0 };
+    for (let k = 0; k < 60; k++) live = step1(live, true, Math.PI / 2, 0, 0.016);
+    expect(live.x).toBeGreaterThan(0.2); // trailed back on the move
+  });
+
+  // THE fit invariant: the cloak must DRAPE BEHIND the legs and never scythe through them.
+  // Structural, pose-swept bound on the emitted geometry: seated on a back pivot at
+  // lean-local (0, 1.5, −0.3) with the billow clamped to x ∈ [0, xMax] (never forward) and
+  // z ∈ ±zMax, EVERY cloak part centre — swept across the entire clamped sway range — stays
+  // BEHIND the leg envelope (lean-z ≤ Z_BEHIND, comfortably behind the legs whose rear sits
+  // near lean-z −0.1) and ABOVE the feet (lean-y ≥ Y_FLOOR, so the hem never reaches the
+  // ankles/ground). Re-derive the bounds if the pivot seat or clamps ever change.
+  it("drapes behind the legs and above the feet across the whole sway range", () => {
+    const p = T.player;
+    const lean = p.lean;
+    const S = T.CLOAK_SWAY;
+    const Z_BEHIND = -0.15; // strictly behind the leg column's rear (~ −0.1 at the hip)
+    const Y_FLOOR = 0.32;   // stays around/above the knees — never down at the feet (~0.08)
+    const pivotRest = { x: p.cloakPivot.rotation.x, z: p.cloakPivot.rotation.z };
+    for (const id of CLOAK_IDS) {
+      clearEquip(p);
+      T.equipItem(p, T.makeItem(id));
+      T.recomputeStats(p);
+      const grp = p.gear.cloaks[p.gearShown.cloakArchetype];
+      expect(grp && grp.meshes.length, `${id} meshes`).toBeGreaterThan(0);
+      // Sweep the full clamped sway cone: x from xMin..xMax, z from −zMax..zMax.
+      for (let xi = 0; xi <= 6; xi++) {
+        for (let zi = 0; zi <= 6; zi++) {
+          p.cloakPivot.rotation.x = S.xMin + ((S.xMax - S.xMin) * xi) / 6;
+          p.cloakPivot.rotation.z = -S.zMax + (2 * S.zMax * zi) / 6;
+          for (const m of grp.meshes) {
+            const c = toFrame(m, { x: 0, y: 0, z: 0 }, lean); // part centre in lean space
+            expect(
+              c.z,
+              `${id}/${m.name} z ${c.z.toFixed(3)} not behind the legs at sway x=${p.cloakPivot.rotation.x.toFixed(2)} z=${p.cloakPivot.rotation.z.toFixed(2)}`,
+            ).toBeLessThanOrEqual(Z_BEHIND);
+            expect(
+              c.y,
+              `${id}/${m.name} y ${c.y.toFixed(3)} dips toward the feet at sway x=${p.cloakPivot.rotation.x.toFixed(2)}`,
+            ).toBeGreaterThanOrEqual(Y_FLOOR);
+          }
+        }
+      }
+    }
+    p.cloakPivot.rotation.x = pivotRest.x; p.cloakPivot.rotation.z = pivotRest.z;
     clearEquip(p);
     T.recomputeStats(p);
   });

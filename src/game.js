@@ -33,6 +33,7 @@ import {
   HELM_MATERIAL_TINT, helmetArchetype, CHEST_MATERIAL_TINT, chestArchetype,
   PAULDRON_MATERIAL_TINT, pauldronArchetype, GLOVE_MATERIAL_TINT, gloveArchetype,
   BELT_MATERIAL_TINT, beltArchetype, BOOT_MATERIAL_TINT, bootArchetype,
+  CLOAK_MATERIAL_TINT, cloakArchetype,
 } from "./data/items.js";
 import {
   MATERIALS, MATERIAL_IDS, RESOURCE_KINDS, RELICS, CASTLE_PARTS, CASTLE_PART_BY_ID,
@@ -356,6 +357,48 @@ import {
   function wornDetailFor(tier) {
     if (tier === "low") return { pauldrons: false, belt: false, gloves: true, boots: true, cloak: true, cloakSway: false, helmDetail: false, chestDetail: false, pauldronDetail: false, gloveDetail: false, beltDetail: false, bootDetail: false };
     return { pauldrons: true, belt: true, gloves: true, boots: true, cloak: true, cloakSway: true, helmDetail: true, chestDetail: true, pauldronDetail: true, gloveDetail: true, beltDetail: true, bootDetail: true };
+  }
+
+  // ---- Cloak billow (Task 31) -------------------------------------------
+  // Tuning for the procedural cloak sway, kept in one place so the pure updater and
+  // the fit invariant read the same clamps. The cloak hangs from a back pivot behind
+  // the hips; the pivot's x-rotation trails the drape BACKWARD (never forward — see
+  // `xMin` ≥ 0) and its z-rotation banks it side to side. The clamps make it
+  // structurally impossible for the drape to scythe forward through the legs.
+  const CLOAK_SWAY = {
+    idleBack: 0.06, moveBack: 0.44,   // base backward lean (rad): idle vs moving
+    idleFlap: 0.02, moveFlap: 0.09,   // walk-phase flutter amplitude (rad)
+    idleSide: 0.02, moveSide: 0.11,   // side-to-side sway amplitude (rad)
+    turnGain: 0.45, turnMax: 0.26,    // banking induced by turning (rad·s → rad, clamped)
+    xMin: 0, xMax: 0.62,              // clamp: NEVER forward (x ≥ 0), never past 0.62 back
+    zMax: 0.34,                       // clamp: side sway magnitude
+    rate: 9,                          // exponential smoothing rate (1/s) — frame-rate independent
+  };
+
+  // Pure, frame-rate-independent cloak-billow step (Task 31). Given the pivot's
+  // current rotation {x,z}, whether the wearer is moving, the walk phase, a turn
+  // signal (rad/s) and dt (seconds), return the NEXT {x,z} — clamped so the drape
+  // only ever trails BEHIND (x ∈ [xMin≥0, xMax]) and banks within ±zMax. Time-based
+  // exponential smoothing (`1 − e^(−rate·dt)`) makes it look identical at any frame
+  // rate and freeze exactly when the game pauses (update stops calling it). No side
+  // effects, so it is unit-testable in isolation.
+  function cloakBillowStep(cur, moving, walkPhase, turn, dt) {
+    const S = CLOAK_SWAY;
+    const cl = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+    const ph = Number.isFinite(walkPhase) ? walkPhase : 0;
+    const back = moving ? S.moveBack : S.idleBack;
+    const flap = Math.sin(ph * 1.5) * (moving ? S.moveFlap : S.idleFlap);
+    let tx = cl(back + flap, S.xMin, S.xMax);
+    const tz = cl(
+      Math.sin(ph) * (moving ? S.moveSide : S.idleSide) +
+        cl((Number.isFinite(turn) ? turn : 0) * S.turnGain, -S.turnMax, S.turnMax),
+      -S.zMax,
+      S.zMax,
+    );
+    const cx = cur && Number.isFinite(cur.x) ? cur.x : 0;
+    const cz = cur && Number.isFinite(cur.z) ? cur.z : 0;
+    const k = dt > 0 ? 1 - Math.exp(-S.rate * dt) : 0; // dt ≤ 0 (no time / paused) ⇒ no change
+    return { x: cx + (tx - cx) * k, z: cz + (tz - cz) * k };
   }
 
   // ---- Inventory / equipment operations ----------------------------------
@@ -1232,7 +1275,6 @@ import {
       this.gearShown = {};
       const cast = (m) => { try { shadow.addShadowCaster(m); } catch (e) {} return m; };
       const off = (m) => { try { m.setEnabled(false); } catch (e) {} return m; };
-      const tone = "#9fb0c8"; // neutral steel base; refreshWornGear tints by rarity
 
       // Helmet — a distinct, real-looking head piece per item (Task 25). The
       // `helmet` anchor stays a single, stable TransformNode (so equip/unequip only
@@ -1302,15 +1344,13 @@ import {
       // the finer trims are tier-gated.
       this._buildBoots(scene, spec, cast, off);
 
-      // Cloak — hangs from the upper back and billows when moving (tier-gated sway).
-      if (spec.cloak) {
-        const clMat = emat(scene, "gearCloakM", tone, 0.06);
-        const pivot = new BABYLON.TransformNode("cloakPivot", scene);
-        pivot.parent = this.lean; pivot.position.set(0, 1.5, -0.3);
-        const cloak = box(scene, "gearCloak", 0.78, 1.15, 0.05, clMat);
-        cloak.parent = pivot; cloak.position.set(0, -0.55, 0); cast(cloak);
-        this.cloakPivot = pivot; g.cloak = cloak; g.cloakMat = clMat; off(cloak);
-      }
+      // Cloak — a real draping cloak per item (Task 31): a tapered, segmented cloth
+      // drape with a neck clasp, hung from a single back pivot BEHIND the hips so it
+      // trails behind the legs and billows with motion (tier-gated sway) — instead of
+      // the old single flat box that swung THROUGH the legs on sharp turns. Every
+      // archetype is pre-built once under the shared pivot; refreshWornGear() reveals
+      // the equipped one. Always built (core silhouette); finer trims are tier-gated.
+      if (spec.cloak) this._buildCloak(scene, spec, cast, off);
 
       this.refreshWornGear();
     }
@@ -2164,6 +2204,172 @@ import {
       });
     }
 
+    // Build one procedural mesh group per cloak archetype (Task 31), all parented to
+    // ONE shared back pivot (`this.cloakPivot`) and hidden; refreshWornGear() reveals
+    // the one the equipped cloak maps to. The old cloak was a single flat box whose
+    // pivot swung ±0.5 rad — that flopped the drape FORWARD through the legs on sharp
+    // turns. Instead, every drape is:
+    //   • hung from the pivot at lean-local (0, 1.5, −0.3) — BEHIND the hips — with all
+    //     of its low-hanging geometry at group-local z ≤ 0 (behind the pivot plane), so
+    //     with the billow pivot clamped to x ≥ 0 (never forward, see cloakBillowStep)
+    //     the drape can only ever trail BACKWARD, structurally clear of the legs.
+    //   • a tapered, SEGMENTED cloth drape (a few vertical fold panels) + a neck clasp/
+    //     collar, so it reads as cloth, not a plank — with a per-set/material motif.
+    //   • stopped well ABOVE the ankles (hem ≈ lean-y 0.45 at rest) so even a full leg
+    //     back-swing never meets it.
+    // Each group tracks its own material list (rarity paint() recolours the whole
+    // cloak) and a `meshes` list (the leak test tracks parts; the fit test samples the
+    // real geometry). Always built (core silhouette); the finer trims are tier-gated.
+    _buildCloak(scene, spec, cast, off) {
+      const detail = spec.cloakSway !== false; // richer folds/trims above the low tier
+      const g = this.gear;
+      // The shared anchor the billow rotates. One pivot, built once (never realloc);
+      // enabling/disabling it toggles the whole cloak, and refreshWornGear() enables
+      // just the matching archetype group under it.
+      const pivot = new BABYLON.TransformNode("cloakPivot", scene);
+      pivot.parent = this.lean; pivot.position.set(0, 1.5, -0.3);
+      this.cloakPivot = pivot; off(pivot);
+      const cloaks = (g.cloaks = {});
+      let uid = 0;
+      // A fresh emissive material for a cloak part; base tint by the archetype's
+      // material, tracked so paint() can recolour the whole cloak on equip.
+      const cmat = (mats, key, emissive) => {
+        const m = emat(scene, "gearCloak" + key + uid++, CLOAK_MATERIAL_TINT[key] || "#5a6f8a", emissive == null ? 0.06 : emissive);
+        mats.push(m); return m;
+      };
+      let curMeshes = null;
+      const track = (x) => { if (curMeshes) curMeshes.push(x); cast(x); return x; };
+      // Register an archetype: build its group under the shared pivot via build(node, mats).
+      const arch = (key, build) => {
+        const node = new BABYLON.TransformNode("cloak_" + key, scene);
+        node.parent = pivot; off(node);
+        const mats = []; const meshes = [];
+        curMeshes = meshes; build(node, mats); curMeshes = null;
+        cloaks[key] = { node, mats, meshes };
+      };
+      // Layered primitive helpers attached to a group node (each tracked for tests).
+      const shell = (node, name, w, h, d, m) => { const x = box(scene, name, w, h, d, m); x.parent = node; return track(x); };
+      const ball = (node, name, dia, m) => { const x = sphere(scene, name, dia, m); x.parent = node; return track(x); };
+      const band = (node, name, top, bot, h, m) => { const x = cyl(scene, name, top, bot, h, m); x.parent = node; return track(x); };
+      const spike = (node, name, bot, h, m) => { const x = cone(scene, name, bot, 0.01, h, m); x.parent = node; return track(x); };
+      // The DRAPE shared by every archetype: `folds` vertical cloth panels fanned across
+      // the back, tapering from `topW` (shoulders) to `botW` (hem) over `len`. Each panel
+      // sits at group-local z ≤ 0 (BEHIND the pivot plane) and hangs DOWN from the neck, so
+      // once the billow clamps the pivot to x ≥ 0 the whole drape stays behind the legs.
+      // The outer folds fan out + tilt back so the hem flares like cloth. Returns the panels.
+      const drape = (node, m, folds, topW, botW, len) => {
+        const parts = [];
+        const fw = (botW / folds) * 1.25; // panel width (overlap for a seamless sheet)
+        for (let i = 0; i < folds; i++) {
+          const t = folds === 1 ? 0 : (i / (folds - 1)) * 2 - 1; // −1 (left) .. +1 (right)
+          const panel = shell(node, "cloakFold", fw, len, 0.05, m);
+          panel.position.set(t * botW * 0.42, -0.12 - len / 2, -0.03 - Math.abs(t) * 0.05);
+          panel.rotation.z = -t * 0.12;  // fan the folds outward toward the hem
+          panel.rotation.x = 0.05;       // a gentle backward drape off the shoulders
+          // Taper: narrow the top of each fold so the shoulders read snug, the hem full.
+          panel.scaling.x = 0.72 + 0.28 * Math.abs(t); // outer folds a touch wider at rest
+          parts.push(panel);
+        }
+        return parts;
+      };
+      // A round neck clasp at the throat — high up (lean-y ≈ 1.5), far above the legs, so
+      // it may reach slightly forward to sit on the collarbone without any leg-clip risk.
+      const clasp = (node, m) => {
+        const c = ball(node, "cloakClasp", 0.16, m);
+        c.position.set(0, 0.02, 0.08); c.scaling.set(1.1, 0.7, 0.7);
+        return c;
+      };
+      // A shoulder collar band across the top of the drape.
+      const collar = (node, m, w) => {
+        const b = shell(node, "cloakCollar", w, 0.16, 0.14, m);
+        b.position.set(0, 0.0, 0.0); b.scaling.z = 1.1;
+        return b;
+      };
+
+      // -- CAPE: a simple tapered cloth cape + a round neck clasp (default). --
+      arch("cape", (node, mats) => {
+        const clothM = cmat(mats, "cloth", 0.05);
+        drape(node, clothM, detail ? 4 : 2, 0.5, 0.86, 1.06);
+        clasp(node, cmat(mats, "gold", 0.1));
+        if (detail) collar(node, clothM, 0.46);
+      });
+
+      // -- MANTLE: a hooded traveller's mantle — a cape + a shoulder shawl collar + a
+      //    hood lump at the neck (rare / non-set). --
+      arch("mantle", (node, mats) => {
+        const clothM = cmat(mats, "cloth", 0.05);
+        drape(node, clothM, detail ? 4 : 2, 0.54, 0.9, 1.08);
+        // A broad shawl collar draped over the shoulders.
+        const shawl = shell(node, "cloakShawl", 0.66, 0.2, 0.18, clothM);
+        shawl.position.set(0, 0.0, -0.02); shawl.scaling.z = 1.15;
+        // A hood lump slumped at the back of the neck.
+        const hood = ball(node, "cloakHood", 0.34, clothM);
+        hood.position.set(0, 0.06, -0.12); hood.scaling.set(1, 0.9, 1.1);
+        clasp(node, cmat(mats, "leather", 0.06));
+      });
+
+      // -- SCALED: an overlapping dragonscale cloak — segmented scale panels down the
+      //    back + a fanged clasp (Dragonscale). --
+      arch("scaled", (node, mats) => {
+        const scaleM = cmat(mats, "dragonscale", 0.08);
+        drape(node, scaleM, detail ? 4 : 2, 0.5, 0.84, 1.02);
+        // Overlapping scale rows climbing down the centre of the drape.
+        const rows = detail ? 4 : 2;
+        for (let r = 0; r < rows; r++) {
+          const sc = ball(node, "cloakScale", 0.2, scaleM);
+          sc.position.set(0, -0.16 - r * 0.22, -0.03); sc.scaling.set(1.3, 0.5, 0.4);
+        }
+        // A fanged clasp at the throat.
+        const fang = cmat(mats, "gold", 0.12);
+        clasp(node, fang);
+        if (detail) {
+          const spineL = spike(node, "cloakFangL", 0.06, 0.16, fang);
+          spineL.position.set(-0.12, 0.0, 0.06); spineL.rotation.x = Math.PI;
+          const spineR = spike(node, "cloakFangR", 0.06, 0.16, fang);
+          spineR.position.set(0.12, 0.0, 0.06); spineR.rotation.x = Math.PI;
+        }
+      });
+
+      // -- REGAL: an ornate gold-trimmed royal mantle — a broad shoulder collar + a
+      //    hemmed drape + hanging tassels (epic). --
+      arch("regal", (node, mats) => {
+        const clothM = cmat(mats, "cloth", 0.06);
+        const trimM = cmat(mats, "gold", detail ? 0.14 : 0.08);
+        drape(node, clothM, detail ? 5 : 2, 0.52, 0.92, 1.1);
+        // A broad, raised royal collar.
+        const col = collar(node, trimM, 0.6); col.scaling.set(1, 1.2, 1.2);
+        // A gold hem band across the bottom of the drape.
+        const hem = shell(node, "cloakHem", 0.9, 0.09, 0.06, trimM);
+        hem.position.set(0, -1.02, -0.06);
+        clasp(node, trimM);
+        if (detail) { // two hanging tassels off the collar
+          for (const sx of [-1, 1]) {
+            const tas = band(node, "cloakTassel", 0.04, 0.02, 0.3, trimM);
+            tas.position.set(sx * 0.22, -0.2, -0.02);
+          }
+        }
+      });
+
+      // -- WINGED: a feathered/winged cloak that flares out at the shoulders (gold) —
+      //    legendary (wings_of_dawn). --
+      arch("winged", (node, mats) => {
+        const clothM = cmat(mats, "cloth", 0.08);
+        const featherM = cmat(mats, "gold", detail ? 0.16 : 0.1);
+        drape(node, clothM, detail ? 5 : 2, 0.48, 0.96, 1.08);
+        // Feathered wing panels flaring UP + OUT from the shoulders (kept behind, z ≤ 0).
+        const feathers = detail ? 3 : 2;
+        for (const sx of [-1, 1]) {
+          for (let f = 0; f < feathers; f++) {
+            const fe = shell(node, "cloakFeather", 0.14, 0.4 - f * 0.06, 0.04, featherM);
+            fe.position.set(sx * (0.26 + f * 0.14), 0.12 - f * 0.04, -0.04);
+            fe.rotation.z = sx * (0.5 + f * 0.22); // fan the feathers out like a wing
+          }
+        }
+        // A jewelled clasp at the throat.
+        clasp(node, featherM);
+      });
+    }
+
     // Show/hide + recolour each worn-gear piece from the live equipment. Pure
     // visual: no allocation (meshes built once), so equipping never leaks. The
     // rarity colour signals power at a glance; legendary/epic get a faint glow.
@@ -2177,13 +2383,6 @@ import {
           const c = BABYLON.Color3.FromHexString(col);
           for (const m of mats) { if (!m) continue; m.diffuseColor = c; m.emissiveColor = c.scale(emi); }
         } catch (e) { /* hex parse can fail headless */ }
-      };
-      const apply = (slot, meshes, mats) => {
-        const inst = this.equipment[slot];
-        const on = !!(inst && inst !== TWO_HANDED);
-        shown[slot] = on;
-        if (meshes) for (const m of (Array.isArray(meshes) ? meshes : [meshes])) { try { m.setEnabled(on); } catch (e) {} }
-        if (on && mats) paint(Array.isArray(mats) ? mats : [mats], getDef(inst.id));
       };
       // Reveal ONLY the archetype group the equipped item maps to (helmets Task 25,
       // chests Task 26) and paint that group by rarity. Unused groups stay hidden so
@@ -2266,21 +2465,54 @@ import {
       // low tier (belt omitted) — applyArch tolerates a null groups map and just keeps
       // the (absent) anchor hidden, so the clean low-tier omission is preserved.
       applyArch("belt", g.belt, g.belts, beltArchetype, "beltArchetype");
+      // Cloak (Task 31): reveal ONLY the archetype the equipped cloak maps to under the
+      // single back pivot (built once, never realloc); paint it by rarity/set. The pivot
+      // itself toggles on/off with the slot, and the billow rotates it. Same contract as
+      // applyBelt but the anchor is `this.cloakPivot`. `g.cloaks` is absent only if the
+      // cloak was never built (it's core silhouette, so always present).
+      const applyCloak = () => {
+        const inst = this.equipment.cloak;
+        const on = !!(inst && inst !== TWO_HANDED);
+        shown.cloak = on;
+        try { if (this.cloakPivot) this.cloakPivot.setEnabled(on); } catch (e) {}
+        const sel = on && g.cloaks ? cloakArchetype(getDef(inst.id)).archetype : null;
+        shown.cloakArchetype = sel;
+        if (g.cloaks) {
+          for (const key in g.cloaks) {
+            const grp = g.cloaks[key];
+            const show = on && key === sel;
+            try { grp.node.setEnabled(show); } catch (e) {}
+            if (show) paint(grp.mats, getDef(inst.id));
+          }
+        }
+      };
       applyPauldrons();
       applyGloves();
       applyBoots();
-      apply("cloak", g.cloak, g.cloakMat);
+      applyCloak();
     }
 
-    // Billow the cloak with movement (frame-rate-smoothed lerp like the limbs;
-    // freezes with the pause menu since update() stops being called).
-    _animateCloak() {
+    // Billow the cloak with movement (Task 31). Frame-rate-independent + pure: the
+    // per-frame math lives in cloakBillowStep() (clamped so the drape only ever trails
+    // BEHIND — never scything forward through the legs). Freezes with the pause menu
+    // since update() stops calling it. On the low tier (cloakSway === false) the cloak
+    // drapes statically (a clean omission), which — with x pinned at 0 — hangs straight
+    // behind the back.
+    _animateCloak(dt) {
       if (!this.cloakPivot || !this._wornSpec || !this._wornSpec.cloakSway) return;
       const moving = this.state === "walk";
-      const back = (moving ? -0.5 : -0.06) + Math.sin(this.walkPhase * 1.5) * (moving ? 0.08 : 0.02);
-      const side = Math.sin(this.walkPhase) * (moving ? 0.12 : 0.03);
-      this.cloakPivot.rotation.x = lerp(this.cloakPivot.rotation.x || 0, back, 0.15);
-      this.cloakPivot.rotation.z = lerp(this.cloakPivot.rotation.z || 0, side, 0.15);
+      // Turn signal: how fast the facing is changing (rad/s), so a sharp turn banks the
+      // hem to the side. Wrap to (−π, π] so a ±2π facing wrap doesn't spike it.
+      const prev = this._cloakFacing == null ? this.facing : this._cloakFacing;
+      let d = this.facing - prev;
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      const turn = dt > 0 ? d / dt : 0;
+      this._cloakFacing = this.facing;
+      const cur = { x: this.cloakPivot.rotation.x || 0, z: this.cloakPivot.rotation.z || 0 };
+      const next = cloakBillowStep(cur, moving, this.walkPhase, turn, dt);
+      this.cloakPivot.rotation.x = next.x;
+      this.cloakPivot.rotation.z = next.z;
     }
 
     // Keep the pauldrons seated on the shoulders through the attack. The shoulder
@@ -2366,7 +2598,7 @@ import {
       this.wandGlow.intensity = 0.4 + (rangedStrike ? 0.9 : 0) + pulse * 0.1;
 
       this._animatePauldrons(); // keep the shoulders seated (after the arms are posed)
-      this._animateCloak();
+      this._animateCloak(dt);
       this.yaw.rotation.y = this.facing;
     }
 
@@ -12623,6 +12855,8 @@ import {
       beltArchetype,
       // ---- Worn boots: distinct real boots per item (Task 30) ----
       bootArchetype,
+      // ---- Worn cloaks: a real draping cloak per item (Task 31) ----
+      cloakArchetype, cloakBillowStep, CLOAK_SWAY,
 
       // ---- Responsive HUD / drag-to-slot / fullscreen (Task 16) ----
       dragSlotReducer, pointerDragSupported, Fullscreen,

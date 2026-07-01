@@ -300,6 +300,16 @@ export default defineConfig({
       testMatch: /worn-boots\.spec\.js/,
       use: { ...devices["Desktop Chrome"] },
     },
+    // Worn cloaks (Task 31): boot the built site, equip several cloaks, turn Lily's back
+    // to the lens, hold a steady mid-turn BILLOW pose and screenshot her back + cloak,
+    // asserting each maps to its archetype, the drape shapes visibly differ, and the cloak
+    // trails behind (never through the legs). Needs a real WebGL canvas, so it runs at
+    // desktop.
+    {
+      name: "worn-cloaks-desktop",
+      testMatch: /worn-cloaks\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",
