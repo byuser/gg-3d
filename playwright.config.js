@@ -248,6 +248,14 @@ export default defineConfig({
       testMatch: /cloudsignin\.spec\.js/,
       use: { ...devices["Desktop Chrome"] },
     },
+    // Worn helmets (Task 25): boot the built site, equip several helmets and
+    // screenshot Lily's head, asserting each maps to its archetype and the shapes
+    // visibly differ. Needs a real WebGL canvas, so it runs at desktop.
+    {
+      name: "worn-helmets-desktop",
+      testMatch: /worn-helmets\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",

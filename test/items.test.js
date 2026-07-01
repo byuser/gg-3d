@@ -320,3 +320,100 @@ describe("Task 12 — save / load round-trip + migration", () => {
       expect(T.player.equipment[slot]).toBe(null);
   });
 });
+
+describe("Task 25 — worn helmets: distinct archetype per item", () => {
+  const HELMET_IDS = Object.keys(T.ITEM_DB).filter((id) => T.ITEM_DB[id].type === "helmet");
+  const VALID_ARCH = ["cap", "open", "great", "dragon", "crown"];
+  const VALID_MAT = ["leather", "cloth", "iron", "steel", "gold", "dragonscale"];
+
+  it("maps every helmet def to a valid archetype + material", () => {
+    expect(HELMET_IDS.length).toBeGreaterThanOrEqual(4);
+    for (const id of HELMET_IDS) {
+      const a = T.helmetArchetype(T.getDef(id));
+      expect(VALID_ARCH.includes(a.archetype), `${id} archetype`).toBe(true);
+      expect(VALID_MAT.includes(a.material), `${id} material`).toBe(true);
+    }
+  });
+
+  it("gives the four shipped helmets four DISTINCT archetypes", () => {
+    const pick = (id) => T.helmetArchetype(T.getDef(id));
+    expect(pick("leather_cap")).toMatchObject({ archetype: "cap", material: "leather" });
+    expect(pick("iron_helm")).toMatchObject({ archetype: "open", material: "iron" });
+    expect(pick("dragon_helm")).toMatchObject({ archetype: "dragon", material: "dragonscale" });
+    expect(pick("crown_eternal")).toMatchObject({ archetype: "crown", material: "gold" });
+    // A leather cap and a dragon helm must NOT look identical.
+    expect(pick("leather_cap").archetype).not.toBe(pick("dragon_helm").archetype);
+  });
+
+  it("is pure + total: infers a valid pair for helmets with no `helm` block", () => {
+    // Set-driven inference (Dragonscale → dragon horns, Ironguard → open iron).
+    expect(T.helmetArchetype({ type: "helmet", rarity: "rare", set: "dragonscale" }))
+      .toMatchObject({ archetype: "dragon", material: "dragonscale" });
+    expect(T.helmetArchetype({ type: "helmet", rarity: "rare", set: "ironguard" }))
+      .toMatchObject({ archetype: "open", material: "steel" });
+    // Rarity fallbacks (legendary → crown, epic/rare → great).
+    expect(T.helmetArchetype({ type: "helmet", rarity: "legendary" }).archetype).toBe("crown");
+    expect(T.helmetArchetype({ type: "helmet", rarity: "epic" }).archetype).toBe("great");
+    // Bogus / missing input clamps to a drawable pair (never throws, never invalid).
+    for (const bad of [undefined, null, {}, { helm: { archetype: "xx", material: "plastic" } }]) {
+      const a = T.helmetArchetype(bad);
+      expect(VALID_ARCH.includes(a.archetype)).toBe(true);
+      expect(VALID_MAT.includes(a.material)).toBe(true);
+    }
+    // Deterministic (same def ⇒ same pair).
+    expect(T.helmetArchetype(T.getDef("dragon_helm"))).toEqual(T.helmetArchetype(T.getDef("dragon_helm")));
+  });
+
+  it("pre-builds every archetype mesh group once (headless-safe), each with materials", () => {
+    const g = T.player.gear;
+    expect(g.helms).toBeTruthy();
+    expect(Object.keys(g.helms).sort()).toEqual(["cap", "crown", "dragon", "great", "open"]);
+    for (const k in g.helms) {
+      expect(g.helms[k].node, k).toBeTruthy();
+      expect(g.helms[k].mats.length, k).toBeGreaterThan(0);
+    }
+  });
+
+  it("tier-gates the helm trim detail (simpler shell on low)", () => {
+    expect(T.wornDetailFor("low").helmDetail).toBe(false);
+    expect(T.wornDetailFor("high").helmDetail).toBe(true);
+  });
+
+  it("shows exactly the equipped helmet's archetype (and nothing when bare)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const map = { leather_cap: "cap", iron_helm: "open", dragon_helm: "dragon", crown_eternal: "crown" };
+    for (const id in map) {
+      T.equipItem(p, T.makeItem(id));
+      expect(p.gearShown.helmet, id).toBe(true);
+      expect(p.gearShown.helmetArchetype, id).toBe(map[id]);
+      T.unequipSlot(p, "helmet");
+      T.recomputeStats(p);
+    }
+    expect(p.gearShown.helmet).toBe(false);
+    expect(p.gearShown.helmetArchetype).toBe(null);
+  });
+
+  it("never reallocates the helmet meshes across equip churn (no leak)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const anchor = p.gear.helmet;
+    const groups = { cap: p.gear.helms.cap.node, dragon: p.gear.helms.dragon.node, crown: p.gear.helms.crown.node };
+    // Hammer through every helmet many times.
+    for (let i = 0; i < 10; i++) {
+      for (const id of ["leather_cap", "iron_helm", "dragon_helm", "crown_eternal"]) {
+        T.equipItem(p, T.makeItem(id));
+        expect(() => step(1)).not.toThrow(); // animates + renders with the helm on
+      }
+      T.unequipSlot(p, "helmet");
+      T.recomputeStats(p);
+    }
+    // Same anchor + archetype nodes throughout — nothing was rebuilt.
+    expect(p.gear.helmet).toBe(anchor);
+    expect(p.gear.helms.cap.node).toBe(groups.cap);
+    expect(p.gear.helms.dragon.node).toBe(groups.dragon);
+    expect(p.gear.helms.crown.node).toBe(groups.crown);
+  });
+});
