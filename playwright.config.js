@@ -264,6 +264,15 @@ export default defineConfig({
       testMatch: /worn-chests\.spec\.js/,
       use: { ...devices["Desktop Chrome"] },
     },
+    // Worn pauldrons (Task 27): boot the built site, equip several pauldrons, hold
+    // Lily in the melee strike pose and screenshot her shoulder + chest, asserting
+    // each maps to its archetype, the shapes visibly differ, and there's no chest
+    // penetration mid-attack. Needs a real WebGL canvas, so it runs at desktop.
+    {
+      name: "worn-pauldrons-desktop",
+      testMatch: /worn-pauldrons\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",

@@ -31,6 +31,7 @@ import {
   isMaterial, isStackable, SHOP_STOCK, POTION_STOCK, INGREDIENT_STOCK, ALCHEMIST_STOCK, RARE_DROPS, FEATURED_POOL,
   AFFIXES, rollAffixes, affixStats, SETS, setBonusStats, activeSets, itemCategory,
   HELM_MATERIAL_TINT, helmetArchetype, CHEST_MATERIAL_TINT, chestArchetype,
+  PAULDRON_MATERIAL_TINT, pauldronArchetype,
 } from "./data/items.js";
 import {
   MATERIALS, MATERIAL_IDS, RESOURCE_KINDS, RELICS, CASTLE_PARTS, CASTLE_PART_BY_ID,
@@ -352,8 +353,8 @@ import {
   // are dropped on the low tier so phones keep their budget. Equip still applies
   // a missing piece's STATS — only its mesh is skipped.
   function wornDetailFor(tier) {
-    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, cloak: true, cloakSway: false, helmDetail: false, chestDetail: false };
-    return { pauldrons: true, belt: true, gloves: true, cloak: true, cloakSway: true, helmDetail: true, chestDetail: true };
+    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, cloak: true, cloakSway: false, helmDetail: false, chestDetail: false, pauldronDetail: false };
+    return { pauldrons: true, belt: true, gloves: true, cloak: true, cloakSway: true, helmDetail: true, chestDetail: true, pauldronDetail: true };
   }
 
   // ---- Inventory / equipment operations ----------------------------------
@@ -1264,16 +1265,12 @@ import {
         g.belt = belt; g.beltMat = beltMat; off(belt);
       }
 
-      // Pauldrons — shoulder caps on each arm pivot (tier-gated).
-      if (spec.pauldrons) {
-        const pMat = emat(scene, "gearPauldronM", tone, 0.06);
-        g.pauldrons = []; g.pauldronMat = pMat;
-        for (const arm of [this.armL, this.armR]) {
-          const cap = sphere(scene, "gearPauldron", 0.42, pMat);
-          cap.parent = arm; cap.position.set(0, 0.04, 0); cap.scaling.set(1.05, 0.7, 1.05); cast(cap); off(cap);
-          g.pauldrons.push(cap);
-        }
-      }
+      // Pauldrons — a distinct, real shoulder piece per item (Task 27), seated ON
+      // the shoulder joint (not diving into the chest). Each shoulder gets its own
+      // pivot (child of the arm, so it swings with the attack) under which EVERY
+      // archetype is pre-built once; refreshWornGear() reveals the equipped one.
+      // Tier-gated: dropped entirely on the low tier (a clean omission).
+      if (spec.pauldrons) this._buildPauldrons(scene, spec, cast, off);
 
       // Gloves — cuffs over the hands (ride the arms).
       const glMat = emat(scene, "gearGloveM", tone, 0.06);
@@ -1557,6 +1554,156 @@ import {
       }
     }
 
+    // Build one procedural mesh group per pauldron archetype (Task 27) on EACH
+    // shoulder, hidden; refreshWornGear() shows the pair the equipped pauldrons map
+    // to. The fix for the old inward clip is the ANCHOR: the old sphere was parented
+    // to the ARM pivot, so the melee roll (armR.z → +1.2) swung it across the chest.
+    // A real pauldron is strapped to the SHOULDER, not the upper arm — so each
+    // shoulder gets its own pivot parented to `lean` (the torso), seated just outside
+    // the torso surface (lean-x ±0.44, torso half-width ≈0.23 at shoulder height).
+    // _animatePauldrons() then drives the pivot to follow a FRACTION of the arm's
+    // forward/back PITCH (so it still reads as connected to the arm through the swing)
+    // and IGNORES the arm's roll entirely. Because pitch is a rotation about X it
+    // never changes the piece's x-extent, so no pose can dive it into the chest — the
+    // shoulder-fit invariant is structural, not tuned. Each archetype group tracks its
+    // material list so the rarity paint() recolours the whole shoulder. Tier-gated.
+    _buildPauldrons(scene, spec, cast, off) {
+      const detail = spec.pauldronDetail !== false; // full lames/spines above low tier
+      const g = this.gear;
+      // Per-archetype record: { nodes:[Lnode,Rnode], mats:[...both], meshes:[...both] }.
+      const pauls = (g.pauls = {});
+      this.shoulderPivots = [];
+      g.pauldronMat = null; // superseded by per-archetype mats (kept for back-compat)
+      let uid = 0;
+      const arms = [
+        { arm: this.armL, s: -1 }, // left shoulder: outward is -x
+        { arm: this.armR, s: 1 },  // right shoulder: outward is +x
+      ];
+      // A shoulder pivot per side, parented to `lean` at the shoulder joint just
+      // outside the torso. Its pitch is driven per-frame in _animatePauldrons() from
+      // the matching arm; we stash the pivot + its arm.
+      const pivots = arms.map(({ arm, s }) => {
+        const pv = new BABYLON.TransformNode("shoulderP" + (s < 0 ? "L" : "R"), scene);
+        pv.parent = this.lean; pv.position.set(0.44 * s, 1.46, 0);
+        this.shoulderPivots.push({ pivot: pv, arm, s });
+        return pv;
+      });
+      // A fresh emissive material for a pauldron part; base tint by the archetype's
+      // material, tracked (across BOTH shoulders) so paint() recolours the pair.
+      const pmat = (mats, key, emissive) => {
+        const m = emat(scene, "gearPaul" + key + uid++, PAULDRON_MATERIAL_TINT[key] || "#9fb0c8", emissive == null ? 0.06 : emissive);
+        mats.push(m); return m;
+      };
+      // `meshes` collects every built part (both shoulders) so tests can sample the
+      // real geometry (torso-envelope invariant) and the leak test can track them.
+      let curMeshes = null;
+      const track = (x) => { if (curMeshes) curMeshes.push(x); cast(x); return x; };
+      // Register an archetype: build its group on BOTH shoulders via `build(node, s, mats)`.
+      const arch = (key, build) => {
+        const nodes = []; const mats = []; const meshes = [];
+        pivots.forEach((pv, i) => {
+          const node = new BABYLON.TransformNode("paul_" + key + (i ? "R" : "L"), scene);
+          node.parent = pv; off(node);
+          curMeshes = meshes;
+          build(node, arms[i].s, mats);
+          curMeshes = null;
+          nodes.push(node);
+        });
+        pauls[key] = { nodes, mats, meshes };
+      };
+      // Layered primitive helpers attached to a group node (each tracked for tests).
+      const shell = (node, name, w, h, d, m) => { const x = box(scene, name, w, h, d, m); x.parent = node; return track(x); };
+      const dome = (node, name, dia, m) => { const x = sphere(scene, name, dia, m); x.parent = node; return track(x); };
+      const spike = (node, name, bot, h, m) => { const x = cone(scene, name, bot, 0.01, h, m); x.parent = node; return track(x); };
+      const band = (node, name, top, bot, h, m) => { const x = cyl(scene, name, top, bot, h, m); x.parent = node; return track(x); };
+
+      // -- CAP: a soft rounded leather shoulder cap (leather_pauldrons). --
+      arch("cap", (node, s, mats) => {
+        const capM = pmat(mats, "leather", 0.05);
+        const cap = dome(node, "paulCap", 0.46, capM);
+        // Flat + outboard: dome centre pulled outward, squashed in y so it hugs the
+        // shoulder instead of ballooning inward over the neck.
+        cap.position.set(0.05 * s, 0.0, 0); cap.scaling.set(1.0, 0.66, 1.02);
+        if (detail) { // a rolled leather trim around the rim
+          const trim = band(node, "paulCapTrim", 0.5, 0.52, 0.12, pmat(mats, "cloth", 0.04));
+          trim.rotation.x = Math.PI / 2; trim.position.set(0.05 * s, -0.08, 0);
+        }
+      });
+
+      // -- PLATED: a segmented banded iron cap over stacked lames (Ironguard). --
+      arch("plated", (node, s, mats) => {
+        const ironM = pmat(mats, "iron", 0.06);
+        const cap = dome(node, "paulPlateCap", 0.48, ironM);
+        cap.position.set(0.06 * s, 0.03, 0); cap.scaling.set(1.02, 0.6, 1.04);
+        const lames = detail ? 3 : 2; // overlapping shoulder lames sweeping down the arm
+        for (let i = 0; i < lames; i++) {
+          const lame = band(node, "paulPlateLame", 0.5 - i * 0.05, 0.46 - i * 0.05, 0.1, ironM);
+          lame.rotation.x = Math.PI / 2;
+          lame.position.set(0.06 * s, -0.06 - i * 0.11, 0); lame.scaling.z = 0.9;
+        }
+        if (detail) { // a raised rivet ridge along the crest
+          const ridge = shell(node, "paulPlateRidge", 0.1, 0.1, 0.42, ironM);
+          ridge.position.set(0.06 * s, 0.14, 0);
+        }
+      });
+
+      // -- SPIKED: overlapping dragonscale cap + swept-back spines (Dragonscale). --
+      arch("spiked", (node, s, mats) => {
+        const scaleM = pmat(mats, "dragonscale", 0.08);
+        const cap = dome(node, "paulSpikeCap", 0.46, scaleM);
+        cap.position.set(0.1 * s, 0.02, 0); cap.scaling.set(1.02, 0.62, 1.04);
+        // Overlapping scale plates climbing the outer shoulder.
+        const rows = detail ? 3 : 2;
+        for (let r = 0; r < rows; r++) {
+          const sc = dome(node, "paulScale", 0.2, scaleM);
+          sc.position.set((0.08 + r * 0.02) * s, 0.06 - r * 0.1, 0.0); sc.scaling.set(1, 0.5, 1);
+        }
+        const spineM = pmat(mats, "gold", 0.12);
+        const spines = detail ? 3 : 2; // a fan of swept-back spines off the crown
+        for (let i = 0; i < spines; i++) {
+          const sp = spike(node, "paulSpine", 0.09, 0.28 - i * 0.04, spineM);
+          sp.position.set((0.12 + i * 0.02) * s, 0.12, -0.02 - i * 0.12);
+          sp.rotation.z = (0.5 + i * 0.12) * s; sp.rotation.x = -0.5;
+        }
+      });
+
+      // -- ORNATE: a polished trimmed plate cap + a domed stud (rare, non-set). --
+      arch("ornate", (node, s, mats) => {
+        const steelM = pmat(mats, "steel", 0.06);
+        const trimM = pmat(mats, "gold", detail ? 0.14 : 0.08);
+        const cap = dome(node, "paulOrnCap", 0.5, steelM);
+        cap.position.set(0.06 * s, 0.02, 0); cap.scaling.set(1.04, 0.62, 1.04);
+        const rim = band(node, "paulOrnRim", 0.54, 0.56, 0.1, trimM); // a gold rim band
+        rim.rotation.x = Math.PI / 2; rim.position.set(0.06 * s, -0.06, 0); rim.scaling.z = 0.94;
+        // A raised central boss stud.
+        const boss = dome(node, "paulOrnBoss", 0.2, trimM); boss.position.set(0.08 * s, 0.1, 0); boss.scaling.set(1, 0.7, 1);
+        if (detail) { // a lame skirt sweeping onto the upper arm
+          const lame = band(node, "paulOrnLame", 0.46, 0.42, 0.1, steelM);
+          lame.rotation.x = Math.PI / 2; lame.position.set(0.06 * s, -0.18, 0); lame.scaling.z = 0.9;
+        }
+      });
+
+      // -- WINGED: a flared great-pauldron with an upswept fin (epic / legendary). --
+      arch("winged", (node, s, mats) => {
+        const plateM = pmat(mats, "steel", 0.06);
+        const trimM = pmat(mats, "gold", detail ? 0.16 : 0.08);
+        const cap = dome(node, "paulWingCap", 0.5, plateM);
+        cap.position.set(0.12 * s, 0.02, 0); cap.scaling.set(1.04, 0.6, 1.04);
+        // A broad flared pauldron plate sweeping out over the arm.
+        const flare = band(node, "paulWingFlare", 0.38, 0.58, 0.12, plateM);
+        flare.rotation.x = Math.PI / 2; flare.position.set(0.16 * s, -0.06, 0); flare.scaling.z = 0.9;
+        // An upswept fin/blade off the crown — the signature "storm" silhouette.
+        const fin = spike(node, "paulWingFin", 0.16, 0.42, trimM);
+        fin.position.set(0.1 * s, 0.18, -0.04); fin.rotation.z = 0.4 * s; fin.rotation.x = -0.3;
+        if (detail) {
+          const fin2 = spike(node, "paulWingFin2", 0.1, 0.3, trimM);
+          fin2.position.set(0.18 * s, 0.12, -0.14); fin2.rotation.z = 0.7 * s; fin2.rotation.x = -0.4;
+          const edge = band(node, "paulWingEdge", 0.62, 0.64, 0.06, trimM); // a gold rim on the flare
+          edge.rotation.x = Math.PI / 2; edge.position.set(0.12 * s, -0.12, 0); edge.scaling.z = 0.9;
+        }
+      });
+    }
+
     // Show/hide + recolour each worn-gear piece from the live equipment. Pure
     // visual: no allocation (meshes built once), so equipping never leaks. The
     // rarity colour signals power at a glance; legendary/epic get a faint glow.
@@ -1598,10 +1745,28 @@ import {
           }
         }
       };
+      // Reveal ONLY the pauldron archetype pair (both shoulders) the equipped item
+      // maps to (Task 27); the anchors are the shoulder pivots (built once, never
+      // realloc). Same contract as applyArch but each archetype spans two nodes.
+      const applyPauldrons = () => {
+        const inst = this.equipment.pauldrons;
+        const on = !!(inst && inst !== TWO_HANDED);
+        shown.pauldrons = on;
+        const sel = on && g.pauls ? pauldronArchetype(getDef(inst.id)).archetype : null;
+        shown.pauldronArchetype = sel;
+        if (g.pauls) {
+          for (const key in g.pauls) {
+            const grp = g.pauls[key];
+            const show = on && key === sel;
+            for (const n of grp.nodes) { try { n.setEnabled(show); } catch (e) {} }
+            if (show) paint(grp.mats, getDef(inst.id));
+          }
+        }
+      };
       applyArch("helmet", g.helmet, g.helms, helmetArchetype, "helmetArchetype");
       applyArch("breastplate", g.chest, g.chests, chestArchetype, "chestArchetype");
       apply("belt", g.belt, g.beltMat);
-      apply("pauldrons", g.pauldrons, g.pauldronMat);
+      applyPauldrons();
       apply("gloves", g.gloves, g.gloveMat);
       apply("boots", g.boots, g.bootMat);
       apply("cloak", g.cloak, g.cloakMat);
@@ -1616,6 +1781,29 @@ import {
       const side = Math.sin(this.walkPhase) * (moving ? 0.12 : 0.03);
       this.cloakPivot.rotation.x = lerp(this.cloakPivot.rotation.x || 0, back, 0.15);
       this.cloakPivot.rotation.z = lerp(this.cloakPivot.rotation.z || 0, side, 0.15);
+    }
+
+    // Keep the pauldrons seated on the shoulders through the attack. The shoulder
+    // pivots are children of the arms (so they swing with the pitch), but the arm's
+    // z-ROLL — big on the melee strike (armR.z → +1.2) — would swing the cap across
+    // the chest. Cancel most of that roll on the pivot each frame (net roll ≈ 20% of
+    // the arm's) so the shoulder cap stays outboard of the torso. Called from
+    // update(), so it freezes correctly with the pause menu.
+    _animatePauldrons() {
+      if (!this.shoulderPivots) return;
+      // The shoulder pivots hang off the torso (lean), so they don't inherit the arm's
+      // roll (the twist that used to dive the old sphere across the chest). Drive each
+      // to follow a FRACTION of its arm's forward/back PITCH so the shoulder cap still
+      // swings with the attack — but pitch is a rotation about X, so it never changes
+      // the piece's x-extent: the cap can never reach into the torso, at any pose.
+      // Frame-rate-independent lerp; freezes with the pause menu since update() stops
+      // calling it.
+      const FOLLOW = 0.5;
+      for (const { pivot, arm } of this.shoulderPivots) {
+        try {
+          pivot.rotation.x = lerp(pivot.rotation.x || 0, (arm.rotation.x || 0) * FOLLOW, 0.4);
+        } catch (e) {}
+      }
     }
 
     startPickup(itemMesh, onPicked) {
@@ -1677,6 +1865,7 @@ import {
       const rangedStrike = this.swing.kind === "ranged" && this.swing.striking;
       this.wandGlow.intensity = 0.4 + (rangedStrike ? 0.9 : 0) + pulse * 0.1;
 
+      this._animatePauldrons(); // keep the shoulders seated (after the arms are posed)
       this._animateCloak();
       this.yaw.rotation.y = this.facing;
     }
@@ -11926,6 +12115,8 @@ import {
       helmetArchetype,
       // ---- Worn chest pieces: layered breastplates & robes per item (Task 26) ----
       chestArchetype,
+      // ---- Worn pauldrons: shoulder armour that sits on the shoulder (Task 27) ----
+      pauldronArchetype,
 
       // ---- Responsive HUD / drag-to-slot / fullscreen (Task 16) ----
       dragSlotReducer, pointerDragSupported, Fullscreen,

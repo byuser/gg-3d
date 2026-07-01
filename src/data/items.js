@@ -281,6 +281,56 @@
     return { archetype, material };
   }
 
+  // ---- Worn-pauldron archetypes (Task 27) -------------------------------
+  // Each pauldron (shoulder) renders as a distinct, real shoulder piece that sits
+  // ON the shoulder joint — instead of one plain sphere that dives into the chest.
+  // As with the helmets/chests, the 3D SHAPE is chosen by a pure, testable selector
+  // so the worn-gear builder (src/game.js `_buildPauldrons`) pre-builds every
+  // archetype once (per shoulder) and just toggles the matching one on equip. A
+  // pauldron def opts in via a `paul: { archetype, material }` block; without it we
+  // infer a sensible pair from the item's set / rarity so ANY pauldron maps to a
+  // valid pair the builder can draw.
+  //
+  //   archetype: "cap"      soft rounded leather shoulder cap (leather / cloth)
+  //              "plated"   segmented banded iron cap with lames (iron) — Ironguard
+  //              "spiked"   overlapping scale cap + swept spines (dragonscale)
+  //              "ornate"   polished trimmed plate cap + a stud (steel / gold)
+  //              "winged"   flared great-pauldron with an upswept fin (epic/legend.)
+  //   material:  "leather" | "cloth" | "iron" | "steel" | "gold" | "dragonscale"
+  const PAULDRON_ARCHETYPES = ["cap", "plated", "spiked", "ornate", "winged"];
+  const PAULDRON_MATERIALS = ["leather", "cloth", "iron", "steel", "gold", "dragonscale"];
+  // Base tints per material (rarity `paint()` then recolours the built mesh, but a
+  // sensible base keeps the un-painted headless build + any preview readable).
+  const PAULDRON_MATERIAL_TINT = {
+    leather: "#6f4a2a", cloth: "#8a7a5a", iron: "#8f9fb6",
+    steel: "#c3ccd8", gold: "#e8c057", dragonscale: "#b8603a",
+  };
+  // Resolve a pauldron item def to a { archetype, material } pair. Pure + total:
+  // honours an explicit `paul` block, else infers from the item's set (Dragonscale
+  // → spiked scale, Ironguard → banded plated) and rarity (legendary/epic → winged,
+  // rare → ornate), and finally clamps to the known archetype/material lists so the
+  // result is always one the builder can draw. Coordinated with chestArchetype /
+  // helmetArchetype so a full set reads as one suit (shared iron/steel/dragonscale
+  // materials, matching set motifs — an Ironguard cuirass + Ironguard shoulders).
+  function pauldronArchetype(def) {
+    let archetype = "cap";
+    let material = "leather";
+    const p = def && def.paul;
+    if (p && p.archetype) archetype = p.archetype;
+    else if (def && def.set === "dragonscale") archetype = "spiked";
+    else if (def && def.set === "ironguard") archetype = "plated";
+    else if (def && (def.rarity === "legendary" || def.rarity === "epic")) archetype = "winged";
+    else if (def && def.rarity === "rare") archetype = "ornate";
+    if (p && p.material) material = p.material;
+    else if (def && def.set === "dragonscale") material = "dragonscale";
+    else if (def && def.set === "ironguard") material = "iron";
+    else if (def && def.rarity === "legendary") material = "gold";
+    else if (def && (def.rarity === "epic" || def.rarity === "rare")) material = "steel";
+    if (!PAULDRON_ARCHETYPES.includes(archetype)) archetype = "cap";
+    if (!PAULDRON_MATERIALS.includes(material)) material = "leather";
+    return { archetype, material };
+  }
+
   // An item's effective stat block once its enhancement level + affixes are folded
   // in. `haste` (a sub-1 cooldown multiplier) improves *toward* zero, so we scale
   // its distance from 1 instead of the raw value; affix haste then compounds.
@@ -383,8 +433,8 @@
     iron_plate:     { name: "Iron Plate",     icon: "🛡️", type: "breastplate", rarity: "normal", cost: 40, desc: "+35 health, +10% resist.", stats: { maxHealth: 35, damageReduction: 0.1 }, set: "ironguard", chest: { archetype: "cuirass", material: "iron" } },
     leather_boots:  { name: "Leather Boots",  icon: "🥾", type: "boots",       rarity: "normal", cost: 16, desc: "+0.8 move speed.", stats: { moveSpeed: 0.8 } },
     iron_greaves:   { name: "Iron Greaves",   icon: "🦿", type: "boots",       rarity: "normal", cost: 30, desc: "+0.4 speed, +5% resist.", stats: { moveSpeed: 0.4, damageReduction: 0.05 }, set: "ironguard" },
-    leather_pauldrons: { name: "Leather Spaulders", icon: "🎽", type: "pauldrons", rarity: "normal", cost: 16, desc: "+12 max health.", stats: { maxHealth: 12 } },
-    iron_pauldrons: { name: "Iron Spaulders", icon: "🎽", type: "pauldrons", rarity: "normal", cost: 32, desc: "+18 health, +5% resist.", stats: { maxHealth: 18, damageReduction: 0.05 }, set: "ironguard" },
+    leather_pauldrons: { name: "Leather Spaulders", icon: "🎽", type: "pauldrons", rarity: "normal", cost: 16, desc: "+12 max health.", stats: { maxHealth: 12 }, paul: { archetype: "cap", material: "leather" } },
+    iron_pauldrons: { name: "Iron Spaulders", icon: "🎽", type: "pauldrons", rarity: "normal", cost: 32, desc: "+18 health, +5% resist.", stats: { maxHealth: 18, damageReduction: 0.05 }, set: "ironguard", paul: { archetype: "plated", material: "iron" } },
     leather_gloves: { name: "Leather Gloves", icon: "🧤", type: "gloves",     rarity: "normal", cost: 14, desc: "+1 weapon damage.", stats: { damage: 1 } },
     iron_gauntlets: { name: "Iron Gauntlets", icon: "🧤", type: "gloves",     rarity: "normal", cost: 30, desc: "+12 health, +1 damage.", stats: { maxHealth: 12, damage: 1 }, set: "ironguard" },
     leather_belt:   { name: "Leather Belt",   icon: "🪢", type: "belt",        rarity: "normal", cost: 12, desc: "+10 max health.", stats: { maxHealth: 10 } },
@@ -416,7 +466,7 @@
     vampiric_ring:  { name: "Vampiric Ring", icon: "🩸", type: "ring",        rarity: "rare", value: 70, desc: "Heal +3 per kill.", stats: { lifesteal: 3 } },
     titan_pendant:  { name: "Titan Pendant", icon: "💠", type: "necklace",    rarity: "rare", value: 110, desc: "+45 health, +8% resist, +2 damage.", stats: { maxHealth: 45, damageReduction: 0.08, damage: 2 } },
     dragonscale_plate: { name: "Dragonscale Plate", icon: "🐲", type: "breastplate", rarity: "rare", value: 105, desc: "+50 health, +14% resist.", stats: { maxHealth: 50, damageReduction: 0.14 }, set: "dragonscale", chest: { archetype: "dragonscale", material: "dragonscale" } },
-    dragon_pauldrons: { name: "Dragonscale Spaulders", icon: "🐲", type: "pauldrons", rarity: "rare", value: 80, desc: "+30 health, +8% resist.", stats: { maxHealth: 30, damageReduction: 0.08 }, set: "dragonscale" },
+    dragon_pauldrons: { name: "Dragonscale Spaulders", icon: "🐲", type: "pauldrons", rarity: "rare", value: 80, desc: "+30 health, +8% resist.", stats: { maxHealth: 30, damageReduction: 0.08 }, set: "dragonscale", paul: { archetype: "spiked", material: "dragonscale" } },
     dragon_gauntlets: { name: "Dragonscale Gauntlets", icon: "🐲", type: "gloves", rarity: "rare", value: 78, desc: "+18 health, +2 damage.", stats: { maxHealth: 18, damage: 2 }, set: "dragonscale" },
     dragon_belt:    { name: "Dragonscale Belt", icon: "🐲", type: "belt",      rarity: "rare", value: 76, desc: "+22 health, +5% resist.", stats: { maxHealth: 22, damageReduction: 0.05 }, set: "dragonscale" },
     dragon_cloak:   { name: "Dragonscale Cloak", icon: "🐲", type: "cloak",    rarity: "rare", value: 90, desc: "+0.8 speed, +6% resist.", stats: { moveSpeed: 0.8, damageReduction: 0.06 }, set: "dragonscale" },
@@ -430,7 +480,7 @@
                       weapon: { ranged: true, shape: "bolt", damage: 3, cooldown: 0.3, multishot: 5, spread: 0.14, pierce: 1, boltSpeed: 28, boltRadius: 0.95, gravity: 1.1, color: "#ffb24e", haloColor: "#ffe27a" } },
     phoenix_plate:  { name: "Phoenix Plate", icon: "🔥", type: "breastplate", rarity: "epic", value: 180, desc: "+75 health, +20% resist.", stats: { maxHealth: 75, damageReduction: 0.2 }, chest: { archetype: "plate", material: "gold" } },
     seraph_ring:    { name: "Seraph Ring", icon: "💫", type: "ring", rarity: "epic", value: 150, desc: "+3 damage, +5 lifesteal.", stats: { damage: 3, lifesteal: 5 } },
-    storm_pauldrons:{ name: "Stormforged Spaulders", icon: "⚡", type: "pauldrons", rarity: "epic", value: 160, desc: "+45 health, +12% resist.", stats: { maxHealth: 45, damageReduction: 0.12 } },
+    storm_pauldrons:{ name: "Stormforged Spaulders", icon: "⚡", type: "pauldrons", rarity: "epic", value: 160, desc: "+45 health, +12% resist.", stats: { maxHealth: 45, damageReduction: 0.12 }, paul: { archetype: "winged", material: "steel" } },
     titan_gauntlets:{ name: "Titan Gauntlets", icon: "🥊", type: "gloves", rarity: "epic", value: 150, desc: "+25 health, +3 damage.", stats: { maxHealth: 25, damage: 3 } },
 
     // ----- LEGENDARY gear (the apex featured / blacksmith showcase) -----
@@ -501,4 +551,5 @@ export {
   affixStats, affixMagMult, SETS, setCounts, setBonusStats, activeSets,
   HELM_ARCHETYPES, HELM_MATERIALS, HELM_MATERIAL_TINT, helmetArchetype,
   CHEST_ARCHETYPES, CHEST_MATERIALS, CHEST_MATERIAL_TINT, chestArchetype,
+  PAULDRON_ARCHETYPES, PAULDRON_MATERIALS, PAULDRON_MATERIAL_TINT, pauldronArchetype,
 };
