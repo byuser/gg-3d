@@ -30,7 +30,7 @@ import {
   effectiveStats, EQUIP_SLOTS, WORN_SLOTS, TWO_HANDED, SLOT_META, FISTS, ITEM_DB, getDef, isGear,
   isMaterial, isStackable, SHOP_STOCK, POTION_STOCK, INGREDIENT_STOCK, ALCHEMIST_STOCK, RARE_DROPS, FEATURED_POOL,
   AFFIXES, rollAffixes, affixStats, SETS, setBonusStats, activeSets, itemCategory,
-  HELM_MATERIAL_TINT, helmetArchetype,
+  HELM_MATERIAL_TINT, helmetArchetype, CHEST_MATERIAL_TINT, chestArchetype,
 } from "./data/items.js";
 import {
   MATERIALS, MATERIAL_IDS, RESOURCE_KINDS, RELICS, CASTLE_PARTS, CASTLE_PART_BY_ID,
@@ -352,8 +352,8 @@ import {
   // are dropped on the low tier so phones keep their budget. Equip still applies
   // a missing piece's STATS — only its mesh is skipped.
   function wornDetailFor(tier) {
-    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, cloak: true, cloakSway: false, helmDetail: false };
-    return { pauldrons: true, belt: true, gloves: true, cloak: true, cloakSway: true, helmDetail: true };
+    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, cloak: true, cloakSway: false, helmDetail: false, chestDetail: false };
+    return { pauldrons: true, belt: true, gloves: true, cloak: true, cloakSway: true, helmDetail: true, chestDetail: true };
   }
 
   // ---- Inventory / equipment operations ----------------------------------
@@ -1244,11 +1244,17 @@ import {
       // paints it still works; refreshWornGear paints the ACTIVE archetype's set.
       g.helmetMat = g.helms.open.mats[0];
 
-      // Breastplate — a shell over the torso.
-      const chestMat = emat(scene, "gearChestM", tone, 0.06);
-      const chest = cyl(scene, "gearChest", 0.6, 0.72, 0.62, chestMat);
-      chest.parent = this.lean; chest.position.set(0, 1.16, 0.02); chest.scaling.z = 0.86; cast(chest);
-      g.chest = chest; g.chestMat = chestMat; off(chest);
+      // Breastplate — a distinct, layered torso piece per item (Task 26). The
+      // `chest` anchor stays a single, stable TransformNode (so equip/unequip only
+      // toggles it — no realloc/leak); under it we pre-build EVERY archetype once
+      // and refreshWornGear() enables the one the equipped breastplate maps to.
+      const chest = new BABYLON.TransformNode("gearChest", scene);
+      chest.parent = this.lean; chest.position.set(0, 1.16, 0.02);
+      g.chest = chest; off(chest);
+      this._buildChests(scene, chest, spec, cast, off);
+      // Back-compat: keep g.chestMat pointing at a material so any old caller that
+      // paints it still works; refreshWornGear paints the ACTIVE archetype's set.
+      g.chestMat = g.chests.vest.mats[0];
 
       // Belt — a band at the waist (tier-gated).
       if (spec.belt) {
@@ -1408,6 +1414,149 @@ import {
       }
     }
 
+    // Build one procedural mesh group per chest archetype (Task 26), all parented
+    // to the shared `chest` anchor (seated on the torso at lean-y 1.16, so local
+    // y=0 is torso centre) and hidden; refreshWornGear() shows the one the equipped
+    // breastplate maps to. Each group tracks its own material list so the rarity
+    // recolour/sheen (paint()) can tint the whole piece. The torso cylinder spans
+    // local y −0.33..+0.37, arms pivot at x ±0.32 and the neck/head begins ≈ local
+    // y +0.34; every shell stays within x half-width ≈ 0.30 and below local y ≈
+    // +0.30 so it never bites the arms or the neck, and its base sits at ≈ local
+    // y −0.18 (level with the belt band) — the belt (Task 29) rides just below and
+    // the pauldrons (Task 27) sit out on the shoulders, so a full suit reads as one.
+    // Tier-gated: the low tier drops the finer straps/lames (`spec.chestDetail`).
+    _buildChests(scene, anchor, spec, cast, off) {
+      const detail = spec.chestDetail !== false; // full trims only above the low tier
+      const g = this.gear;
+      const chests = (g.chests = {});
+      let uid = 0;
+      // A fresh emissive material for a chest part; base tint by the archetype's
+      // material, tracked so paint() can recolour the whole piece on equip.
+      const cmat = (mats, key, emissive) => {
+        const m = emat(scene, "gearChest" + key + uid++, CHEST_MATERIAL_TINT[key] || "#9fb0c8", emissive == null ? 0.06 : emissive);
+        mats.push(m); return m;
+      };
+      // Layered primitive helpers attached to a group node.
+      const shell = (node, name, w, h, d, m) => { const x = box(scene, name, w, h, d, m); x.parent = node; cast(x); return x; };
+      const tube = (node, name, top, bot, h, m) => { const x = cyl(scene, name, top, bot, h, m); x.parent = node; cast(x); return x; };
+      const ball = (node, name, dia, m) => { const x = sphere(scene, name, dia, m); x.parent = node; cast(x); return x; };
+      // Make + register an archetype group under the anchor.
+      const group = (key) => {
+        const node = new BABYLON.TransformNode("chest_" + key, scene);
+        node.parent = anchor; const mats = [];
+        chests[key] = { node, mats }; off(node); return { node, mats };
+      };
+      // A pair of shoulder straps crossing the chest — shared by the layered
+      // armours so a set reads consistently; kept thin so pauldrons sit clear.
+      const straps = (node, m) => {
+        for (const s of [-1, 1]) {
+          const st = shell(node, "chestStrap", 0.12, 0.5, 0.1, m);
+          st.position.set(0.2 * s, 0.06, 0.2); st.rotation.z = 0.16 * s;
+        }
+      };
+
+      // -- VEST: a soft layered leather/cloth jerkin — a rounded shell, a laced
+      //    front seam + a shoulder yoke. The default (leather_vest). --
+      {
+        const { node, mats } = group("vest");
+        const hideM = cmat(mats, "leather", 0.05);
+        const shellM = tube(node, "vestShell", 0.66, 0.78, 0.66, hideM);
+        shellM.scaling.z = 0.82; shellM.position.y = 0;
+        const yoke = tube(node, "vestYoke", 0.7, 0.68, 0.16, hideM); // a collar yoke over the shoulders
+        yoke.scaling.z = 0.86; yoke.position.y = 0.28;
+        if (detail) {
+          const lace = shell(node, "vestLace", 0.06, 0.56, 0.06, cmat(mats, "cloth", 0.04)); // a central laced seam
+          lace.position.set(0, 0, 0.3);
+          for (let i = 0; i < 3; i++) { // stitched cross-laces
+            const x = shell(node, "vestX", 0.22, 0.03, 0.05, mats[mats.length - 1]); x.parent = node; cast(x);
+            x.position.set(0, 0.16 - i * 0.16, 0.31);
+          }
+        }
+      }
+
+      // -- CUIRASS: a segmented banded iron cuirass — a breast shell over stacked
+      //    horizontal lames + shoulder straps (Ironguard: iron_plate). --
+      {
+        const { node, mats } = group("cuirass");
+        const ironM = cmat(mats, "iron", 0.06);
+        const breast = tube(node, "cuirBreast", 0.6, 0.72, 0.4, ironM); // the upper chest plate
+        breast.scaling.z = 0.84; breast.position.y = 0.12;
+        const ridge = shell(node, "cuirRidge", 0.08, 0.42, 0.1, ironM); // a central keel ridge
+        ridge.position.set(0, 0.12, 0.3);
+        const lames = detail ? 3 : 2; // stacked abdominal bands (fauld)
+        for (let i = 0; i < lames; i++) {
+          const lame = tube(node, "cuirLame", 0.7 - i * 0.02, 0.74 - i * 0.02, 0.12, ironM);
+          lame.scaling.z = 0.86; lame.position.y = -0.06 - i * 0.12;
+        }
+        straps(node, cmat(mats, "leather", 0.04));
+        if (detail) { // riveted gorget ring at the throat
+          const gorget = tube(node, "cuirGorget", 0.5, 0.52, 0.1, ironM); gorget.scaling.z = 0.9; gorget.position.y = 0.3;
+        }
+      }
+
+      // -- PLATE: an ornate polished aegis — a sculpted breastplate, a gorget, a
+      //    trimmed hem + an embossed emblem (aegis_plate / phoenix_plate). --
+      {
+        const { node, mats } = group("plate");
+        const steelM = cmat(mats, "steel", 0.06);
+        const trimM = cmat(mats, "gold", detail ? 0.14 : 0.08);
+        const breast = tube(node, "plateBreast", 0.64, 0.78, 0.56, steelM);
+        breast.scaling.z = 0.84; breast.position.y = 0.04;
+        // Sculpted pectoral swells for a heroic silhouette.
+        for (const s of [-1, 1]) { const pec = ball(node, "platePec", 0.34, steelM); pec.position.set(0.16 * s, 0.1, 0.22); pec.scaling.set(1, 0.9, 0.6); }
+        const gorget = tube(node, "plateGorget", 0.52, 0.54, 0.12, trimM); gorget.scaling.z = 0.9; gorget.position.y = 0.3; // gold throat guard
+        const hem = tube(node, "plateHem", 0.8, 0.82, 0.1, trimM); hem.scaling.z = 0.86; hem.position.y = -0.24; // gold hem band
+        if (detail) {
+          const emblem = BABYLON.MeshBuilder.CreatePolyhedron("plateEmblem", { type: 0, size: 0.14 }, scene); // an embossed diamond boss
+          emblem.material = gloss(trimM, 0.2, 0.4); emblem.parent = node; cast(emblem); emblem.position.set(0, 0.06, 0.32);
+          straps(node, trimM);
+        }
+      }
+
+      // -- DRAGONSCALE: overlapping scale rows sweeping up the torso + a glowing
+      //    chest gem, spined collar (Dragonscale: dragonscale_plate). --
+      {
+        const { node, mats } = group("dragonscale");
+        const scaleM = cmat(mats, "dragonscale", 0.08);
+        const shellM = tube(node, "dsShell", 0.64, 0.76, 0.6, scaleM);
+        shellM.scaling.z = 0.82;
+        // Overlapping rows of scales (small flattened balls) climbing the front.
+        const rows = detail ? 4 : 2, perRow = detail ? 5 : 3;
+        for (let r = 0; r < rows; r++) {
+          for (let i = 0; i < perRow; i++) {
+            const sc = ball(node, "dsScale", 0.18, scaleM);
+            const x = (i - (perRow - 1) / 2) * 0.13 + (r % 2 ? 0.065 : 0);
+            sc.position.set(x, 0.18 - r * 0.13, 0.28); sc.scaling.set(1, 1, 0.5);
+          }
+        }
+        const collarM = cmat(mats, "gold", 0.12);
+        if (detail) for (const s of [-1, 1]) { // a pair of small shoulder spines
+          const spine = cone(scene, "dsSpine", 0.08, 0.01, 0.26, collarM); spine.parent = node; cast(spine);
+          spine.position.set(0.24 * s, 0.28, 0.06); spine.rotation.z = 0.5 * s; spine.rotation.x = -0.3;
+        }
+        // A glowing gem set in the sternum.
+        const gem = BABYLON.MeshBuilder.CreatePolyhedron("dsGem", { type: 1, size: 0.11 }, scene);
+        gem.material = gloss(cmat(mats, "gold", 0.3), 0.2, 0.1); gem.parent = node; cast(gem); gem.position.set(0, 0.12, 0.32);
+      }
+
+      // -- ROBE: a flowing layered cloth robe — a soft bodice, a draped over-mantle
+      //    + a sash (for cloth breastplates; no shipped item yet, but the selector
+      //    resolves any cloth def here so it always has a mesh). --
+      {
+        const { node, mats } = group("robe");
+        const clothM = cmat(mats, "cloth", 0.05);
+        const bodice = tube(node, "robeBodice", 0.62, 0.82, 0.68, clothM);
+        bodice.scaling.z = 0.84;
+        const mantle = tube(node, "robeMantle", 0.74, 0.6, 0.3, clothM); // a draped over-mantle on the shoulders
+        mantle.scaling.z = 0.88; mantle.position.y = 0.22;
+        if (detail) {
+          const sash = shell(node, "robeSash", 0.5, 0.14, 0.06, cmat(mats, "gold", 0.08)); // a gold sash across the chest
+          sash.position.set(0, -0.04, 0.3); sash.rotation.z = 0.18;
+          const trim = tube(node, "robeTrim", 0.66, 0.86, 0.08, mats[mats.length - 1]); trim.scaling.z = 0.86; trim.position.y = -0.28; // hem trim
+        }
+      }
+    }
+
     // Show/hide + recolour each worn-gear piece from the live equipment. Pure
     // visual: no allocation (meshes built once), so equipping never leaks. The
     // rarity colour signals power at a glance; legendary/epic get a faint glow.
@@ -1429,27 +1578,28 @@ import {
         if (meshes) for (const m of (Array.isArray(meshes) ? meshes : [meshes])) { try { m.setEnabled(on); } catch (e) {} }
         if (on && mats) paint(Array.isArray(mats) ? mats : [mats], getDef(inst.id));
       };
-      // Helmet: toggle the anchor, then reveal ONLY the archetype the equipped
-      // helmet maps to (Task 25) and paint that group by rarity. The unused
-      // archetype groups stay hidden so a leather cap and a dragon helm never both
-      // show; the anchor object itself never changes (no realloc / leak).
-      {
-        const inst = this.equipment.helmet;
+      // Reveal ONLY the archetype group the equipped item maps to (helmets Task 25,
+      // chests Task 26) and paint that group by rarity. Unused groups stay hidden so
+      // e.g. a leather cap and a dragon helm never both show; the shared `anchor`
+      // object itself never changes (no realloc / leak). `pick(def)` → archetype key.
+      const applyArch = (slot, anchor, groups, pick, shownKey) => {
+        const inst = this.equipment[slot];
         const on = !!(inst && inst !== TWO_HANDED);
-        shown.helmet = on;
-        try { g.helmet.setEnabled(on); } catch (e) {}
-        const sel = on ? helmetArchetype(getDef(inst.id)).archetype : null;
-        shown.helmetArchetype = sel; // observable for tests + debugging
-        if (g.helms) {
-          for (const key in g.helms) {
-            const grp = g.helms[key];
+        shown[slot] = on;
+        try { if (anchor) anchor.setEnabled(on); } catch (e) {}
+        const sel = on ? pick(getDef(inst.id)).archetype : null;
+        shown[shownKey] = sel; // observable for tests + debugging
+        if (groups) {
+          for (const key in groups) {
+            const grp = groups[key];
             const show = on && key === sel;
             try { grp.node.setEnabled(show); } catch (e) {}
             if (show) paint(grp.mats, getDef(inst.id));
           }
         }
-      }
-      apply("breastplate", g.chest, g.chestMat);
+      };
+      applyArch("helmet", g.helmet, g.helms, helmetArchetype, "helmetArchetype");
+      applyArch("breastplate", g.chest, g.chests, chestArchetype, "chestArchetype");
       apply("belt", g.belt, g.beltMat);
       apply("pauldrons", g.pauldrons, g.pauldronMat);
       apply("gloves", g.gloves, g.gloveMat);
@@ -11774,6 +11924,8 @@ import {
       deriveStats, equippedAfter, equipDelta, wornDetailFor, isGear,
       // ---- Worn helmets: distinct archetype per item (Task 25) ----
       helmetArchetype,
+      // ---- Worn chest pieces: layered breastplates & robes per item (Task 26) ----
+      chestArchetype,
 
       // ---- Responsive HUD / drag-to-slot / fullscreen (Task 16) ----
       dragSlotReducer, pointerDragSupported, Fullscreen,
