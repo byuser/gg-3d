@@ -32,6 +32,7 @@ import {
   AFFIXES, rollAffixes, affixStats, SETS, setBonusStats, activeSets, itemCategory,
   HELM_MATERIAL_TINT, helmetArchetype, CHEST_MATERIAL_TINT, chestArchetype,
   PAULDRON_MATERIAL_TINT, pauldronArchetype, GLOVE_MATERIAL_TINT, gloveArchetype,
+  BELT_MATERIAL_TINT, beltArchetype,
 } from "./data/items.js";
 import {
   MATERIALS, MATERIAL_IDS, RESOURCE_KINDS, RELICS, CASTLE_PARTS, CASTLE_PART_BY_ID,
@@ -353,8 +354,8 @@ import {
   // are dropped on the low tier so phones keep their budget. Equip still applies
   // a missing piece's STATS — only its mesh is skipped.
   function wornDetailFor(tier) {
-    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, cloak: true, cloakSway: false, helmDetail: false, chestDetail: false, pauldronDetail: false, gloveDetail: false };
-    return { pauldrons: true, belt: true, gloves: true, cloak: true, cloakSway: true, helmDetail: true, chestDetail: true, pauldronDetail: true, gloveDetail: true };
+    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, cloak: true, cloakSway: false, helmDetail: false, chestDetail: false, pauldronDetail: false, gloveDetail: false, beltDetail: false };
+    return { pauldrons: true, belt: true, gloves: true, cloak: true, cloakSway: true, helmDetail: true, chestDetail: true, pauldronDetail: true, gloveDetail: true, beltDetail: true };
   }
 
   // ---- Inventory / equipment operations ----------------------------------
@@ -1257,12 +1258,26 @@ import {
       // paints it still works; refreshWornGear paints the ACTIVE archetype's set.
       g.chestMat = g.chests.vest.mats[0];
 
-      // Belt — a band at the waist (tier-gated).
+      // Belt — a distinct, real belt per item (Task 29): a strap + buckle (+ pouches/
+      // plates by set/material), seated at the WAIST below the chest piece (Task 26)
+      // instead of the old plain cylinder that overlapped the chest band. The `belt`
+      // anchor stays a single, stable TransformNode (so equip/unequip only toggles it —
+      // no realloc/leak); under it we pre-build EVERY archetype once and
+      // refreshWornGear() enables the one the equipped belt maps to. Tier-gated:
+      // dropped entirely on the low tier (a clean omission), like the old cylinder.
       if (spec.belt) {
-        const beltMat = emat(scene, "gearBeltM", tone, 0.06);
-        const belt = cyl(scene, "gearBelt", 0.9, 0.9, 0.14, beltMat);
-        belt.parent = this.lean; belt.position.set(0, 0.98, 0); cast(belt);
-        g.belt = belt; g.beltMat = beltMat; off(belt);
+        const belt = new BABYLON.TransformNode("gearBelt", scene);
+        // The chest anchor sits at lean-y 1.16 and the chest envelope's LOWEST parts
+        // reach down to ≈ lean-y 0.80 (the Ironguard cuirass fauld). Seat the belt
+        // anchor at lean-y 0.72 with every part's TOP kept at/below ≈ lean-y 0.79 so
+        // the band tucks UNDER the chest and never z-fights it; hanging pouches /
+        // tassets drop in −y (further from the chest, over the thighs).
+        belt.parent = this.lean; belt.position.set(0, 0.72, 0);
+        g.belt = belt; off(belt);
+        this._buildBelt(scene, belt, spec, cast, off);
+        // Back-compat: keep g.beltMat pointing at a material so any old caller that
+        // paints it still works; refreshWornGear paints the ACTIVE archetype's set.
+        g.beltMat = g.belts.strap.mats[0];
       }
 
       // Pauldrons — a distinct, real shoulder piece per item (Task 27), seated ON
@@ -1843,6 +1858,153 @@ import {
       });
     }
 
+    // Build one procedural mesh group per belt archetype (Task 29), all parented to
+    // the shared `belt` anchor (at the WAIST, lean-y 0.74) and hidden;
+    // refreshWornGear() shows the one the equipped belt maps to. The old belt was a
+    // single plain cylinder at lean-y 0.98 that OVERLAPPED the chest band; a real belt
+    // is a strap + buckle strapped around the waist BELOW the cuirass. Every part is
+    // built in belt-local space where the strap band sits at y≈0 (≈ lean-y 0.74) and
+    // its TOP is kept at/below belt-local +0.06 (≈ lean-y 0.80, the chest envelope's
+    // lowest reach) so the two never z-fight; pouches/tassets/plates hang DOWN in −y
+    // (further from the chest), and nothing rises toward it. The band is parented to
+    // the TORSO (`lean`), never the legs, so it is pose-independent — the stride
+    // swings the legs beneath it and can't reach it (the below-chest + clears-legs
+    // invariants are structural, not tuned). Each archetype group tracks its own
+    // material list so the rarity paint() recolours the whole belt. The `meshes` list
+    // lets the leak test track parts and the fit test sample the real geometry.
+    // Tier-gated: only built above the low tier (a clean omission — see wornDetailFor).
+    _buildBelt(scene, anchor, spec, cast, off) {
+      const detail = spec.beltDetail !== false; // finer studs / pouches above low tier
+      const g = this.gear;
+      const belts = (g.belts = {});
+      let uid = 0;
+      // A fresh emissive material for a belt part; base tint by the archetype's
+      // material, tracked so paint() can recolour the whole belt on equip.
+      const bmat = (mats, key, emissive) => {
+        const m = emat(scene, "gearBelt" + key + uid++, BELT_MATERIAL_TINT[key] || "#9fb0c8", emissive == null ? 0.06 : emissive);
+        mats.push(m); return m;
+      };
+      // `meshes` collects every built part so the leak test can track them and the
+      // below-chest / clears-legs invariants can sample the real geometry.
+      let curMeshes = null;
+      const track = (x) => { if (curMeshes) curMeshes.push(x); cast(x); return x; };
+      // Layered primitive helpers attached to a group node (each tracked for tests).
+      const shell = (node, name, w, h, d, m) => { const x = box(scene, name, w, h, d, m); x.parent = node; return track(x); };
+      const ball = (node, name, dia, m) => { const x = sphere(scene, name, dia, m); x.parent = node; return track(x); };
+      const band = (node, name, top, bot, h, m) => { const x = cyl(scene, name, top, bot, h, m); x.parent = node; return track(x); };
+      // Register an archetype group under the anchor via build(node, mats).
+      const arch = (key, build) => {
+        const node = new BABYLON.TransformNode("belt_" + key, scene);
+        node.parent = anchor; off(node);
+        const mats = []; const meshes = [];
+        curMeshes = meshes; build(node, mats); curMeshes = null;
+        belts[key] = { node, mats, meshes };
+      };
+      // The waist STRAP shared by every archetype: a thin vertical band ⌀≈0.98 around
+      // the waist, centred just below the anchor so its TOP stays under the chest hem.
+      // (A cylinder's axis is +y, so a squat one IS a waist ring.)
+      const strap = (node, m) => {
+        const s = band(node, "beltStrap", 0.98, 1.0, 0.12, m);
+        s.position.y = -0.01; s.scaling.z = 0.86; // flatten front-to-back like the torso
+        return s;
+      };
+      // A rectangular buckle plate at the FRONT of the strap (belt-local +z).
+      const buckle = (node, w, h, m) => {
+        const bk = shell(node, "beltBuckle", w, h, 0.08, m);
+        bk.position.set(0, -0.01, 0.44); return bk;
+      };
+
+      // -- STRAP: a plain leather strap + a simple square buckle. The default
+      //    (leather_belt). --
+      arch("strap", (node, mats) => {
+        const hideM = bmat(mats, "leather", 0.05);
+        strap(node, hideM);
+        buckle(node, 0.2, 0.16, hideM);
+        if (detail) { // a raised inner tongue on the buckle
+          const tongue = shell(node, "beltTongue", 0.05, 0.1, 0.03, bmat(mats, "gold", 0.08));
+          tongue.position.set(0, -0.01, 0.49);
+        }
+      });
+
+      // -- PLATED: a banded iron war-belt — a broad rectangular plate buckle + a row
+      //    of riveted studs around the strap (Ironguard: reinforced_belt). --
+      arch("plated", (node, mats) => {
+        const ironM = bmat(mats, "iron", 0.06);
+        strap(node, ironM);
+        const plate = buckle(node, 0.3, 0.22, ironM); plate.scaling.z = 1.1; // a big plate buckle
+        if (detail) {
+          const rim = band(node, "beltPlateRim", 1.02, 1.04, 0.05, ironM); // a rivet rim around the top
+          rim.position.y = 0.04; rim.scaling.z = 0.86;
+          // A ring of small riveted studs around the front of the strap.
+          for (let i = -2; i <= 2; i++) {
+            const a = i * 0.5; // fan across the front
+            const stud = ball(node, "beltStud", 0.07, ironM);
+            stud.position.set(Math.sin(a) * 0.46, -0.01, Math.cos(a) * 0.4);
+          }
+        }
+      });
+
+      // -- SCALED: an overlapping dragonscale belt + a fanged clasp + a hanging side
+      //    plate (Dragonscale: dragon_belt). --
+      arch("scaled", (node, mats) => {
+        const scaleM = bmat(mats, "dragonscale", 0.08);
+        strap(node, scaleM);
+        // A fanged central clasp (a boss flanked by two little downward fangs).
+        const clasp = ball(node, "beltClasp", 0.2, scaleM); clasp.position.set(0, -0.01, 0.44); clasp.scaling.set(1.2, 1, 0.7);
+        const fangM = bmat(mats, "gold", 0.12);
+        for (const s of [-1, 1]) { const fang = cone(scene, "beltFang", 0.06, 0.01, 0.16, fangM); fang.parent = node; track(fang); fang.position.set(0.08 * s, -0.12, 0.42); fang.rotation.x = Math.PI; }
+        if (detail) {
+          // Overlapping scale plates climbing the front of the strap.
+          for (let i = -2; i <= 2; i++) {
+            const sc = ball(node, "beltScale", 0.16, scaleM);
+            sc.position.set(i * 0.2, -0.02, 0.36); sc.scaling.set(1, 1, 0.5);
+          }
+          // A hanging scale tasset on the left hip.
+          const tasset = shell(node, "beltTasset", 0.22, 0.28, 0.06, scaleM);
+          tasset.position.set(-0.4, -0.2, 0.18); tasset.rotation.y = -0.4;
+        }
+      });
+
+      // -- POUCHED: a leather adventurer's belt + a round buckle + hanging pouches
+      //    (leather, rare / non-set). --
+      arch("pouched", (node, mats) => {
+        const hideM = bmat(mats, "leather", 0.05);
+        strap(node, hideM);
+        const ring = band(node, "beltRing", 0.2, 0.2, 0.06, bmat(mats, "gold", detail ? 0.1 : 0.06)); // a round buckle ring
+        ring.rotation.x = Math.PI / 2; ring.position.set(0, -0.01, 0.46);
+        if (detail) {
+          // A pair of soft hanging pouches on the hips.
+          for (const s of [-1, 1]) {
+            const pouch = ball(node, "beltPouch", 0.22, hideM);
+            pouch.position.set(0.34 * s, -0.16, 0.22); pouch.scaling.set(0.9, 1.1, 0.8);
+            const flap = shell(node, "beltPouchFlap", 0.2, 0.08, 0.16, hideM); // a flap over each pouch
+            flap.position.set(0.34 * s, -0.06, 0.24);
+          }
+        }
+      });
+
+      // -- WARBELT: an ornate gold-trimmed plate belt — a gem-set boss buckle + a
+      //    front tasset (steel / gold, epic / legendary). --
+      arch("warbelt", (node, mats) => {
+        const steelM = bmat(mats, "steel", 0.06);
+        const trimM = bmat(mats, "gold", detail ? 0.14 : 0.08);
+        strap(node, steelM);
+        const rim = band(node, "beltWarRim", 1.02, 1.04, 0.05, trimM); // a gold rim around the top edge
+        rim.position.y = 0.04; rim.scaling.z = 0.86;
+        // A raised central boss buckle set with a gem.
+        const boss = ball(node, "beltWarBoss", 0.26, trimM); boss.position.set(0, -0.01, 0.42); boss.scaling.set(1.2, 1, 0.7);
+        const gem = BABYLON.MeshBuilder.CreatePolyhedron("beltGem", { type: 1, size: 0.08 }, scene);
+        gem.material = gloss(bmat(mats, "gold", 0.3), 0.2, 0.1); gem.parent = node; track(gem); gem.position.set(0, -0.01, 0.5);
+        if (detail) {
+          // A trimmed central tasset hanging over the front of the thighs.
+          const tasset = shell(node, "beltWarTasset", 0.26, 0.3, 0.06, steelM);
+          tasset.position.set(0, -0.22, 0.34);
+          const tTrim = shell(node, "beltWarTassetTrim", 0.28, 0.05, 0.07, trimM); // a gold hem on it
+          tTrim.position.set(0, -0.36, 0.35);
+        }
+      });
+    }
+
     // Show/hide + recolour each worn-gear piece from the live equipment. Pure
     // visual: no allocation (meshes built once), so equipping never leaks. The
     // rarity colour signals power at a glance; legendary/epic get a faint glow.
@@ -1922,7 +2084,11 @@ import {
       };
       applyArch("helmet", g.helmet, g.helms, helmetArchetype, "helmetArchetype");
       applyArch("breastplate", g.chest, g.chests, chestArchetype, "chestArchetype");
-      apply("belt", g.belt, g.beltMat);
+      // Belt (Task 29): reveal ONLY the archetype the equipped belt maps to under the
+      // single waist anchor (built once, never realloc). `g.belts` is absent on the
+      // low tier (belt omitted) — applyArch tolerates a null groups map and just keeps
+      // the (absent) anchor hidden, so the clean low-tier omission is preserved.
+      applyArch("belt", g.belt, g.belts, beltArchetype, "beltArchetype");
       applyPauldrons();
       applyGloves();
       apply("boots", g.boots, g.bootMat);
@@ -12276,6 +12442,8 @@ import {
       pauldronArchetype,
       // ---- Worn gloves & gauntlets: distinct hand piece per item (Task 28) ----
       gloveArchetype,
+      // ---- Worn belts: distinct belt per item (Task 29) ----
+      beltArchetype,
 
       // ---- Responsive HUD / drag-to-slot / fullscreen (Task 16) ----
       dragSlotReducer, pointerDragSupported, Fullscreen,

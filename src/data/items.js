@@ -385,6 +385,62 @@
     return { archetype, material };
   }
 
+  // ---- Worn-belt archetypes (Task 29) -----------------------------------
+  // Each belt renders as a distinct, real belt — a strap + buckle (+ pouches /
+  // plates by set / material) — that sits at the waist BELOW the chest piece,
+  // instead of one plain cylinder overlapping the chest band. As with the
+  // helmets/chests/pauldrons/gloves, the 3D SHAPE is chosen by a pure, testable
+  // selector so the worn-gear builder (src/game.js `_buildBelt`) pre-builds every
+  // archetype once (under one waist anchor) and just toggles the matching one on
+  // equip. A belt def opts in via a `belt: { archetype, material }` block; without
+  // it we infer a sensible pair from the item's set / rarity so ANY belt def maps
+  // to a valid pair the builder can draw.
+  //
+  //   archetype: "strap"    a plain leather strap + a simple square buckle (default)
+  //              "plated"   a banded iron war-belt — a rectangular plate buckle +
+  //                         riveted studs (iron) — Ironguard
+  //              "scaled"   an overlapping dragonscale belt + a fanged clasp + a
+  //                         hanging side plate (dragonscale) — Dragonscale
+  //              "pouched"  a leather belt + a round buckle + hanging pouches
+  //                         (leather, rare / non-set)
+  //              "warbelt"  an ornate gold-trimmed plate belt — a gem-set boss buckle
+  //                         + tassets (steel / gold) — epic / legendary
+  //   material:  "leather" | "cloth" | "iron" | "steel" | "gold" | "dragonscale"
+  const BELT_ARCHETYPES = ["strap", "plated", "scaled", "pouched", "warbelt"];
+  const BELT_MATERIALS = ["leather", "cloth", "iron", "steel", "gold", "dragonscale"];
+  // Base tints per material (rarity `paint()` then recolours the built mesh, but a
+  // sensible base keeps the un-painted headless build + any preview readable).
+  const BELT_MATERIAL_TINT = {
+    leather: "#6f4a2a", cloth: "#8a7a5a", iron: "#8f9fb6",
+    steel: "#c3ccd8", gold: "#e8c057", dragonscale: "#b8603a",
+  };
+  // Resolve a belt item def to a { archetype, material } pair. Pure + total:
+  // honours an explicit `belt` block, else infers from the item's set (Dragonscale
+  // → scaled clasp, Ironguard → banded plated) and rarity (legendary/epic → ornate
+  // warbelt, rare → pouched), and finally clamps to the known archetype/material
+  // lists so the result is always one the builder can draw. Coordinated with
+  // gloveArchetype / pauldronArchetype / chestArchetype / helmetArchetype so a full
+  // set reads as one suit (shared iron/steel/dragonscale materials, matching set
+  // motifs — an Ironguard cuirass + Ironguard shoulders + Ironguard war-belt).
+  function beltArchetype(def) {
+    let archetype = "strap";
+    let material = "leather";
+    const b = def && def.belt;
+    if (b && b.archetype) archetype = b.archetype;
+    else if (def && def.set === "dragonscale") archetype = "scaled";
+    else if (def && def.set === "ironguard") archetype = "plated";
+    else if (def && (def.rarity === "legendary" || def.rarity === "epic")) archetype = "warbelt";
+    else if (def && def.rarity === "rare") archetype = "pouched";
+    if (b && b.material) material = b.material;
+    else if (def && def.set === "dragonscale") material = "dragonscale";
+    else if (def && def.set === "ironguard") material = "iron";
+    else if (def && def.rarity === "legendary") material = "gold";
+    else if (def && (def.rarity === "epic" || def.rarity === "rare")) material = "steel";
+    if (!BELT_ARCHETYPES.includes(archetype)) archetype = "strap";
+    if (!BELT_MATERIALS.includes(material)) material = "leather";
+    return { archetype, material };
+  }
+
   // An item's effective stat block once its enhancement level + affixes are folded
   // in. `haste` (a sub-1 cooldown multiplier) improves *toward* zero, so we scale
   // its distance from 1 instead of the raw value; affix haste then compounds.
@@ -491,8 +547,8 @@
     iron_pauldrons: { name: "Iron Spaulders", icon: "🎽", type: "pauldrons", rarity: "normal", cost: 32, desc: "+18 health, +5% resist.", stats: { maxHealth: 18, damageReduction: 0.05 }, set: "ironguard", paul: { archetype: "plated", material: "iron" } },
     leather_gloves: { name: "Leather Gloves", icon: "🧤", type: "gloves",     rarity: "normal", cost: 14, desc: "+1 weapon damage.", stats: { damage: 1 }, glov: { archetype: "glove", material: "leather" } },
     iron_gauntlets: { name: "Iron Gauntlets", icon: "🧤", type: "gloves",     rarity: "normal", cost: 30, desc: "+12 health, +1 damage.", stats: { maxHealth: 12, damage: 1 }, set: "ironguard", glov: { archetype: "gauntlet", material: "iron" } },
-    leather_belt:   { name: "Leather Belt",   icon: "🪢", type: "belt",        rarity: "normal", cost: 12, desc: "+10 max health.", stats: { maxHealth: 10 } },
-    reinforced_belt:{ name: "Reinforced Belt", icon: "🪢", type: "belt",       rarity: "normal", cost: 28, desc: "+14 health, +3% resist.", stats: { maxHealth: 14, damageReduction: 0.03 }, set: "ironguard" },
+    leather_belt:   { name: "Leather Belt",   icon: "🪢", type: "belt",        rarity: "normal", cost: 12, desc: "+10 max health.", stats: { maxHealth: 10 }, belt: { archetype: "strap", material: "leather" } },
+    reinforced_belt:{ name: "Reinforced Belt", icon: "🪢", type: "belt",       rarity: "normal", cost: 28, desc: "+14 health, +3% resist.", stats: { maxHealth: 14, damageReduction: 0.03 }, set: "ironguard", belt: { archetype: "plated", material: "iron" } },
     travel_cloak:   { name: "Travelling Cloak", icon: "🧥", type: "cloak",     rarity: "normal", cost: 18, desc: "+0.7 move speed.", stats: { moveSpeed: 0.7 } },
     guard_cloak:    { name: "Warding Cloak",  icon: "🧥", type: "cloak",       rarity: "normal", cost: 30, desc: "+18 health, +4% resist.", stats: { maxHealth: 18, damageReduction: 0.04 } },
 
@@ -522,7 +578,7 @@
     dragonscale_plate: { name: "Dragonscale Plate", icon: "🐲", type: "breastplate", rarity: "rare", value: 105, desc: "+50 health, +14% resist.", stats: { maxHealth: 50, damageReduction: 0.14 }, set: "dragonscale", chest: { archetype: "dragonscale", material: "dragonscale" } },
     dragon_pauldrons: { name: "Dragonscale Spaulders", icon: "🐲", type: "pauldrons", rarity: "rare", value: 80, desc: "+30 health, +8% resist.", stats: { maxHealth: 30, damageReduction: 0.08 }, set: "dragonscale", paul: { archetype: "spiked", material: "dragonscale" } },
     dragon_gauntlets: { name: "Dragonscale Gauntlets", icon: "🐲", type: "gloves", rarity: "rare", value: 78, desc: "+18 health, +2 damage.", stats: { maxHealth: 18, damage: 2 }, set: "dragonscale", glov: { archetype: "scaled", material: "dragonscale" } },
-    dragon_belt:    { name: "Dragonscale Belt", icon: "🐲", type: "belt",      rarity: "rare", value: 76, desc: "+22 health, +5% resist.", stats: { maxHealth: 22, damageReduction: 0.05 }, set: "dragonscale" },
+    dragon_belt:    { name: "Dragonscale Belt", icon: "🐲", type: "belt",      rarity: "rare", value: 76, desc: "+22 health, +5% resist.", stats: { maxHealth: 22, damageReduction: 0.05 }, set: "dragonscale", belt: { archetype: "scaled", material: "dragonscale" } },
     dragon_cloak:   { name: "Dragonscale Cloak", icon: "🐲", type: "cloak",    rarity: "rare", value: 90, desc: "+0.8 speed, +6% resist.", stats: { moveSpeed: 0.8, damageReduction: 0.06 }, set: "dragonscale" },
     shadow_cloak:   { name: "Shadow Cloak",  icon: "🌑", type: "cloak",       rarity: "rare", value: 84, desc: "+1.1 speed, +5% resist.", stats: { moveSpeed: 1.1, damageReduction: 0.05 } },
     swift_gloves:   { name: "Quickhand Gloves", icon: "🤌", type: "gloves",   rarity: "rare", value: 72, desc: "Attack 10% faster.", stats: { haste: 0.9 }, glov: { archetype: "bracer", material: "leather" } },
@@ -607,4 +663,5 @@ export {
   CHEST_ARCHETYPES, CHEST_MATERIALS, CHEST_MATERIAL_TINT, chestArchetype,
   PAULDRON_ARCHETYPES, PAULDRON_MATERIALS, PAULDRON_MATERIAL_TINT, pauldronArchetype,
   GLOVE_ARCHETYPES, GLOVE_MATERIALS, GLOVE_MATERIAL_TINT, gloveArchetype,
+  BELT_ARCHETYPES, BELT_MATERIALS, BELT_MATERIAL_TINT, beltArchetype,
 };

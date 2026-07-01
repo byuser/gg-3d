@@ -974,3 +974,214 @@ describe("Task 28 — worn gloves & gauntlets: distinct archetype per item + gri
     T.recomputeStats(p);
   });
 });
+
+describe("Task 29 — worn belts: distinct archetype per item + below-chest fit", () => {
+  const BELT_IDS = Object.keys(T.ITEM_DB).filter((id) => T.ITEM_DB[id].type === "belt");
+  const VALID_ARCH = ["strap", "plated", "scaled", "pouched", "warbelt"];
+  const VALID_MAT = ["leather", "cloth", "iron", "steel", "gold", "dragonscale"];
+
+  it("maps every belt def to a valid archetype + material", () => {
+    expect(BELT_IDS.length).toBeGreaterThanOrEqual(3);
+    for (const id of BELT_IDS) {
+      const a = T.beltArchetype(T.getDef(id));
+      expect(VALID_ARCH.includes(a.archetype), `${id} archetype`).toBe(true);
+      expect(VALID_MAT.includes(a.material), `${id} material`).toBe(true);
+    }
+  });
+
+  it("gives the shipped belts distinct, on-theme archetypes", () => {
+    const pick = (id) => T.beltArchetype(T.getDef(id));
+    expect(pick("leather_belt")).toMatchObject({ archetype: "strap", material: "leather" });
+    expect(pick("reinforced_belt")).toMatchObject({ archetype: "plated", material: "iron" });
+    expect(pick("dragon_belt")).toMatchObject({ archetype: "scaled", material: "dragonscale" });
+    // A plain leather strap and a banded iron war-belt must NOT look identical.
+    expect(pick("leather_belt").archetype).not.toBe(pick("reinforced_belt").archetype);
+    // The three shipped belts use three distinct silhouettes.
+    const used = new Set(BELT_IDS.map((id) => pick(id).archetype));
+    expect(used.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it("shares the set motif with the matching chest + pauldrons + gloves + helmet (a full suit reads as one)", () => {
+    // Ironguard: reinforced belt ↔ cuirass chest ↔ plated shoulders ↔ iron gauntlets (same iron).
+    expect(T.beltArchetype(T.getDef("reinforced_belt")).material)
+      .toBe(T.chestArchetype(T.getDef("iron_plate")).material);
+    expect(T.beltArchetype(T.getDef("reinforced_belt")).material)
+      .toBe(T.gloveArchetype(T.getDef("iron_gauntlets")).material);
+    // Dragonscale: dragon belt ↔ scaled chest ↔ spiked shoulders ↔ horned helm (same dragonscale).
+    expect(T.beltArchetype(T.getDef("dragon_belt")).material)
+      .toBe(T.helmetArchetype(T.getDef("dragon_helm")).material);
+    expect(T.beltArchetype(T.getDef("dragon_belt")).material)
+      .toBe(T.pauldronArchetype(T.getDef("dragon_pauldrons")).material);
+    // The Ironguard belt uses the SAME 'plated' motif keyword as its shoulders.
+    expect(T.beltArchetype(T.getDef("reinforced_belt")).archetype)
+      .toBe(T.pauldronArchetype(T.getDef("iron_pauldrons")).archetype);
+  });
+
+  it("is pure + total: infers a valid pair for belts with no `belt` block", () => {
+    // Set-driven inference (Dragonscale → scaled clasp, Ironguard → banded plated).
+    expect(T.beltArchetype({ type: "belt", rarity: "rare", set: "dragonscale" }))
+      .toMatchObject({ archetype: "scaled", material: "dragonscale" });
+    expect(T.beltArchetype({ type: "belt", rarity: "normal", set: "ironguard" }))
+      .toMatchObject({ archetype: "plated", material: "iron" });
+    // Rarity fallbacks (legendary/epic → warbelt; rare → pouched; normal → strap).
+    expect(T.beltArchetype({ type: "belt", rarity: "legendary" }).archetype).toBe("warbelt");
+    expect(T.beltArchetype({ type: "belt", rarity: "epic" }).archetype).toBe("warbelt");
+    expect(T.beltArchetype({ type: "belt", rarity: "rare" }).archetype).toBe("pouched");
+    expect(T.beltArchetype({ type: "belt", rarity: "normal" }).archetype).toBe("strap");
+    // Materials follow rarity when there's no set (legendary → gold, epic/rare → steel).
+    expect(T.beltArchetype({ type: "belt", rarity: "legendary" }).material).toBe("gold");
+    expect(T.beltArchetype({ type: "belt", rarity: "epic" }).material).toBe("steel");
+    // An explicit block wins over inference.
+    expect(T.beltArchetype({ type: "belt", rarity: "rare", belt: { archetype: "warbelt", material: "gold" } }))
+      .toMatchObject({ archetype: "warbelt", material: "gold" });
+    // Bogus / missing input clamps to a drawable pair (never throws, never invalid).
+    for (const bad of [undefined, null, {}, { belt: { archetype: "xx", material: "plastic" } }]) {
+      const a = T.beltArchetype(bad);
+      expect(VALID_ARCH.includes(a.archetype)).toBe(true);
+      expect(VALID_MAT.includes(a.material)).toBe(true);
+    }
+    // Deterministic (same def ⇒ same pair).
+    expect(T.beltArchetype(T.getDef("dragon_belt"))).toEqual(T.beltArchetype(T.getDef("dragon_belt")));
+  });
+
+  it("pre-builds every belt archetype group once under the single waist anchor (headless-safe)", () => {
+    const g = T.player.gear;
+    expect(g.belts).toBeTruthy();
+    expect(Object.keys(g.belts).sort()).toEqual(["plated", "pouched", "scaled", "strap", "warbelt"]);
+    for (const k in g.belts) {
+      const grp = g.belts[k];
+      expect(grp.mats.length, k).toBeGreaterThan(0);
+      expect(grp.meshes.length, k).toBeGreaterThan(0);
+      // Every archetype hangs off the shared waist anchor (built once, never realloc).
+      expect(grp.node.parent).toBe(g.belt);
+    }
+    // The waist anchor rides the torso (lean), not the legs — so it's pose-independent.
+    expect(g.belt.parent).toBe(T.player.lean);
+  });
+
+  it("tier-gates the belt (omitted entirely on low; built on high) — a clean omission", () => {
+    // The belt is a light extra: dropped on the low tier (like the old cylinder), so a
+    // phone keeps its budget; the STATS still apply, only the mesh is skipped.
+    expect(T.wornDetailFor("low").belt).toBe(false);
+    expect(T.wornDetailFor("low").beltDetail).toBe(false);
+    expect(T.wornDetailFor("high").belt).toBe(true);
+    expect(T.wornDetailFor("high").beltDetail).toBe(true);
+  });
+
+  it("shows exactly the equipped belt's archetype (and nothing when bare)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const map = { leather_belt: "strap", reinforced_belt: "plated", dragon_belt: "scaled" };
+    for (const id in map) {
+      T.equipItem(p, T.makeItem(id));
+      expect(p.gearShown.belt, id).toBe(true);
+      expect(p.gearShown.beltArchetype, id).toBe(map[id]);
+      // Exactly that archetype group is enabled; the rest are hidden.
+      for (const k in p.gear.belts) {
+        expect(p.gear.belts[k].node.isEnabled(), `${id}/${k}`).toBe(k === map[id]);
+      }
+      T.unequipSlot(p, "belt");
+      T.recomputeStats(p);
+    }
+    expect(p.gearShown.belt).toBe(false);
+    expect(p.gearShown.beltArchetype).toBe(null);
+    // The shared anchor is hidden when nothing is equipped.
+    expect(p.gear.belt.isEnabled()).toBe(false);
+  });
+
+  it("never reallocates the belt meshes across equip churn (no leak)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const strapNode = p.gear.belts.strap.node;
+    const scaledNode = p.gear.belts.scaled.node;
+    const meshCount = Object.values(p.gear.belts).reduce((n, grp) => n + grp.meshes.length, 0);
+    for (let i = 0; i < 10; i++) {
+      for (const id of ["leather_belt", "reinforced_belt", "dragon_belt"]) {
+        T.equipItem(p, T.makeItem(id));
+        expect(() => step(1)).not.toThrow();
+      }
+      T.unequipSlot(p, "belt");
+      T.recomputeStats(p);
+    }
+    // Same archetype nodes + total mesh count throughout — nothing was rebuilt.
+    expect(p.gear.belts.strap.node).toBe(strapNode);
+    expect(p.gear.belts.scaled.node).toBe(scaledNode);
+    expect(Object.values(p.gear.belts).reduce((n, grp) => n + grp.meshes.length, 0)).toBe(meshCount);
+  });
+
+  // THE fit invariant: the belt must sit at the WAIST, BELOW the chest piece (so the two
+  // never z-fight), and CLEAR OF THE LEGS through the whole stride. Two structural bounds
+  // on the emitted geometry (re-derived if the builder's offsets ever change):
+  //   (a) BELOW-CHEST — every belt part's CENTRE (walked up the node chain into LEAN-local
+  //       space) stays at/below a ceiling that is below the chest envelope's lowest reach.
+  //       The chest anchor sits at lean-y 1.16 and its lowest part (the Ironguard cuirass
+  //       fauld) bottoms out at ≈ lean-y 0.80; the belt's highest part CENTRE is a thin
+  //       rim at lean-y 0.76 (top ≈ 0.785) and its thickest part (the strap band, half-
+  //       height 0.06) is centred at lean-y 0.71 (top ≈ 0.77) — both under 0.80.
+  //   (b) CLEARS-LEGS — the belt is parented to the TORSO (lean), never the legs, so it is
+  //       pose-independent; the legs swing beneath it. Sampling the real animated legs
+  //       across a full stride, every belt part centre keeps a healthy 3D distance from
+  //       each leg's capsule segment (pivot→foot), so no part ever enters a leg.
+  it("sits at the waist below the chest and clears the legs through the stride", () => {
+    const p = T.player;
+    const lean = p.lean;
+    // Derived from the chest builder: anchor lean-y 1.16, lowest part (cuirass fauld)
+    // bottoms out at ≈ lean-y 0.80. Bound belt part CENTRES below that, leaving room for
+    // the thickest part's half-extent. (No mesh dimensions are readable from the stub, so
+    // we bound centres — exactly as the helmet/chest/pauldron/glove fit tests do.)
+    const CHEST_BOTTOM = 0.80;
+    const BELT_CEILING = 0.79;   // highest allowed belt part centre (rims sit at 0.76)
+    const STRAP_HALF_H = 0.06;   // the strap band cylinder (height 0.12) half-height
+    for (const id of BELT_IDS) {
+      clearEquip(p);
+      T.equipItem(p, T.makeItem(id));
+      T.recomputeStats(p);
+      const grp = p.gear.belts[p.gearShown.beltArchetype];
+      expect(grp.meshes.length, `${id} meshes`).toBeGreaterThan(0);
+      // (a) BELOW-CHEST: every part centre under the ceiling; the strap band's TOP
+      //     (centre + its known half-height) stays under the real chest bottom.
+      for (const m of grp.meshes) {
+        const c = toFrame(m, { x: 0, y: 0, z: 0 }, lean);
+        expect(c.y, `${id} part centre y ${c.y.toFixed(3)} intrudes into the chest`).toBeLessThanOrEqual(BELT_CEILING);
+        if (m.name === "beltStrap") {
+          expect(c.y + STRAP_HALF_H, `${id} strap top overlaps the chest`).toBeLessThanOrEqual(CHEST_BOTTOM);
+        }
+      }
+    }
+    // (b) CLEARS-LEGS across the whole stride, for every belt.
+    const LEG_R = 0.10;             // the leg capsule radius
+    const MIN_CLEAR = LEG_R + 0.02; // require the part centre to stay outside the capsule
+    const segDist = (pt, a, b) => {
+      const abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+      const apx = pt.x - a.x, apy = pt.y - a.y, apz = pt.z - a.z;
+      const len2 = abx * abx + aby * aby + abz * abz || 1e-9;
+      let t = (apx * abx + apy * aby + apz * abz) / len2; t = Math.max(0, Math.min(1, t));
+      return Math.hypot(pt.x - (a.x + abx * t), pt.y - (a.y + aby * t), pt.z - (a.z + abz * t));
+    };
+    for (const id of BELT_IDS) {
+      clearEquip(p);
+      T.equipItem(p, T.makeItem(id));
+      T.recomputeStats(p);
+      const grp = p.gear.belts[p.gearShown.beltArchetype];
+      for (let k = 0; k < 12; k++) {
+        p.state = "walk"; p.walkPhase = (k * Math.PI) / 6; // sweep a full stride cycle
+        step(1);
+        const legs = [p.legL, p.legR].map((leg) => ({
+          top: toFrame(leg, { x: 0, y: 0, z: 0 }, lean),     // the leg-pivot origin (top)
+          foot: toFrame(leg, { x: 0, y: -0.6, z: 0 }, lean), // the capsule bottom (foot)
+        }));
+        for (const m of grp.meshes) {
+          const c = toFrame(m, { x: 0, y: 0, z: 0 }, lean);
+          for (const L of legs) {
+            const d = segDist(c, L.top, L.foot);
+            expect(d, `${id}/${m.name} enters a leg at phase ${k} (dist ${d.toFixed(3)})`).toBeGreaterThanOrEqual(MIN_CLEAR);
+          }
+        }
+      }
+    }
+    clearEquip(p);
+    T.recomputeStats(p);
+  });
+});

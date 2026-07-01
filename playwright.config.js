@@ -282,6 +282,15 @@ export default defineConfig({
       testMatch: /worn-gloves\.spec\.js/,
       use: { ...devices["Desktop Chrome"] },
     },
+    // Worn belts (Task 29): boot the built site, equip several belts (under a chest
+    // piece) and screenshot Lily's waist, asserting each maps to its archetype, the
+    // shapes visibly differ, and the belt sits below the chest hem. Needs a real WebGL
+    // canvas, so it runs at desktop.
+    {
+      name: "worn-belts-desktop",
+      testMatch: /worn-belts\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",
