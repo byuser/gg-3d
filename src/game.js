@@ -31,7 +31,7 @@ import {
   isMaterial, isStackable, SHOP_STOCK, POTION_STOCK, INGREDIENT_STOCK, ALCHEMIST_STOCK, RARE_DROPS, FEATURED_POOL,
   AFFIXES, rollAffixes, affixStats, SETS, setBonusStats, activeSets, itemCategory,
   HELM_MATERIAL_TINT, helmetArchetype, CHEST_MATERIAL_TINT, chestArchetype,
-  PAULDRON_MATERIAL_TINT, pauldronArchetype,
+  PAULDRON_MATERIAL_TINT, pauldronArchetype, GLOVE_MATERIAL_TINT, gloveArchetype,
 } from "./data/items.js";
 import {
   MATERIALS, MATERIAL_IDS, RESOURCE_KINDS, RELICS, CASTLE_PARTS, CASTLE_PART_BY_ID,
@@ -353,8 +353,8 @@ import {
   // are dropped on the low tier so phones keep their budget. Equip still applies
   // a missing piece's STATS — only its mesh is skipped.
   function wornDetailFor(tier) {
-    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, cloak: true, cloakSway: false, helmDetail: false, chestDetail: false, pauldronDetail: false };
-    return { pauldrons: true, belt: true, gloves: true, cloak: true, cloakSway: true, helmDetail: true, chestDetail: true, pauldronDetail: true };
+    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, cloak: true, cloakSway: false, helmDetail: false, chestDetail: false, pauldronDetail: false, gloveDetail: false };
+    return { pauldrons: true, belt: true, gloves: true, cloak: true, cloakSway: true, helmDetail: true, chestDetail: true, pauldronDetail: true, gloveDetail: true };
   }
 
   // ---- Inventory / equipment operations ----------------------------------
@@ -1272,14 +1272,11 @@ import {
       // Tier-gated: dropped entirely on the low tier (a clean omission).
       if (spec.pauldrons) this._buildPauldrons(scene, spec, cast, off);
 
-      // Gloves — cuffs over the hands (ride the arms).
-      const glMat = emat(scene, "gearGloveM", tone, 0.06);
-      g.gloves = []; g.gloveMat = glMat;
-      for (const arm of [this.armL, this.armR]) {
-        const cuff = sphere(scene, "gearGlove", 0.36, glMat);
-        cuff.parent = arm; cuff.position.set(0, -0.6, 0); cuff.scaling.set(1, 0.95, 1); cast(cuff); off(cuff);
-        g.gloves.push(cuff);
-      }
+      // Gloves — a distinct, real hand piece per item (Task 28), wrapped around the
+      // hand + wrist (rides each arm, so it follows the hand through the attack). Each
+      // archetype is pre-built once per hand under the arm; refreshWornGear() reveals
+      // the equipped pair. Kept compact around the hand so it never engulfs the grip.
+      this._buildGloves(scene, spec, cast, off);
 
       // Boots — calf cuffs over the shoes (ride the leg pivots, so they stride).
       const btMat = emat(scene, "gearBootM", tone, 0.06);
@@ -1704,6 +1701,148 @@ import {
       });
     }
 
+    // Build one procedural mesh group per glove archetype (Task 28) on EACH hand,
+    // hidden; refreshWornGear() shows the pair the equipped gloves map to. Each glove
+    // is parented to its ARM pivot (like the little hand sphere it replaces), so it
+    // rides the hand through the whole attack automatically — the melee roll/pitch and
+    // the ranged thrust all carry it, and it stays attached to the wrist. The pieces
+    // are kept COMPACT around the hand (hand centre at arm-local y −0.62; the wand grip
+    // sits at arm-local (0,−0.58,+0.12) with the shaft rising in +y): the cuff hugs the
+    // wrist just ABOVE the hand (y ≈ −0.5), the back-of-hand shell sits AT the hand with
+    // a small forward bias, and the finger hint is a subtle stub BELOW it — nothing
+    // reaches up the +y shaft or balloons in +z, so the grip is never engulfed. Each
+    // archetype group tracks its own material list so the rarity paint() recolours the
+    // whole pair. Always built (core silhouette), but the finer trims are tier-gated.
+    _buildGloves(scene, spec, cast, off) {
+      const detail = spec.gloveDetail !== false; // finger lames / trims above the low tier
+      const g = this.gear;
+      // Per-archetype record: { nodes:[Lnode,Rnode], mats:[...both], meshes:[...both] }.
+      const gloves = (g.gloves = {});
+      g.gloveMat = null; // superseded by per-archetype mats (kept for back-compat)
+      let uid = 0;
+      const hands = [this.armL, this.armR];
+      // A fresh emissive material for a glove part; base tint by the archetype's
+      // material, tracked (across BOTH hands) so paint() recolours the pair.
+      const gmat = (mats, key, emissive) => {
+        const m = emat(scene, "gearGlove" + key + uid++, GLOVE_MATERIAL_TINT[key] || "#9fb0c8", emissive == null ? 0.06 : emissive);
+        mats.push(m); return m;
+      };
+      // `meshes` collects every built part (both hands) so the leak test can track
+      // them and the fit test can sample the real geometry.
+      let curMeshes = null;
+      const track = (x) => { if (curMeshes) curMeshes.push(x); cast(x); return x; };
+      // Register an archetype: build its group on BOTH hands via `build(node, mats)`.
+      // Each group node sits at the hand (arm-local y −0.62) so a part's local y is
+      // relative to the hand centre.
+      const arch = (key, build) => {
+        const nodes = []; const mats = []; const meshes = [];
+        hands.forEach((arm, i) => {
+          const node = new BABYLON.TransformNode("glove_" + key + (i ? "R" : "L"), scene);
+          node.parent = arm; node.position.set(0, -0.62, 0); off(node);
+          curMeshes = meshes;
+          build(node, mats);
+          curMeshes = null;
+          nodes.push(node);
+        });
+        gloves[key] = { nodes, mats, meshes };
+      };
+      // Layered primitive helpers attached to a group node (each tracked for tests).
+      const shell = (node, name, w, h, d, m) => { const x = box(scene, name, w, h, d, m); x.parent = node; return track(x); };
+      const ball = (node, name, dia, m) => { const x = sphere(scene, name, dia, m); x.parent = node; return track(x); };
+      const band = (node, name, top, bot, h, m) => { const x = cyl(scene, name, top, bot, h, m); x.parent = node; return track(x); };
+      // The finger hint shared by the layered gloves: three short stubs fanned across
+      // the front of the hand, angled forward + down so they read as fingers gripping
+      // WITHOUT extending into the weapon shaft. Kept subtle so it reads at distance.
+      const fingers = (node, m, spread, len) => {
+        for (let i = -1; i <= 1; i++) {
+          const f = shell(node, "gloveFinger", 0.06, len, 0.09, m);
+          f.position.set(i * spread, -0.14, 0.12); f.rotation.x = 0.5;
+        }
+      };
+
+      // -- GLOVE: a soft cloth/leather glove — a snug cuff + a rounded hand. The
+      //    default (leather_gloves). --
+      arch("glove", (node, mats) => {
+        const hideM = gmat(mats, "leather", 0.05);
+        const hand = ball(node, "gloveHand", 0.32, hideM); // the padded hand
+        hand.position.set(0, 0, 0.02); hand.scaling.set(1, 0.9, 1.08);
+        const cuff = band(node, "gloveCuff", 0.34, 0.3, 0.16, hideM); // a snug wrist cuff
+        cuff.position.set(0, 0.12, 0);
+        if (detail) fingers(node, hideM, 0.09, 0.16); // a soft finger hint
+      });
+
+      // -- BRACER: a laced leather bracer over a light hand wrap (rare, non-set:
+      //    swift_gloves). A tall forearm cuff + a slim hand. --
+      arch("bracer", (node, mats) => {
+        const hideM = gmat(mats, "leather", 0.05);
+        const wrap = ball(node, "bracerHand", 0.3, hideM); // a slim hand wrap
+        wrap.position.set(0, -0.02, 0.02); wrap.scaling.set(0.94, 0.86, 1.06);
+        const bracer = band(node, "bracerCuff", 0.36, 0.32, 0.3, hideM); // a tall laced bracer
+        bracer.position.set(0, 0.2, 0);
+        if (detail) {
+          const laceM = gmat(mats, "cloth", 0.04);
+          for (let i = 0; i < 2; i++) { const lace = band(node, "bracerLace", 0.38, 0.38, 0.04, laceM); lace.position.set(0, 0.13 + i * 0.14, 0); lace.scaling.z = 1.02; }
+          fingers(node, hideM, 0.085, 0.14);
+        }
+      });
+
+      // -- GAUNTLET: a segmented iron gauntlet — a banded cuff, a knuckle plate + a
+      //    row of finger lames (Ironguard: iron_gauntlets). --
+      arch("gauntlet", (node, mats) => {
+        const ironM = gmat(mats, "iron", 0.06);
+        const hand = ball(node, "gauntHand", 0.32, ironM); // the metal hand
+        hand.position.set(0, 0, 0.02); hand.scaling.set(1.02, 0.86, 1.08);
+        const cuff = band(node, "gauntCuff", 0.4, 0.32, 0.22, ironM); // a flared banded cuff
+        cuff.position.set(0, 0.16, 0);
+        const knuckle = shell(node, "gauntKnuckle", 0.3, 0.1, 0.2, ironM); // a raised knuckle plate
+        knuckle.position.set(0, 0.02, 0.18); knuckle.rotation.x = 0.3;
+        if (detail) {
+          const cuffBand = band(node, "gauntBand", 0.42, 0.42, 0.05, ironM); cuffBand.position.set(0, 0.25, 0); cuffBand.scaling.z = 1.02; // a rivet band
+          fingers(node, ironM, 0.09, 0.16); // articulated finger lames
+        }
+      });
+
+      // -- SCALED: an overlapping dragonscale gauntlet + a spined cuff (Dragonscale:
+      //    dragon_gauntlets). --
+      arch("scaled", (node, mats) => {
+        const scaleM = gmat(mats, "dragonscale", 0.08);
+        const hand = ball(node, "scaledHand", 0.32, scaleM);
+        hand.position.set(0, 0, 0.02); hand.scaling.set(1, 0.88, 1.08);
+        const cuff = band(node, "scaledCuff", 0.4, 0.3, 0.2, scaleM); // a scaled wrist guard
+        cuff.position.set(0, 0.15, 0);
+        // Overlapping scale plates climbing the back of the hand.
+        const rows = detail ? 3 : 2;
+        for (let r = 0; r < rows; r++) {
+          const sc = ball(node, "gloveScale", 0.18, scaleM);
+          sc.position.set(0, 0.06 - r * 0.1, 0.16); sc.scaling.set(1, 0.5, 1);
+        }
+        if (detail) {
+          const spineM = gmat(mats, "gold", 0.12);
+          for (const s of [-1, 1]) { // a pair of small swept-back cuff spines
+            const sp = cone(scene, "gloveSpine", 0.07, 0.01, 0.2, spineM); sp.parent = node; track(sp);
+            sp.position.set(0.14 * s, 0.22, -0.02); sp.rotation.z = 0.5 * s; sp.rotation.x = -0.5;
+          }
+          fingers(node, scaleM, 0.09, 0.16);
+        }
+      });
+
+      // -- WARPLATE: an ornate polished plate gauntlet — a gold-trimmed cuff + a
+      //    raised knuckle boss (epic / legendary: titan_gauntlets). --
+      arch("warplate", (node, mats) => {
+        const steelM = gmat(mats, "steel", 0.06);
+        const trimM = gmat(mats, "gold", detail ? 0.14 : 0.08);
+        const hand = ball(node, "warHand", 0.34, steelM);
+        hand.position.set(0, 0, 0.02); hand.scaling.set(1.04, 0.86, 1.08);
+        const cuff = band(node, "warCuff", 0.44, 0.34, 0.24, steelM); // a broad flared cuff
+        cuff.position.set(0, 0.18, 0);
+        const rim = band(node, "warRim", 0.46, 0.44, 0.06, trimM); // a gold rim on the cuff
+        rim.position.set(0, 0.28, 0); rim.scaling.z = 1.02;
+        // A raised central knuckle boss.
+        const boss = ball(node, "warBoss", 0.2, trimM); boss.position.set(0, 0.02, 0.2); boss.scaling.set(1.1, 0.7, 1);
+        if (detail) fingers(node, steelM, 0.095, 0.17); // plated finger lames
+      });
+    }
+
     // Show/hide + recolour each worn-gear piece from the live equipment. Pure
     // visual: no allocation (meshes built once), so equipping never leaks. The
     // rarity colour signals power at a glance; legendary/epic get a faint glow.
@@ -1763,11 +1902,29 @@ import {
           }
         }
       };
+      // Reveal ONLY the glove archetype pair (both hands) the equipped item maps to
+      // (Task 28); the anchors are the per-hand group nodes (built once, never
+      // realloc). Same contract as applyPauldrons — each archetype spans two nodes.
+      const applyGloves = () => {
+        const inst = this.equipment.gloves;
+        const on = !!(inst && inst !== TWO_HANDED);
+        shown.gloves = on;
+        const sel = on && g.gloves ? gloveArchetype(getDef(inst.id)).archetype : null;
+        shown.gloveArchetype = sel;
+        if (g.gloves) {
+          for (const key in g.gloves) {
+            const grp = g.gloves[key];
+            const show = on && key === sel;
+            for (const n of grp.nodes) { try { n.setEnabled(show); } catch (e) {} }
+            if (show) paint(grp.mats, getDef(inst.id));
+          }
+        }
+      };
       applyArch("helmet", g.helmet, g.helms, helmetArchetype, "helmetArchetype");
       applyArch("breastplate", g.chest, g.chests, chestArchetype, "chestArchetype");
       apply("belt", g.belt, g.beltMat);
       applyPauldrons();
-      apply("gloves", g.gloves, g.gloveMat);
+      applyGloves();
       apply("boots", g.boots, g.bootMat);
       apply("cloak", g.cloak, g.cloakMat);
     }
@@ -12117,6 +12274,8 @@ import {
       chestArchetype,
       // ---- Worn pauldrons: shoulder armour that sits on the shoulder (Task 27) ----
       pauldronArchetype,
+      // ---- Worn gloves & gauntlets: distinct hand piece per item (Task 28) ----
+      gloveArchetype,
 
       // ---- Responsive HUD / drag-to-slot / fullscreen (Task 16) ----
       dragSlotReducer, pointerDragSupported, Fullscreen,
