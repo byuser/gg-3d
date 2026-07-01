@@ -824,6 +824,10 @@ const ruForms = { one: "часть", few: "части", many: "частей" };
 ok(T.plural(1, ruForms) === "часть", "ru plural: 1 → one");
 ok(T.plural(3, ruForms) === "части", "ru plural: 3 → few");
 ok(T.plural(5, ruForms) === "частей" && T.plural(11, ruForms) === "частей", "ru plural: 5 & 11 → many");
+// Task 24 — the strengthened Slavic plural across the one/few/many boundaries.
+ok(T.plural(21, ruForms) === "часть" && T.plural(101, ruForms) === "часть", "ru plural: 21 & 101 → one");
+ok(T.plural(22, ruForms) === "части" && T.plural(112, ruForms) === "частей", "ru plural: 22 → few, 112 → many (teens exception)");
+ok(T.agree(2, ruForms) === "части" && T.agree(5, ruForms) === "частей", "agree() is the Slavic-aware plural alias for count strings");
 
 // Data-table names resolve in Russian (and differ from the English source).
 ok(T.tItemName(T.getDef("magic_wand")) === "Волшебная палочка", "item name resolves to Russian");
