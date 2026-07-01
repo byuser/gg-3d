@@ -538,13 +538,16 @@ rings), the **compare-vs-equipped deltas**, the **visible worn gear** (core silh
 high-tier extras, **tier-gated**, toggled with **no mesh reallocation** across
 equip/unequip), the **tabbed inventory** (filter / sort / potion consume), the **v7
 save round-trip** of affixes + the new slots **plus migration** from an older (v6) file,
-and the **distinct worn gear** selectors — Task 25's helmets, Task 26's chests and Task 27's
-pauldrons (`helmetArchetype` / `chestArchetype` / `pauldronArchetype` are each pure + total — every
-def → a valid archetype + material — every archetype group builds once, the equipped item shows its
-own shape, and equip churn never reallocates the meshes; the pauldron suite adds a **shoulder-fit
-invariant** proving the shoulder mesh's inner reach is pose-independent and never enters the torso
-through idle/walk/attack; Playwright `worn-{helmets,chests,pauldrons}.spec.js` screenshot the
-distinct pieces worn on a real canvas — the pauldrons mid-attack, confirming no chest penetration),
+and the **distinct worn gear** selectors — Task 25's helmets, Task 26's chests, Task 27's
+pauldrons and Task 28's gloves (`helmetArchetype` / `chestArchetype` / `pauldronArchetype` /
+`gloveArchetype` are each pure + total — every def → a valid archetype + material — every archetype
+group builds once, the equipped item shows its own shape, and equip churn never reallocates the
+meshes; the pauldron suite adds a **shoulder-fit invariant** proving the shoulder mesh's inner reach
+is pose-independent and never enters the torso through idle/walk/attack, and the glove suite adds a
+**grip-fit invariant** proving every glove part stays compact around the hand and below the weapon
+shaft so it never engulfs the grip; Playwright `worn-{helmets,chests,pauldrons,gloves}.spec.js`
+screenshot the distinct pieces worn on a real canvas — the pauldrons mid-attack confirming no chest
+penetration, the gloves wrapped around the wand grip),
 and the **skill & leveling** suite (`test/skills.test.js`) that locks in Task 14: the
 **XP curve + focus math** (pure), **level-up** grants (health + focus + auto-learned skills),
 **focus regen + cooldown** ticking, the **quick-bar** assign (deduplicated) + **activate**
@@ -794,6 +797,17 @@ whole thing is unit-testable without a GPU:
   while its **roll is ignored** — so, since pitch never changes the piece's x-extent, the shoulder cap
   can never reach into the chest at any pose. Built once per shoulder (no reallocation) and tier-gated
   (omitted entirely on the low tier).
+- **Distinct worn gloves & gauntlets (Task 28).** Each **gloves** item renders as its own hand piece —
+  a soft leather **glove**, a laced leather **bracer**, a segmented **iron gauntlet** with a knuckle
+  plate + finger lames (Ironguard), an overlapping **dragonscale** gauntlet with cuff spines
+  (Dragonscale), or an ornate gold-trimmed steel **warplate** with a knuckle boss (epic/legendary) —
+  instead of the old plain sphere on each hand. A pure, tested selector `gloveArchetype(def)` maps
+  every `gloves` item (via its `glov:{ archetype, material }` metadata, or inferred from set/rarity) to
+  one of five archetypes + a material, sharing the **Ironguard**/**Dragonscale** motif with the
+  matching helmet + chest + pauldrons. Each glove rides its **arm pivot** (like the hand it replaces),
+  so it follows the hand through every attack, and is kept **compact around the wrist** so the wand
+  shaft rises cleanly out of the fist — it never engulfs the grip. Built once per hand (no
+  reallocation) and tier-gated (finer finger lames/trims dropped on the low tier).
 - **Persistence.** `SAVE_VERSION` 7 stores `{ id, lvl, aff }` per instance across the bag + all 12
   slots; older saves (no affixes / no new slots) load with clean defaults.
 - **Value / weight.** Items carry a coin **value** (resale, scaled by enhancement); **weight /
@@ -1267,4 +1281,16 @@ Source: GitHub Actions**.
       so the piece's inner reach is pose-independent and can never enter the chest. Built once per
       shoulder (no reallocation), tier-gated (omitted on low). Covered by `test/items.test.js` (incl. a
       shoulder-fit invariant) + `test/e2e/worn-pauldrons.spec.js` (a real-browser screenshot mid-attack) — Task 27
+- [x] **Distinct worn gloves & gauntlets** — each **gloves** item shows as its own hand piece instead of
+      the old plain sphere on each hand: a soft leather **glove**, a laced leather **bracer**, a
+      segmented **iron gauntlet** (knuckle plate + finger lames, Ironguard), an overlapping
+      **dragonscale** gauntlet (climbing scales + cuff spines, Dragonscale), or an ornate gold-trimmed
+      steel **warplate** (knuckle boss, epic/legendary). A pure, tested `gloveArchetype(def)` selector
+      maps every gloves item to one of five archetypes + a material (from its `glov` metadata, or
+      inferred from set/rarity), sharing the set motif with the helmet + chest + pauldrons. Each glove
+      rides its arm pivot (so it follows the hand through the attack) and stays **compact around the
+      wrist** so the wand shaft rises cleanly out of the fist — it never engulfs the grip. Built once
+      per hand (no reallocation), tier-gated (finer lames/trims on high). Covered by
+      `test/items.test.js` (incl. a grip-fit invariant) + `test/e2e/worn-gloves.spec.js` (a real-browser
+      screenshot of distinct gloves wrapped around the grip) — Task 28
 - [ ] Puzzles (levers, plates, gated doors)

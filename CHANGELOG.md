@@ -50,6 +50,59 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-07-01] — Task 28 — Worn gloves & gauntlets: a distinct hand piece per item
+
+Fourth of the **worn-equipment appearance overhaul** (Tasks 25–35): the hands. Each
+`gloves` item now renders as a distinct glove/gauntlet — the readable hand armour an
+MMORPG wraps around the weapon grip — instead of one plain sphere on each hand.
+
+### Added
+
+- **Per-item procedural glove archetypes.** The single sphere on each hand
+  (`_buildWornGear`) is replaced by **five** distinct hand pieces, chosen by the item def
+  and built **per hand** from layered primitives (cuff + back-of-hand + finger hint): a
+  soft leather **glove** (snug cuff + rounded hand), a laced leather **bracer** (tall
+  forearm cuff, rare/non-set), a segmented **iron gauntlet** with a banded cuff, a knuckle
+  plate + articulated finger lames (Ironguard), an overlapping **dragonscale** **scaled**
+  gauntlet with climbing scales + swept-back gold cuff spines (Dragonscale), and an ornate
+  gold-trimmed steel **warplate** with a broad flared cuff + a raised knuckle boss
+  (epic/legendary). Built from the proven mesh/material helpers, so they're
+  **headless-safe**. Each glove rides its **arm pivot** (like the hand it replaces), so it
+  follows the hand through every attack pose for free, and is kept **compact around the
+  wrist** so the wand shaft rises cleanly out of the fist — the grip is never swallowed.
+- **`gloveArchetype(def)` selector** (`src/data/items.js`) — a **pure, total,
+  deterministic** function mapping every `gloves` item to a `{ archetype, material }` pair.
+  Each gloves opts in via new `glov: { archetype, material }` metadata; any gloves without
+  it still resolves a sensible pair from its **set** (Dragonscale → scaled gauntlet,
+  Ironguard → banded gauntlet) and **rarity** (legendary/epic → warplate, rare → bracer,
+  else glove), then clamps to the known archetype/material lists so the result is always
+  one the builder can draw. Coordinated with `pauldronArchetype`/`chestArchetype`/
+  `helmetArchetype` (shared iron/steel/dragonscale materials + matching set motifs) so a
+  full **Ironguard**/**Dragonscale** suit — helm + cuirass + shoulders + gauntlets — reads
+  as one. Exported on the test seam.
+- **Tier-gated glove detail** (`wornDetailFor().gloveDetail`). Gloves are core silhouette
+  (always built), but the finer finger lames / cuff trims / spines are dropped on the
+  **low** tier so phones keep their budget; equip still applies the stats regardless.
+- **Task 28 tests** — `test/items.test.js` gains the glove-archetype selector suite
+  (validity/on-theme distinctness/set-motif sharing/pure-total inference/determinism), a
+  pre-build-once-per-hand + no-leak-across-equip-churn check, the tier-gate, a
+  shows-exactly-the-equipped-archetype check, and a **grip-fit invariant** (every glove
+  part's centre stays within a tight radius of the hand and below the weapon shaft, so no
+  shape balloons over or climbs the grip). Suite 46 → 55; **Vitest 393 → 402**.
+- **`test/e2e/worn-gloves.spec.js`** — a real-browser Playwright spec that boots the built
+  site, equips several gloves, frames a close-up of Lily's right hand + the wand grip it
+  holds and **screenshots distinct gloves wrapped around the grip**, asserting each maps
+  to its archetype, the shapes visibly differ, and there are no console errors (with the
+  shared `GG_LOCAL_BABYLON` route hook for offline sandboxes). Registered as the
+  `worn-gloves-desktop` project in `playwright.config.js`.
+
+### Changed
+
+- **`refreshWornGear` reveals the equipped glove archetype pair** (both hands) and paints
+  it by rarity/set, hiding the other four groups — the pre-built groups are toggled, never
+  reallocated, so equip/unequip churn can't leak. `p.gearShown.gloveArchetype` is exposed
+  for tests/debugging. No `SAVE_VERSION` change (gloves are transient visuals).
+
 ## [2026-07-01] — Task 27 — Worn pauldrons: shoulder armour that sits on the shoulder
 
 Third of the **worn-equipment appearance overhaul** (Tasks 25–35): the shoulders. Each
