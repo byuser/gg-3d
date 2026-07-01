@@ -1756,7 +1756,20 @@ A task is **done** only when **all** of these are true:
   and test that hint carefully.
 
 ### Task 24 — Russian grammatical morphology (Android-style declensions, gender & plural agreement)
-- **Status:** `[ ]`
+- **Status:** `[x]` — 2026-07-01 · Added an Android-/ICU-style morphology layer to `src/core/i18n.js`:
+  a declension model (`RU_NOUNS`: gender m/f/n/pl + animacy + explicit six-case forms for every
+  interpolated noun — zones, landmarks, NPCs, materials, relics, castle parts, bosses, dragon) with a
+  rule-based `declineRegular` fallback (animate-accusative + `-ень` fugitive vowel); case-aware
+  `interp()` that declines a `nounRef` on a `{name:gen}`-style tag in RU and substitutes the plain
+  English name in EN (plain `{x}` unchanged); an ICU-style `select()` for gender/number agreement
+  (возведён/возведена/возведено/возведены) and a strengthened Slavic `plural()`/`agree()` now backing
+  **every** count string (2 камня / 5 камней). Retrofitted the affected RU strings — objectives
+  (reach→gen, gather→acc, talk→ins, defeat-boss→acc+pre, build→acc), toasts (gathered / part-raised /
+  reached / boss-defeated), the guidance/quest-log givers (dat/ins) + places (pre with в/на), and the
+  map compass portal (в/на + acc). New `test/i18n-morphology.test.js` [33 cases] (decliner × six cases,
+  agreement, the one/few/many boundaries 1/2/5/11/21/112, case-aware interp, a noun-metadata
+  completeness gate, a retrofit smoke) + strengthened the [28] i18n harness; Vitest **335 → 368**.
+  English path unchanged (collapses to identity); no `SAVE_VERSION` change.
 - **Depends on:** Task 7 (the i18n layer — `LOCALES` / `t()` / `interp()` /
   `plural()` in `src/core/i18n.js`, the `RU` data-table dictionary + resolvers).
   None else.

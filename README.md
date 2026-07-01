@@ -87,9 +87,32 @@ small i18n layer:
 - The **data tables** keep their English text as the source of truth; the parallel **`RU`**
   object holds the Russian, read by per-field resolvers (`tItemName`, `tZoneName`, …) that fall
   back to English. A **completeness** test walks the tables so no data string ships untranslated.
-- **Russian plurals** use the standard one/few/many rule (`plural()`); the locale persists in
-  `localStorage` and is applied **before first paint** and **live** on switch (no reload needed),
-  also updating `<html lang>`.
+- **Russian plurals** use the standard one/few/many rule (`plural()` / its count-string alias
+  `agree()`); the locale persists in `localStorage` and is applied **before first paint** and
+  **live** on switch (no reload needed), also updating `<html lang>`.
+
+### Russian grammatical morphology (declensions + agreement)
+
+Russian is heavily inflected, so a noun dropped into a sentence must take the **case** its
+verb/preposition governs, and the verbs/adjectives around it must **agree** in gender/number —
+"Reach {name}", "Defeat {boss} in {zone}", "{part} raised" all read broken if the noun is left
+in the nominative. The i18n core carries an **Android-/ICU-style morphology layer** (pure,
+headless-safe, English collapses to identity):
+
+- **A declension model** (`RU_NOUNS`) gives every interpolated Russian noun (zone, landmark,
+  NPC, material, relic, castle part, boss/dragon) its **gender** (m/f/n/pl), animacy and explicit
+  **case forms** (nominative / genitive / dative / accusative / instrumental / prepositional). A
+  rule-based decliner (`declineRegular`) covers regular nouns (incl. the animate-accusative rule
+  and the `-ень` fugitive vowel) and fills any case an override omits.
+- **Case-aware interpolation:** a template requests a case with a `{name:gen}`-style tag and the
+  call site passes a `nounRef(group, id, displayName)`; `interp()` declines it in Russian and
+  substitutes the plain English name (ignoring the tag) in English, so the two locales share one
+  template. Plain `{x}` interpolation is unchanged.
+- **Gender/number agreement** via an ICU-style `select(gender, forms)` — e.g. `{part} raised` →
+  возведён / возведена / возведено / возведены — and the strengthened Slavic `plural()`/`agree()`
+  now backs **every** count string (2 камня / 5 камней), not just the castle counter.
+- A **completeness test** (mirroring the untranslated-key gate) fails the build if any interpolated
+  RU noun ships without its gender + case metadata.
 
 Everything is feature-detected (`localStorage`, `querySelectorAll`), so the headless harness
 runs in English without a browser.
@@ -468,7 +491,11 @@ suite: strict **mission ordering/unlocks**, the **guided tracker**, **main-vs-si
 **repeatable** side quests, the **finale** enablement, the UI render paths, and the **story-state
 save/load round-trip**, the **i18n** suite: **EN/RU key-parity**, `t()`
 **interpolation**, **Russian pluralization**, **data-translation completeness**, locale-aware
-objective text, and the **locale-persistence round-trip**, the **lighting & shadows**
+objective text, and the **locale-persistence round-trip**, plus the **Russian-morphology** suite
+(`test/i18n-morphology.test.js`): the **decliner** over all six cases × number, gender/number
+**agreement** (`select`), the strengthened **Slavic plural** across the one/few/many boundaries,
+the **case-aware interpolation** (noun-refs), a **noun metadata completeness** gate, and a retrofit
+**smoke** that key RU sentences render grammatically, the **lighting & shadows**
 suite: the **quality-tier** decision (a pure function of device facts), **every zone building +
 tearing down its shadow generator** without leaking, the **feature-detected post-FX** setup
 (tone mapping / bloom / SSAO) and the **per-zone light mood**, and the new **higher-fidelity
@@ -1002,6 +1029,11 @@ Source: GitHub Actions**.
 - [x] **Russian language support** — full **English + Russian** localization (UI + all data) via a
       `LOCALES`/`t()` i18n layer, switchable on the start screen & in pause settings, applied live
       and persisted (`localStorage`); EN/RU key-parity + data-completeness enforced by tests
+- [x] **Russian grammatical morphology** — an Android-/ICU-style declension layer (`RU_NOUNS` +
+      `declineRegular`) inflects every interpolated Russian noun into the **case** its sentence
+      governs (six cases × number), verbs/adjectives **agree** in gender/number via `select()`, and
+      the strengthened **Slavic plural** (`plural`/`agree`) backs every count string; a noun-metadata
+      completeness gate mirrors the untranslated-key test. English collapses to identity
 - [x] **More realistic lighting & shadows** — grounded sun shadows (**cascaded + contact-hardening**
       → PCF → blurred-exponential), **ACES tone mapping**, subtle **bloom** + optional **SSAO**, and
       a **per-zone light mood** — all gated by an auto-detected **graphics tier** (`Quality`) so it

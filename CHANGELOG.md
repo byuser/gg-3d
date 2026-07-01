@@ -50,6 +50,48 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-07-01] — Task 24 — Russian grammatical morphology (Android-style declensions, gender & plural agreement)
+
+### Added
+
+- **Interpolated Russian nouns are now grammatically declined, and verbs/adjectives
+  agree in gender/number.** Russian is heavily inflected, but the localization dropped
+  every interpolated noun (`{name}`, `{boss}`, `{zone}`, `{part}`, `{label}`, the giver
+  and place in guidance) in its **nominative** form regardless of the case the sentence
+  governed, so lines like "Reach {name}", "Defeat {boss} in {zone}" and "{part} raised"
+  read broken to a native speaker. `src/core/i18n.js` gains an **Android-/ICU-style
+  morphology layer** (pure, headless-safe; the English path collapses to identity):
+  - **A declension model** (`RU_NOUNS`) — every interpolated noun (zone / landmark / NPC
+    / material / relic / castle part / boss / dragon) carries its **gender** (m/f/n/pl),
+    animacy and explicit **case forms** (nominative / genitive / dative / accusative /
+    instrumental / prepositional). A rule-based decliner (`declineRegular`) covers regular
+    nouns — including the **animate-accusative** rule (Дракон → Дракона) and the **`-ень`
+    fugitive vowel** (Камень → Камня) — and fills any case an override omits (`ruForm`).
+  - **Case-aware interpolation** — a template requests a case with a `{name:gen}`-style
+    tag and the call site passes a `nounRef(group, id, displayName)`; `interp()` declines
+    it in Russian and substitutes the plain English name (ignoring the tag) in English, so
+    the two locales share one template. Plain `{x}` interpolation is byte-for-byte unchanged.
+  - **Gender/number agreement** — an ICU-style `select(gender, forms)` picks the agreeing
+    verb/adjective form (`{part} raised` → возведён / возведена / возведено / возведены;
+    `{boss} defeated` → повержен / повержена), and the **strengthened Slavic plural**
+    (`plural()` + its count-string alias `agree()`) now backs **every** count string
+    (2 камня / 5 камней), not just the castle counter.
+  - **Retrofit** — the affected RU strings now route their nouns/counts through the new
+    helpers: objectives (reach → genitive, gather → accusative, talk → instrumental,
+    defeat-boss → accusative + prepositional, build → accusative), toasts (`toast.gathered`
+    / `toast.partRaised` / `toast.reached` / `toast.bossDefeated`), the guidance +
+    quest-log giver (dative after «к», instrumental after «с») and place (prepositional
+    with the right в/на), and the map compass portal (в/на + accusative for motion "to").
+- **Tests:** a new `test/i18n-morphology.test.js` (33 cases) covers the decliner across
+  all six cases × number (regular + irregular), gender/number agreement, the strengthened
+  `plural()`/`agree()` over the one/few/many boundaries (1, 2, 5, 11, 21, 112…), the
+  case-aware `interp()` (noun-refs decline in RU, collapse to the English name in EN), a
+  **noun-metadata completeness gate** (mirrors the untranslated-key test — no interpolated
+  RU noun may ship without its gender + case data), and a retrofit smoke that key RU
+  sentences render grammatically; the [28] i18n harness suite is strengthened with the
+  plural boundaries. **Vitest 335 → 368.** English is unaffected; no `SAVE_VERSION` change
+  (morphology is a display-time transform, nothing new is persisted).
+
 ## [2026-06-30] — Task 23 — Persist Google Drive sign-in across reloads (true silent re-auth; no unprompted dialog)
 
 ### Fixed
