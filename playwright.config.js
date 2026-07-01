@@ -291,6 +291,15 @@ export default defineConfig({
       testMatch: /worn-belts\.spec\.js/,
       use: { ...devices["Desktop Chrome"] },
     },
+    // Worn boots (Task 30): boot the built site, equip several boots, hold Lily in a
+    // steady mid-stride pose and screenshot her lower legs + feet, asserting each maps to
+    // its archetype, the shapes visibly differ, and the boots ride the striding feet.
+    // Needs a real WebGL canvas, so it runs at desktop.
+    {
+      name: "worn-boots-desktop",
+      testMatch: /worn-boots\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",

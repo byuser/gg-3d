@@ -32,7 +32,7 @@ import {
   AFFIXES, rollAffixes, affixStats, SETS, setBonusStats, activeSets, itemCategory,
   HELM_MATERIAL_TINT, helmetArchetype, CHEST_MATERIAL_TINT, chestArchetype,
   PAULDRON_MATERIAL_TINT, pauldronArchetype, GLOVE_MATERIAL_TINT, gloveArchetype,
-  BELT_MATERIAL_TINT, beltArchetype,
+  BELT_MATERIAL_TINT, beltArchetype, BOOT_MATERIAL_TINT, bootArchetype,
 } from "./data/items.js";
 import {
   MATERIALS, MATERIAL_IDS, RESOURCE_KINDS, RELICS, CASTLE_PARTS, CASTLE_PART_BY_ID,
@@ -354,8 +354,8 @@ import {
   // are dropped on the low tier so phones keep their budget. Equip still applies
   // a missing piece's STATS — only its mesh is skipped.
   function wornDetailFor(tier) {
-    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, cloak: true, cloakSway: false, helmDetail: false, chestDetail: false, pauldronDetail: false, gloveDetail: false, beltDetail: false };
-    return { pauldrons: true, belt: true, gloves: true, cloak: true, cloakSway: true, helmDetail: true, chestDetail: true, pauldronDetail: true, gloveDetail: true, beltDetail: true };
+    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, boots: true, cloak: true, cloakSway: false, helmDetail: false, chestDetail: false, pauldronDetail: false, gloveDetail: false, beltDetail: false, bootDetail: false };
+    return { pauldrons: true, belt: true, gloves: true, boots: true, cloak: true, cloakSway: true, helmDetail: true, chestDetail: true, pauldronDetail: true, gloveDetail: true, beltDetail: true, bootDetail: true };
   }
 
   // ---- Inventory / equipment operations ----------------------------------
@@ -1293,14 +1293,14 @@ import {
       // the equipped pair. Kept compact around the hand so it never engulfs the grip.
       this._buildGloves(scene, spec, cast, off);
 
-      // Boots — calf cuffs over the shoes (ride the leg pivots, so they stride).
-      const btMat = emat(scene, "gearBootM", tone, 0.06);
-      g.boots = []; g.bootMat = btMat;
-      for (const leg of [this.legL, this.legR]) {
-        const boot = cyl(scene, "gearBoot", 0.28, 0.33, 0.36, btMat);
-        boot.parent = leg; boot.position.set(0, -0.5, 0.02); cast(boot); off(boot);
-        g.boots.push(boot);
-      }
+      // Boots — a distinct, real pair of boots per item (Task 30): layered primitives
+      // (a shaft up the shin + a foot/vamp over the existing shoe + a sole/cuff) instead
+      // of the old plain calf cylinder that could intersect the leg or punch through the
+      // ground. Each archetype is pre-built once per leg under the leg pivot; refreshWornGear()
+      // reveals the equipped pair. Anchored at the FOOT (not the shin midpoint), so it
+      // tracks the leg's bottom through the stride. Always built (core silhouette), but
+      // the finer trims are tier-gated.
+      this._buildBoots(scene, spec, cast, off);
 
       // Cloak — hangs from the upper back and billows when moving (tier-gated sway).
       if (spec.cloak) {
@@ -2005,6 +2005,165 @@ import {
       });
     }
 
+    // Build one procedural mesh group per boot archetype (Task 30) on EACH leg,
+    // hidden; refreshWornGear() shows the pair the equipped boots map to. The old boot
+    // was a single plain cylinder anchored at the SHIN midpoint (leg-local −0.5), so it
+    // could intersect the leg and, as the stride swung the leg, punch through the ground.
+    // A real boot is anchored at the FOOT: each archetype group node sits at leg-local
+    // (0, −0.62, 0.02) — the shoe centre — so a part's local +y is height ABOVE the foot
+    // and the whole boot rides the leg's BOTTOM (like the shoe it sits over). Because the
+    // group is rigidly parented to the leg pivot, the boot strides with the foot for free
+    // (the leg swing only ever RAISES the foot, so nothing new dips below the existing
+    // shoes → no ground clip — the on-leg / no-ground-clip invariant is structural, not
+    // tuned). Every part is kept within the shoe's footprint (|x| ≤ ~0.15, z within the
+    // foot depth) and between the sole and mid-shin, so it hugs the leg without clipping
+    // it. Each archetype group tracks its own material list so the rarity paint()
+    // recolours the whole pair. The `meshes` list lets the leak test track parts and the
+    // fit test sample the real geometry. Always built (core silhouette); trims tier-gated.
+    _buildBoots(scene, spec, cast, off) {
+      const detail = spec.bootDetail !== false; // finer trims / scale rows above the low tier
+      const g = this.gear;
+      // Per-archetype record: { nodes:[Lnode,Rnode], mats:[...both], meshes:[...both] }.
+      const boots = (g.boots = {});
+      g.bootMat = null; // superseded by per-archetype mats (kept for back-compat)
+      let uid = 0;
+      const legs = [this.legL, this.legR];
+      // A fresh emissive material for a boot part; base tint by the archetype's material,
+      // tracked (across BOTH legs) so paint() recolours the pair on equip.
+      const bmat = (mats, key, emissive) => {
+        const m = emat(scene, "gearBoot" + key + uid++, BOOT_MATERIAL_TINT[key] || "#9fb0c8", emissive == null ? 0.06 : emissive);
+        mats.push(m); return m;
+      };
+      // `meshes` collects every built part (both legs) so the leak test can track them
+      // and the fit test can sample the real geometry.
+      let curMeshes = null;
+      const track = (x) => { if (curMeshes) curMeshes.push(x); cast(x); return x; };
+      // Register an archetype: build its group on BOTH legs via build(node, mats). Each
+      // group node sits at the FOOT (leg-local y −0.62, the shoe centre) so a part's local
+      // y is height ABOVE the foot and it tracks the leg's bottom through the stride.
+      const arch = (key, build) => {
+        const nodes = []; const mats = []; const meshes = [];
+        legs.forEach((leg, i) => {
+          const node = new BABYLON.TransformNode("boot_" + key + (i ? "R" : "L"), scene);
+          node.parent = leg; node.position.set(0, -0.62, 0.02); off(node);
+          curMeshes = meshes;
+          build(node, mats);
+          curMeshes = null;
+          nodes.push(node);
+        });
+        boots[key] = { nodes, mats, meshes };
+      };
+      // Layered primitive helpers attached to a group node (each tracked for tests).
+      const shell = (node, name, w, h, d, m) => { const x = box(scene, name, w, h, d, m); x.parent = node; return track(x); };
+      const ball = (node, name, dia, m) => { const x = sphere(scene, name, dia, m); x.parent = node; return track(x); };
+      const band = (node, name, top, bot, h, m) => { const x = cyl(scene, name, top, bot, h, m); x.parent = node; return track(x); };
+      const spike = (node, name, bot, h, m) => { const x = cone(scene, name, bot, 0.01, h, m); x.parent = node; return track(x); };
+      // The FOOT shared by every archetype: a thin sole under the foot + a vamp OVER the
+      // existing shoe, forward-biased (z +0.04) to match it. Kept within the shoe's
+      // footprint so the boot never extends below/around the existing feet.
+      const foot = (node, m) => {
+        const sole = shell(node, "bootSole", 0.24, 0.05, 0.36, m);
+        sole.position.set(0, -0.05, 0.04);
+        const vamp = shell(node, "bootVamp", 0.24, 0.16, 0.34, m);
+        vamp.position.set(0, 0.04, 0.04);
+        return vamp;
+      };
+
+      // -- SHOE: a soft low shoe — the vamp + a short ankle collar. The default
+      //    (leather_boots). --
+      arch("shoe", (node, mats) => {
+        const hideM = bmat(mats, "leather", 0.05);
+        foot(node, hideM);
+        const collar = band(node, "bootCollar", 0.30, 0.28, 0.14, hideM); // a low soft ankle collar
+        collar.position.set(0, 0.16, 0);
+        if (detail) { // a stitched tongue over the laces
+          const tongue = shell(node, "bootTongue", 0.16, 0.12, 0.05, bmat(mats, "cloth", 0.04));
+          tongue.position.set(0, 0.13, 0.18);
+        }
+      });
+
+      // -- BOOT: a tall leather boot with a folded-over cuff (rare, non-set:
+      //    winged_boots). --
+      arch("boot", (node, mats) => {
+        const hideM = bmat(mats, "leather", 0.05);
+        foot(node, hideM);
+        const shaft = band(node, "bootShaft", 0.28, 0.32, 0.30, hideM); // a shaft up the shin
+        shaft.position.set(0, 0.20, 0); shaft.scaling.z = 0.94;
+        const cuff = band(node, "bootCuff", 0.36, 0.32, 0.10, hideM); // a folded-over cuff at the top
+        cuff.position.set(0, 0.33, 0);
+        if (detail) { // an ankle strap + a small pull tab at the back
+          const strap = band(node, "bootStrap", 0.34, 0.34, 0.05, bmat(mats, "gold", 0.08));
+          strap.position.set(0, 0.06, 0); strap.scaling.z = 0.96;
+          const tab = shell(node, "bootTab", 0.06, 0.12, 0.04, hideM);
+          tab.position.set(0, 0.34, -0.14);
+        }
+      });
+
+      // -- GREAVE: a plated greave + a sabaton — an armoured shin plate over a pointed
+      //    metal foot (Ironguard: iron_greaves). --
+      arch("greave", (node, mats) => {
+        const ironM = bmat(mats, "iron", 0.06);
+        foot(node, ironM);
+        // A pointed sabaton toe (a cone laid forward over the toe).
+        const toe = spike(node, "bootToe", 0.18, 0.18, ironM);
+        toe.rotation.x = Math.PI / 2; toe.position.set(0, -0.01, 0.16);
+        // A tall curved shin greave hugging the front of the shin.
+        const greave = band(node, "bootGreave", 0.30, 0.32, 0.34, ironM);
+        greave.position.set(0, 0.22, 0.02); greave.scaling.z = 0.86;
+        // A knee poleyn dome at the top.
+        const poleyn = ball(node, "bootPoleyn", 0.26, ironM);
+        poleyn.position.set(0, 0.34, 0.04); poleyn.scaling.set(1, 0.7, 1);
+        if (detail) { // a rivet band + an ankle strap
+          const rim = band(node, "bootGreaveRim", 0.34, 0.34, 0.05, ironM);
+          rim.position.set(0, 0.30, 0); rim.scaling.z = 0.9;
+          const strap = band(node, "bootGreaveStrap", 0.34, 0.34, 0.05, bmat(mats, "leather", 0.04));
+          strap.position.set(0, 0.08, 0); strap.scaling.z = 0.94;
+        }
+      });
+
+      // -- SABATON: an overlapping dragonscale boot — scale plates up the shin + a swept
+      //    cuff spine (Dragonscale). --
+      arch("sabaton", (node, mats) => {
+        const scaleM = bmat(mats, "dragonscale", 0.08);
+        foot(node, scaleM);
+        const shaft = band(node, "bootShaft", 0.28, 0.32, 0.30, scaleM);
+        shaft.position.set(0, 0.20, 0); shaft.scaling.z = 0.9;
+        // Overlapping scale plates climbing the front of the shin.
+        const rows = detail ? 3 : 2;
+        for (let r = 0; r < rows; r++) {
+          const sc = ball(node, "bootScale", 0.18, scaleM);
+          sc.position.set(0, 0.08 + r * 0.11, 0.13); sc.scaling.set(1, 0.6, 0.5);
+        }
+        if (detail) { // a swept-back cuff spine + a scaled toe cap
+          const spineM = bmat(mats, "gold", 0.12);
+          const sp = spike(node, "bootSpine", 0.08, 0.22, spineM);
+          sp.position.set(0, 0.32, -0.06); sp.rotation.x = -0.5;
+          const cap = ball(node, "bootToeCap", 0.16, scaleM);
+          cap.position.set(0, 0.02, 0.18); cap.scaling.set(1, 0.6, 0.9);
+        }
+      });
+
+      // -- WARBOOT: an ornate gold-trimmed plate boot — a knee boss + a gold rim
+      //    (epic / legendary: steel / gold). --
+      arch("warboot", (node, mats) => {
+        const steelM = bmat(mats, "steel", 0.06);
+        const trimM = bmat(mats, "gold", detail ? 0.14 : 0.08);
+        foot(node, steelM);
+        const shaft = band(node, "bootShaft", 0.30, 0.34, 0.32, steelM);
+        shaft.position.set(0, 0.21, 0); shaft.scaling.z = 0.9;
+        const rim = band(node, "bootWarRim", 0.36, 0.34, 0.06, trimM); // a gold rim at the top
+        rim.position.set(0, 0.33, 0); rim.scaling.z = 0.92;
+        const boss = ball(node, "bootWarBoss", 0.24, trimM); // a raised knee boss
+        boss.position.set(0, 0.34, 0.06); boss.scaling.set(1, 0.7, 1);
+        if (detail) { // a gold toe cap + an ankle rim
+          const cap = shell(node, "bootWarToe", 0.22, 0.1, 0.16, trimM);
+          cap.position.set(0, -0.02, 0.18);
+          const ankle = band(node, "bootWarAnkle", 0.34, 0.34, 0.05, trimM);
+          ankle.position.set(0, 0.08, 0); ankle.scaling.z = 0.92;
+        }
+      });
+    }
+
     // Show/hide + recolour each worn-gear piece from the live equipment. Pure
     // visual: no allocation (meshes built once), so equipping never leaks. The
     // rarity colour signals power at a glance; legendary/epic get a faint glow.
@@ -2082,6 +2241,24 @@ import {
           }
         }
       };
+      // Reveal ONLY the boot archetype pair (both legs) the equipped item maps to
+      // (Task 30); the anchors are the per-leg group nodes (built once, never realloc).
+      // Same contract as applyGloves — each archetype spans two nodes.
+      const applyBoots = () => {
+        const inst = this.equipment.boots;
+        const on = !!(inst && inst !== TWO_HANDED);
+        shown.boots = on;
+        const sel = on && g.boots ? bootArchetype(getDef(inst.id)).archetype : null;
+        shown.bootArchetype = sel;
+        if (g.boots) {
+          for (const key in g.boots) {
+            const grp = g.boots[key];
+            const show = on && key === sel;
+            for (const n of grp.nodes) { try { n.setEnabled(show); } catch (e) {} }
+            if (show) paint(grp.mats, getDef(inst.id));
+          }
+        }
+      };
       applyArch("helmet", g.helmet, g.helms, helmetArchetype, "helmetArchetype");
       applyArch("breastplate", g.chest, g.chests, chestArchetype, "chestArchetype");
       // Belt (Task 29): reveal ONLY the archetype the equipped belt maps to under the
@@ -2091,7 +2268,7 @@ import {
       applyArch("belt", g.belt, g.belts, beltArchetype, "beltArchetype");
       applyPauldrons();
       applyGloves();
-      apply("boots", g.boots, g.bootMat);
+      applyBoots();
       apply("cloak", g.cloak, g.cloakMat);
     }
 
@@ -12444,6 +12621,8 @@ import {
       gloveArchetype,
       // ---- Worn belts: distinct belt per item (Task 29) ----
       beltArchetype,
+      // ---- Worn boots: distinct real boots per item (Task 30) ----
+      bootArchetype,
 
       // ---- Responsive HUD / drag-to-slot / fullscreen (Task 16) ----
       dragSlotReducer, pointerDragSupported, Fullscreen,

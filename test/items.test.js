@@ -203,7 +203,7 @@ describe("Task 12 — visible worn gear", () => {
     const p = T.player;
     clearEquip(p);
     T.recomputeStats(p);
-    const refs = [p.gear.helmet, p.gear.chest, p.gear.cloak, p.gear.boots[0], p.gear.pauls.plated.nodes[1]];
+    const refs = [p.gear.helmet, p.gear.chest, p.gear.cloak, p.gear.boots.shoe.nodes[0], p.gear.pauls.plated.nodes[1]];
     expect(p.gearShown.helmet).toBe(false);
     for (let i = 0; i < 12; i++) {
       // hammer equip/unequip
@@ -218,7 +218,7 @@ describe("Task 12 — visible worn gear", () => {
       p.gear.helmet,
       p.gear.chest,
       p.gear.cloak,
-      p.gear.boots[0],
+      p.gear.boots.shoe.nodes[0],
       p.gear.pauls.plated.nodes[1],
     ]).toEqual(refs);
   });
@@ -1181,6 +1181,226 @@ describe("Task 29 — worn belts: distinct archetype per item + below-chest fit"
         }
       }
     }
+    clearEquip(p);
+    T.recomputeStats(p);
+  });
+});
+
+describe("Task 30 — worn boots: distinct archetype per item + on-leg / no-ground-clip fit", () => {
+  const BOOT_IDS = Object.keys(T.ITEM_DB).filter((id) => T.ITEM_DB[id].type === "boots");
+  const VALID_ARCH = ["shoe", "boot", "greave", "sabaton", "warboot"];
+  const VALID_MAT = ["leather", "cloth", "iron", "steel", "gold", "dragonscale"];
+
+  it("maps every boots def to a valid archetype + material", () => {
+    expect(BOOT_IDS.length).toBeGreaterThanOrEqual(3);
+    for (const id of BOOT_IDS) {
+      const a = T.bootArchetype(T.getDef(id));
+      expect(VALID_ARCH.includes(a.archetype), `${id} archetype`).toBe(true);
+      expect(VALID_MAT.includes(a.material), `${id} material`).toBe(true);
+    }
+  });
+
+  it("gives the shipped boots distinct, on-theme archetypes", () => {
+    const pick = (id) => T.bootArchetype(T.getDef(id));
+    expect(pick("leather_boots")).toMatchObject({ archetype: "shoe", material: "leather" });
+    expect(pick("iron_greaves")).toMatchObject({ archetype: "greave", material: "iron" });
+    expect(pick("winged_boots")).toMatchObject({ archetype: "boot", material: "leather" });
+    // A soft shoe and a plated greave must NOT look identical.
+    expect(pick("leather_boots").archetype).not.toBe(pick("iron_greaves").archetype);
+    // The three shipped boots use three distinct silhouettes.
+    const used = new Set(BOOT_IDS.map((id) => pick(id).archetype));
+    expect(used.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it("shares the set motif with the matching chest + pauldrons + gloves + belt + helmet (a full suit reads as one)", () => {
+    // Ironguard: iron greaves ↔ cuirass chest ↔ plated shoulders ↔ iron gauntlets ↔ iron belt (same iron).
+    expect(T.bootArchetype(T.getDef("iron_greaves")).material)
+      .toBe(T.chestArchetype(T.getDef("iron_plate")).material);
+    expect(T.bootArchetype(T.getDef("iron_greaves")).material)
+      .toBe(T.gloveArchetype(T.getDef("iron_gauntlets")).material);
+    expect(T.bootArchetype(T.getDef("iron_greaves")).material)
+      .toBe(T.beltArchetype(T.getDef("reinforced_belt")).material);
+    // Dragonscale inference shares the dragonscale material with the rest of the suit.
+    expect(T.bootArchetype({ type: "boots", rarity: "rare", set: "dragonscale" }).material)
+      .toBe(T.helmetArchetype(T.getDef("dragon_helm")).material);
+    expect(T.bootArchetype({ type: "boots", rarity: "rare", set: "dragonscale" }).material)
+      .toBe(T.pauldronArchetype(T.getDef("dragon_pauldrons")).material);
+  });
+
+  it("is pure + total: infers a valid pair for boots with no `boot` block", () => {
+    // Set-driven inference (Dragonscale → scaled sabaton, Ironguard → plated greave).
+    expect(T.bootArchetype({ type: "boots", rarity: "rare", set: "dragonscale" }))
+      .toMatchObject({ archetype: "sabaton", material: "dragonscale" });
+    expect(T.bootArchetype({ type: "boots", rarity: "normal", set: "ironguard" }))
+      .toMatchObject({ archetype: "greave", material: "iron" });
+    // Rarity fallbacks (legendary/epic → warboot; rare → boot; normal → shoe).
+    expect(T.bootArchetype({ type: "boots", rarity: "legendary" }).archetype).toBe("warboot");
+    expect(T.bootArchetype({ type: "boots", rarity: "epic" }).archetype).toBe("warboot");
+    expect(T.bootArchetype({ type: "boots", rarity: "rare" }).archetype).toBe("boot");
+    expect(T.bootArchetype({ type: "boots", rarity: "normal" }).archetype).toBe("shoe");
+    // Materials follow rarity when there's no set (legendary → gold, epic/rare → steel).
+    expect(T.bootArchetype({ type: "boots", rarity: "legendary" }).material).toBe("gold");
+    expect(T.bootArchetype({ type: "boots", rarity: "epic" }).material).toBe("steel");
+    // An explicit block wins over inference.
+    expect(T.bootArchetype({ type: "boots", rarity: "rare", boot: { archetype: "warboot", material: "gold" } }))
+      .toMatchObject({ archetype: "warboot", material: "gold" });
+    // Bogus / missing input clamps to a drawable pair (never throws, never invalid).
+    for (const bad of [undefined, null, {}, { boot: { archetype: "xx", material: "plastic" } }]) {
+      const a = T.bootArchetype(bad);
+      expect(VALID_ARCH.includes(a.archetype)).toBe(true);
+      expect(VALID_MAT.includes(a.material)).toBe(true);
+    }
+    // Deterministic (same def ⇒ same pair).
+    expect(T.bootArchetype(T.getDef("winged_boots"))).toEqual(T.bootArchetype(T.getDef("winged_boots")));
+  });
+
+  it("pre-builds every boot archetype group once on BOTH legs (headless-safe)", () => {
+    const g = T.player.gear;
+    expect(g.boots).toBeTruthy();
+    expect(Object.keys(g.boots).sort()).toEqual(["boot", "greave", "sabaton", "shoe", "warboot"]);
+    for (const k in g.boots) {
+      const grp = g.boots[k];
+      expect(grp.nodes.length, k).toBe(2); // one per leg
+      expect(grp.mats.length, k).toBeGreaterThan(0);
+      expect(grp.meshes.length, k).toBeGreaterThan(0);
+      // Each leg group hangs off the matching leg pivot (built once, never realloc).
+      expect(grp.nodes[0].parent).toBe(T.player.legL);
+      expect(grp.nodes[1].parent).toBe(T.player.legR);
+    }
+  });
+
+  it("keeps boots in the core silhouette (always built) with tier-gated trims", () => {
+    // Boots are core (always built like gloves/cloak); only the finer trims gate on low.
+    expect(T.wornDetailFor("low").boots).toBe(true);
+    expect(T.wornDetailFor("low").bootDetail).toBe(false);
+    expect(T.wornDetailFor("high").boots).toBe(true);
+    expect(T.wornDetailFor("high").bootDetail).toBe(true);
+  });
+
+  it("shows exactly the equipped boot's archetype (and nothing when bare)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const map = { leather_boots: "shoe", iron_greaves: "greave", winged_boots: "boot" };
+    for (const id in map) {
+      T.equipItem(p, T.makeItem(id));
+      expect(p.gearShown.boots, id).toBe(true);
+      expect(p.gearShown.bootArchetype, id).toBe(map[id]);
+      // Exactly that archetype pair (both legs) is enabled; the rest are hidden.
+      for (const k in p.gear.boots) {
+        for (const n of p.gear.boots[k].nodes) {
+          expect(n.isEnabled(), `${id}/${k}`).toBe(k === map[id]);
+        }
+      }
+      T.unequipSlot(p, "boots");
+      T.recomputeStats(p);
+    }
+    expect(p.gearShown.boots).toBe(false);
+    expect(p.gearShown.bootArchetype).toBe(null);
+  });
+
+  it("never reallocates the boot meshes across equip churn (no leak)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const shoeNodes = p.gear.boots.shoe.nodes.slice();
+    const greaveNodes = p.gear.boots.greave.nodes.slice();
+    const meshCount = Object.values(p.gear.boots).reduce((n, grp) => n + grp.meshes.length, 0);
+    for (let i = 0; i < 10; i++) {
+      for (const id of ["leather_boots", "iron_greaves", "winged_boots"]) {
+        T.equipItem(p, T.makeItem(id));
+        expect(() => step(1)).not.toThrow(); // the legs animate each frame
+      }
+      T.unequipSlot(p, "boots");
+      T.recomputeStats(p);
+    }
+    // Same archetype nodes + total mesh count throughout — nothing was rebuilt.
+    expect(p.gear.boots.shoe.nodes).toEqual(shoeNodes);
+    expect(p.gear.boots.greave.nodes).toEqual(greaveNodes);
+    expect(Object.values(p.gear.boots).reduce((n, grp) => n + grp.meshes.length, 0)).toBe(meshCount);
+  });
+
+  // THE fit invariant: the boot must HUG the leg + foot (no floating off, no climbing
+  // the thigh) and, through the full stride, must NOT clip the ground any worse than the
+  // existing feet. Two structural bounds on the emitted geometry (re-derived if the
+  // builder's offsets ever change):
+  //   (a) ON-LEG ENVELOPE (pose-independent, since the boot is rigidly parented to the
+  //       leg): every boot part CENTRE, transformed into LEG-LOCAL space, stays within
+  //       the shoe's footprint (|x| ≤ 0.17, z within the foot depth) and between the sole
+  //       and mid-shin (leg-local y in [−0.70, −0.25]) — so it wraps the leg without
+  //       floating off or riding up the thigh.
+  //   (b) NO GROUND CLIP across the stride: the leg swing only ever RAISES the foot, so
+  //       the risk is a forward part dipping when the leg swings forward. Sampling the
+  //       real stride angles (the game's own leg swing, up to ≈ ±1.08 rad at full speed)
+  //       and comparing in LEAN space, every boot part CENTRE stays at/above that leg's
+  //       existing SHOE floor (its lowest bottom corner) — i.e. the boot never reaches
+  //       below the feet it rides on, so it can't punch through the ground.
+  it("hugs the leg + foot and never clips the ground through the full stride", () => {
+    const p = T.player;
+    const lean = p.lean;
+    // (a) ON-LEG ENVELOPE — pose-independent (leg-local), for every boot.
+    const X_MAX = 0.17;           // stays within the foot half-width (+ cuff flare)
+    const Z_MIN = -0.18, Z_MAX = 0.28; // stays within the foot depth (heel..toe)
+    const Y_FLOOR = -0.70, Y_CEIL = -0.25; // from the sole up to just above mid-shin
+    for (const id of BOOT_IDS) {
+      clearEquip(p);
+      T.equipItem(p, T.makeItem(id));
+      T.recomputeStats(p);
+      const grp = p.gear.boots[p.gearShown.bootArchetype];
+      expect(grp.meshes.length, `${id} meshes`).toBeGreaterThan(0);
+      for (const node of grp.nodes) {          // both legs (identical geometry)
+        const leg = node.parent;               // the boot sits on the leg pivot
+        const meshes = grp.meshes.filter((m) => {
+          let n = m; while (n) { if (n === node) return true; n = n.parent; } return false;
+        });
+        expect(meshes.length, `${id} leg meshes`).toBeGreaterThan(0);
+        for (const m of meshes) {
+          const c = toFrame(m, { x: 0, y: 0, z: 0 }, leg); // part centre in leg-local space
+          expect(Math.abs(c.x), `${id}/${m.name} x ${c.x.toFixed(3)} off the foot`).toBeLessThanOrEqual(X_MAX);
+          expect(c.z, `${id}/${m.name} z ${c.z.toFixed(3)} behind the heel`).toBeGreaterThanOrEqual(Z_MIN);
+          expect(c.z, `${id}/${m.name} z ${c.z.toFixed(3)} past the toe`).toBeLessThanOrEqual(Z_MAX);
+          expect(c.y, `${id}/${m.name} y ${c.y.toFixed(3)} below the sole`).toBeGreaterThanOrEqual(Y_FLOOR);
+          expect(c.y, `${id}/${m.name} y ${c.y.toFixed(3)} climbs the thigh`).toBeLessThanOrEqual(Y_CEIL);
+        }
+      }
+    }
+    // (b) NO GROUND CLIP across the whole stride, for every boot. Drive the leg pivots
+    //     directly through the game's own swing range (independent of update()), and
+    //     compare each boot part centre to that leg's existing shoe floor in the SAME pose.
+    const SWING = 0.8 * (0.35 + 1); // the game's max leg swing (sin·0.8·(0.35+speed), speed≤1)
+    // The existing shoe box (leg-local centre (0,−0.62,+0.06), 0.22×0.14×0.34) → its four
+    // bottom corners; the lowest in lean space is the "foot floor" the boot must ride on.
+    const SHOE_CORNERS = [];
+    for (const sx of [-0.11, 0.11]) for (const sz of [-0.11, 0.23]) SHOE_CORNERS.push({ x: sx, y: -0.69, z: sz });
+    const restX = { legL: p.legL.rotation.x, legR: p.legR.rotation.x };
+    const TOL = 0.02;
+    for (const id of BOOT_IDS) {
+      clearEquip(p);
+      T.equipItem(p, T.makeItem(id));
+      T.recomputeStats(p);
+      const grp = p.gear.boots[p.gearShown.bootArchetype];
+      for (let k = 0; k <= 24; k++) {
+        const theta = Math.sin((k * Math.PI) / 12) * SWING; // sweep a full stride cycle
+        p.legL.rotation.x = theta; p.legR.rotation.x = theta; // test both legs at every angle
+        for (const node of grp.nodes) {
+          const leg = node.parent;
+          // this leg's shoe floor (lowest bottom corner) in lean space, in the same pose
+          let shoeFloor = Infinity;
+          for (const corner of SHOE_CORNERS) shoeFloor = Math.min(shoeFloor, toFrame(leg, corner, lean).y);
+          const meshes = grp.meshes.filter((m) => {
+            let n = m; while (n) { if (n === node) return true; n = n.parent; } return false;
+          });
+          for (const m of meshes) {
+            const c = toFrame(m, { x: 0, y: 0, z: 0 }, lean);
+            expect(
+              c.y,
+              `${id}/${m.name} dips below the foot (ground clip) at swing ${theta.toFixed(2)} — ${c.y.toFixed(3)} < ${shoeFloor.toFixed(3)}`,
+            ).toBeGreaterThanOrEqual(shoeFloor - TOL);
+          }
+        }
+      }
+    }
+    p.legL.rotation.x = restX.legL; p.legR.rotation.x = restX.legR;
     clearEquip(p);
     T.recomputeStats(p);
   });

@@ -441,6 +441,64 @@
     return { archetype, material };
   }
 
+  // ---- Worn-boot archetypes (Task 30) -----------------------------------
+  // Each boot renders as a distinct, real pair of boots — layered primitives
+  // (a shaft up the shin + a foot/vamp over the existing shoe + a sole/cuff) that
+  // ride the leg pivots so they stride with the feet, instead of one plain calf
+  // cylinder that could intersect the leg or punch through the ground. As with the
+  // helmets/chests/pauldrons/gloves/belts, the 3D SHAPE is chosen by a pure,
+  // testable selector so the worn-gear builder (src/game.js `_buildBoots`) pre-builds
+  // every archetype once (per leg) and just toggles the matching one on equip. A boot
+  // def opts in via a `boot: { archetype, material }` block; without it we infer a
+  // sensible pair from the item's set / rarity so ANY boots def maps to a valid pair
+  // the builder can draw.
+  //
+  //   archetype: "shoe"    a soft low shoe — a snug vamp + a short ankle collar
+  //                        (leather / cloth) — the default (leather_boots)
+  //              "boot"    a tall leather boot with a folded-over cuff (rare, non-set)
+  //              "greave"  a plated greave + a sabaton — an armoured shin plate over
+  //                        a pointed metal foot (iron) — Ironguard
+  //              "sabaton" an overlapping dragonscale boot — scale plates up the shin
+  //                        + a swept cuff spine (dragonscale) — Dragonscale
+  //              "warboot" an ornate gold-trimmed plate boot — a knee poleyn + a
+  //                        gold rim (steel / gold) — epic / legendary
+  //   material:  "leather" | "cloth" | "iron" | "steel" | "gold" | "dragonscale"
+  const BOOT_ARCHETYPES = ["shoe", "boot", "greave", "sabaton", "warboot"];
+  const BOOT_MATERIALS = ["leather", "cloth", "iron", "steel", "gold", "dragonscale"];
+  // Base tints per material (rarity `paint()` then recolours the built mesh, but a
+  // sensible base keeps the un-painted headless build + any preview readable).
+  const BOOT_MATERIAL_TINT = {
+    leather: "#6f4a2a", cloth: "#8a7a5a", iron: "#8f9fb6",
+    steel: "#c3ccd8", gold: "#e8c057", dragonscale: "#b8603a",
+  };
+  // Resolve a boots item def to a { archetype, material } pair. Pure + total:
+  // honours an explicit `boot` block, else infers from the item's set (Dragonscale
+  // → scaled sabaton, Ironguard → plated greave) and rarity (legendary/epic → ornate
+  // warboot, rare → tall leather boot), and finally clamps to the known archetype/
+  // material lists so the result is always one the builder can draw. Coordinated with
+  // beltArchetype / gloveArchetype / pauldronArchetype / chestArchetype /
+  // helmetArchetype so a full set reads as one suit (shared iron/steel/dragonscale
+  // materials, matching set motifs — an Ironguard cuirass + Ironguard shoulders +
+  // Ironguard greaves).
+  function bootArchetype(def) {
+    let archetype = "shoe";
+    let material = "leather";
+    const b = def && def.boot;
+    if (b && b.archetype) archetype = b.archetype;
+    else if (def && def.set === "dragonscale") archetype = "sabaton";
+    else if (def && def.set === "ironguard") archetype = "greave";
+    else if (def && (def.rarity === "legendary" || def.rarity === "epic")) archetype = "warboot";
+    else if (def && def.rarity === "rare") archetype = "boot";
+    if (b && b.material) material = b.material;
+    else if (def && def.set === "dragonscale") material = "dragonscale";
+    else if (def && def.set === "ironguard") material = "iron";
+    else if (def && def.rarity === "legendary") material = "gold";
+    else if (def && (def.rarity === "epic" || def.rarity === "rare")) material = "steel";
+    if (!BOOT_ARCHETYPES.includes(archetype)) archetype = "shoe";
+    if (!BOOT_MATERIALS.includes(material)) material = "leather";
+    return { archetype, material };
+  }
+
   // An item's effective stat block once its enhancement level + affixes are folded
   // in. `haste` (a sub-1 cooldown multiplier) improves *toward* zero, so we scale
   // its distance from 1 instead of the raw value; affix haste then compounds.
@@ -541,8 +599,8 @@
     iron_helm:      { name: "Iron Helm",      icon: "⛑️", type: "helmet",      rarity: "normal", cost: 30, desc: "+25 health, +4% resist.", stats: { maxHealth: 25, damageReduction: 0.04 }, set: "ironguard", helm: { archetype: "open", material: "iron" } },
     leather_vest:   { name: "Leather Vest",   icon: "🦺", type: "breastplate", rarity: "normal", cost: 20, desc: "+20 health, +4% resist.", stats: { maxHealth: 20, damageReduction: 0.04 }, chest: { archetype: "vest", material: "leather" } },
     iron_plate:     { name: "Iron Plate",     icon: "🛡️", type: "breastplate", rarity: "normal", cost: 40, desc: "+35 health, +10% resist.", stats: { maxHealth: 35, damageReduction: 0.1 }, set: "ironguard", chest: { archetype: "cuirass", material: "iron" } },
-    leather_boots:  { name: "Leather Boots",  icon: "🥾", type: "boots",       rarity: "normal", cost: 16, desc: "+0.8 move speed.", stats: { moveSpeed: 0.8 } },
-    iron_greaves:   { name: "Iron Greaves",   icon: "🦿", type: "boots",       rarity: "normal", cost: 30, desc: "+0.4 speed, +5% resist.", stats: { moveSpeed: 0.4, damageReduction: 0.05 }, set: "ironguard" },
+    leather_boots:  { name: "Leather Boots",  icon: "🥾", type: "boots",       rarity: "normal", cost: 16, desc: "+0.8 move speed.", stats: { moveSpeed: 0.8 }, boot: { archetype: "shoe", material: "leather" } },
+    iron_greaves:   { name: "Iron Greaves",   icon: "🦿", type: "boots",       rarity: "normal", cost: 30, desc: "+0.4 speed, +5% resist.", stats: { moveSpeed: 0.4, damageReduction: 0.05 }, set: "ironguard", boot: { archetype: "greave", material: "iron" } },
     leather_pauldrons: { name: "Leather Spaulders", icon: "🎽", type: "pauldrons", rarity: "normal", cost: 16, desc: "+12 max health.", stats: { maxHealth: 12 }, paul: { archetype: "cap", material: "leather" } },
     iron_pauldrons: { name: "Iron Spaulders", icon: "🎽", type: "pauldrons", rarity: "normal", cost: 32, desc: "+18 health, +5% resist.", stats: { maxHealth: 18, damageReduction: 0.05 }, set: "ironguard", paul: { archetype: "plated", material: "iron" } },
     leather_gloves: { name: "Leather Gloves", icon: "🧤", type: "gloves",     rarity: "normal", cost: 14, desc: "+1 weapon damage.", stats: { damage: 1 }, glov: { archetype: "glove", material: "leather" } },
@@ -572,7 +630,7 @@
                       weapon: { ranged: false, damage: 10, cooldown: 0.85, multishot: 1, melee: { range: 3.6, arc: 2.7 }, color: "#ffd76a" } },
     dragon_helm:    { name: "Dragon Helm",   icon: "🐲", type: "helmet",      rarity: "rare", value: 80, desc: "+40 health, +10% resist.", stats: { maxHealth: 40, damageReduction: 0.1 }, set: "dragonscale", helm: { archetype: "dragon", material: "dragonscale" } },
     aegis_plate:    { name: "Aegis Plate",   icon: "🛡️", type: "breastplate", rarity: "rare", value: 100, desc: "+55 health, +16% resist.", stats: { maxHealth: 55, damageReduction: 0.16 }, chest: { archetype: "plate", material: "steel" } },
-    winged_boots:   { name: "Winged Boots",  icon: "🪽", type: "boots",       rarity: "rare", value: 80, desc: "+1.4 speed, +5% resist.", stats: { moveSpeed: 1.4, damageReduction: 0.05 } },
+    winged_boots:   { name: "Winged Boots",  icon: "🪽", type: "boots",       rarity: "rare", value: 80, desc: "+1.4 speed, +5% resist.", stats: { moveSpeed: 1.4, damageReduction: 0.05 }, boot: { archetype: "boot", material: "leather" } },
     vampiric_ring:  { name: "Vampiric Ring", icon: "🩸", type: "ring",        rarity: "rare", value: 70, desc: "Heal +3 per kill.", stats: { lifesteal: 3 } },
     titan_pendant:  { name: "Titan Pendant", icon: "💠", type: "necklace",    rarity: "rare", value: 110, desc: "+45 health, +8% resist, +2 damage.", stats: { maxHealth: 45, damageReduction: 0.08, damage: 2 } },
     dragonscale_plate: { name: "Dragonscale Plate", icon: "🐲", type: "breastplate", rarity: "rare", value: 105, desc: "+50 health, +14% resist.", stats: { maxHealth: 50, damageReduction: 0.14 }, set: "dragonscale", chest: { archetype: "dragonscale", material: "dragonscale" } },
@@ -664,4 +722,5 @@ export {
   PAULDRON_ARCHETYPES, PAULDRON_MATERIALS, PAULDRON_MATERIAL_TINT, pauldronArchetype,
   GLOVE_ARCHETYPES, GLOVE_MATERIALS, GLOVE_MATERIAL_TINT, gloveArchetype,
   BELT_ARCHETYPES, BELT_MATERIALS, BELT_MATERIAL_TINT, beltArchetype,
+  BOOT_ARCHETYPES, BOOT_MATERIALS, BOOT_MATERIAL_TINT, bootArchetype,
 };
