@@ -1790,7 +1790,7 @@ describe("Task 32 — held weapons: real wand / bow / staff / sword / axe / dagg
     for (let i = 0; i < 8; i++) {
       for (const id of ["iron_sword", "war_axe", "short_bow", "apprentice_staff", "magic_wand", "iron_dagger"]) {
         T.equipItem(p, T.makeItem(id));
-        p.swing.trigger(p.weapon.ranged ? "ranged" : "melee"); // fire an attack
+        p.attack.trigger(p.attackClass()); // fire an attack of the equipped class
         expect(() => step(2)).not.toThrow();                   // the weapon rides the hand each frame
       }
     }
@@ -1842,7 +1842,7 @@ describe("Task 32 — held weapons: real wand / bow / staff / sword / axe / dagg
       T.equipItem(p, T.makeItem(id));
       const grp = p.heldWeapons[p.weaponShown.main];
       const rest = toFrame(grp.tip, { x: 0, y: 0, z: 0 }, p.armR); // tip in the arm's frame at rest
-      p.swing.trigger(p.weapon.ranged ? "ranged" : "melee");
+      p.attack.trigger(p.attackClass());
       for (let f = 0; f < 6; f++) {
         step(1);
         const now = toFrame(grp.tip, { x: 0, y: 0, z: 0 }, p.armR);

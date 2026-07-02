@@ -74,10 +74,10 @@ test("renders distinct worn gloves wrapped around the weapon grip", async ({ pag
     const BJS = window.BABYLON;
     p.facing = Math.PI;
     try { p.yaw.rotation.y = Math.PI; } catch (e) {}
-    // Hold a gentle ranged windup so the wand hand is raised + steady for the close-up
+    // Hold a gentle wand windup so the wand hand is raised + steady for the close-up
     // (registered AFTER the game's own updater so it wins each frame).
     scene.onBeforeRenderObservable.add(() => {
-      try { p.swing.kind = "ranged"; p.swing.phase = "windup"; p.swing.t = 0; } catch (e) {}
+      try { p.attack.cls = "wand"; p.attack.phase = "windup"; p.attack.t = 0; } catch (e) {}
     });
     // A 3/4 orbit onto Lily's right hand + the wand grip, close enough that the distinct
     // glove silhouette fills the frame and any grip-swallowing would show.

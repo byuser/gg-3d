@@ -188,8 +188,8 @@ ok(act && act.type === "melee", "melee weapon yields a melee attack");
 T.state.monsters.length = 0;
 const mm2 = new T.Monster(scene, world.shadow, new Vec3(p.position.x, 0, p.position.z + 1.5), 1);
 mm2.hp = 1; T.state.monsters.push(mm2);
-p.swing.phase = "idle"; p.swing.kind = null; T.state.pendingAttack = null;
-p.castCooldown = 0; key("Space"); step(1); key("Space", false); // queue the swing (wind-up)
+p.attack.phase = "idle"; p.attack.cls = null; T.state.pendingAttack = null;
+p.castCooldown = 0; key("Space"); step(1); key("Space", false); // queue the attack (wind-up)
 ok(mm2.alive && mm2.dying <= 0, "no damage on the wind-up frame — the hit waits for the strike");
 step(14);                                                       // advance wind-up → strike (impact)
 ok(!mm2.alive || mm2.dying > 0, "melee swing struck the sweet on its strike (impact) frame");
@@ -1069,49 +1069,70 @@ ok(T.t("settings.gfxAutoIs", { tier: "Zzz" }).indexOf("Zzz") >= 0, "the Auto hin
 // Restore booted state so nothing leaks into later runs.
 localStorage.removeItem(QUALITY_KEY_T); QT.pref = origPref31; QT.tier = origTier31;
 
-console.log("\n[32] animation — attack state machine, flinch, gather + per-zone ambient FX");
-// ---- Swing: the anticipation → impact → recovery action state machine. ----
-const D = T.SWING_DUR.melee;
-const s = new T.Swing();
-ok(s.phase === "idle" && !s.busy, "a fresh Swing is idle");
-s.trigger("melee");
-ok(s.phase === "windup" && s.busy && s.kind === "melee", "trigger() enters the wind-up (anticipation) phase");
+console.log("\n[32] animation — per-weapon attack state machine, flinch, gather + per-zone ambient FX");
+// ---- AttackAnim: the per-weapon-class windup → strike → recover state machine (Task 34). ----
+const D = T.ATTACK_SPECS.sword;
+const s = new T.AttackAnim();
+ok(s.phase === "idle" && !s.busy, "a fresh AttackAnim is idle");
+s.trigger("sword");
+ok(s.phase === "windup" && s.busy && s.cls === "sword" && s.family === "melee", "trigger() enters the wind-up (anticipation) phase");
 s.update(D.windup * 0.5);
 ok(s.phase === "windup" && s.progress() > 0.4 && s.progress() < 0.6, "progress() reports 0..1 within the phase");
 s.update(D.windup * 0.5 + D.strike * 0.5);
-ok(s.phase === "strike" && s.striking, "advances wind-up → strike (impact)");
+ok(s.phase === "strike" && s.striking, "advances wind-up → strike (impact / release)");
 s.update(D.strike * 0.5 + D.recover * 0.5);
 ok(s.phase === "recover", "advances strike → recover (follow-through)");
 s.update(D.recover);
-ok(s.phase === "idle" && s.kind === null && !s.busy, "recover → idle, and the machine resets");
-// Frame-rate independence: leftover time carries across phase edges, so one big
-// dt and many tiny dts land in the same terminal state.
-const total = D.windup + D.strike + D.recover;
-const big = new T.Swing().trigger("melee"); big.update(total + 0.001);
-const tiny = new T.Swing().trigger("melee"); for (let i = 0; i < 240; i++) tiny.update((total + 0.001) / 240);
-ok(big.phase === "idle" && tiny.phase === "idle", "a single oversized dt and 240 tiny dts both resolve to idle (frame-rate independent)");
-ok(new T.Swing().trigger("nonsense").kind === "melee", "an unknown action kind defaults to a melee arc");
-// Each action kind carries a complete 3-phase timing block.
-ok(["melee", "ranged", "gather"].every((k) => {
-  const d = T.SWING_DUR[k]; return d && d.windup > 0 && d.strike > 0 && d.recover > 0;
-}), "melee / ranged / gather each define windup + strike + recover durations");
+ok(s.phase === "idle" && !s.busy, "recover → idle, and the machine resets");
+// Frame-rate independence: leftover time carries across phase edges, so one big dt
+// and many tiny dts land in the same terminal state — for EVERY weapon class.
+let frIndep = true;
+for (const k of Object.keys(T.ATTACK_SPECS)) {
+  const d = T.ATTACK_SPECS[k], total = d.windup + d.strike + d.recover;
+  const big = new T.AttackAnim().trigger(k); big.update(total + 0.001);
+  const tiny = new T.AttackAnim().trigger(k); for (let i = 0; i < 240; i++) tiny.update((total + 0.001) / 240);
+  if (big.phase !== "idle" || tiny.phase !== "idle") frIndep = false;
+}
+ok(frIndep, "one oversized dt and 240 tiny dts both resolve to idle for every weapon class (frame-rate independent)");
+ok(new T.AttackAnim().trigger("nonsense").cls === "sword", "an unknown weapon class defaults to a sword arc");
+// Every weapon class carries a complete 3-phase timing block + a movement family, and
+// reaches its strike (impact / release) frame after the wind-up, before the recovery.
+let classesOk = true, strikeOk = true;
+for (const k of ["sword", "axe", "dagger", "fists", "bow", "wand", "staff", "gather"]) {
+  const d = T.ATTACK_SPECS[k];
+  if (!(d && d.windup > 0 && d.strike > 0 && d.recover > 0 && typeof d.family === "string")) classesOk = false;
+  const a = new T.AttackAnim().trigger(k); a.update(d.windup + d.strike * 0.5);
+  if (!a.striking) strikeOk = false;
+}
+ok(classesOk, "every weapon class defines windup + strike + recover durations + a family");
+ok(strikeOk, "every weapon class reaches its strike (impact / release) frame mid-swing");
+// Melee combo chaining: a re-trigger within COMBO_WINDOW cycles the slash; a late one resets.
+const cm = new T.AttackAnim();
+const cycle = (a) => a.update(a.spec.windup + a.spec.strike + a.spec.recover); // run one attack to idle
+cm.trigger("sword"); ok(cm.comboStep === 0, "a fresh sword attack starts at combo step 0");
+cycle(cm); cm.update(0.1); cm.trigger("sword"); ok(cm.comboStep === 1, "a quick re-swing chains the combo");
+cycle(cm); cm.update(T.COMBO_WINDOW + 1); cm.trigger("sword"); ok(cm.comboStep === 0, "a late re-swing resets the combo");
+// A no-combo class (axe) never advances its step, however fast it is re-triggered.
+const ax = new T.AttackAnim();
+ax.trigger("axe"); cycle(ax); ax.update(0.05); ax.trigger("axe");
+ok(ax.comboStep === 0, "a single-hit class (axe) never advances a combo step");
 
-// ---- Player: tryCast drives the swing; damage triggers a flinch; gather chops. ----
+// ---- Player: tryCast drives the attack; damage triggers a flinch; gather chops. ----
 const cam = { alpha: 0 };
-pl.swing.phase = "idle"; pl.swing.kind = null; pl.castCooldown = 0; pl.state = "idle";
+pl.attack.phase = "idle"; pl.attack.cls = null; pl.castCooldown = 0; pl.state = "idle";
 pl.tryCast();
-ok(pl.swing.busy, "tryCast() starts an attack swing (anticipation → impact → recovery)");
-pl.swing.phase = "idle"; pl.swing.kind = null; pl.flinch = 0;
+ok(pl.attack.busy, "tryCast() starts an attack (anticipation → impact → recovery)");
+pl.attack.phase = "idle"; pl.attack.cls = null; pl.flinch = 0;
 pl.takeDamage(7);
 ok(pl.flinch === 1, "taking damage arms the flinch recoil");
 for (let i = 0; i < 6; i++) pl.update(0.1, cam);
 ok(pl.flinch === 0, "the flinch recoil decays to rest under update() (dt-driven, so it freezes when paused)");
-pl.swing.phase = "idle"; pl.swing.kind = null; pl.state = "idle";
+pl.attack.phase = "idle"; pl.attack.cls = null; pl.state = "idle";
 pl.gather();
-ok(pl.swing.kind === "gather" && pl.swing.busy, "gather() triggers the harvest chop motion");
+ok(pl.attack.cls === "gather" && pl.attack.busy, "gather() triggers the harvest chop motion");
 // Zero / negative dt never advances the machine (guards a paused / first frame).
-const frozen = new T.Swing().trigger("melee"); frozen.update(0); frozen.update(-1);
-ok(frozen.phase === "windup", "a zero/negative dt leaves the swing frozen (pause-correct)");
+const frozen = new T.AttackAnim().trigger("sword"); frozen.update(0); frozen.update(-1);
+ok(frozen.phase === "windup", "a zero/negative dt leaves the attack frozen (pause-correct)");
 
 // ---- Ambient FX: per-zone spec is pure data; build is feature-detected. ----
 let specOk = true; const kinds = new Set();

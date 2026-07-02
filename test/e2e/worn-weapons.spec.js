@@ -80,7 +80,7 @@ test("renders a distinct real weapon of each class in hand", async ({ page }) =>
     scene.onBeforeRenderObservable.add(() => {
       try {
         p.state = "idle"; p.walkPhase = 0;
-        try { p.swing.kind = null; p.swing.phase = "idle"; p.swing.t = 0; p.castCooldown = 0; } catch (e) {}
+        try { p.attack.cls = null; p.attack.phase = "idle"; p.attack.t = 0; p.castCooldown = 0; } catch (e) {}
         p.armR.rotation.set(-0.5, 0, -0.55); // present the weapon up + out from the body
         p.armL.rotation.set(0.1, 0, 0.14);
         p.lean.rotation.set(0, 0, 0); p.lean.position.y = 0;

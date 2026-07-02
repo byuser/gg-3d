@@ -234,8 +234,8 @@ describe("Task 10 — the swing lands in arc + range, on the strike frame, once"
     st.monsters.length = 0;
     const m = new T.Monster(scene, T.world.shadow, new Vec3(p.position.x, 0, p.position.z + 1.4), 1);
     m.hp = m.maxHp = 1000; st.monsters.push(m);
-    p.facing = 0; p.swing.phase = "idle"; p.swing.kind = null; st.pendingAttack = null; p.castCooldown = 0;
-    key("Space"); step(1); key("Space", false);   // queue: swing in wind-up
+    p.facing = 0; p.attack.phase = "idle"; p.attack.cls = null; st.pendingAttack = null; p.castCooldown = 0;
+    key("Space"); step(1); key("Space", false);   // queue: attack in wind-up
     expect(st.pendingAttack, "attack is queued for the strike").toBeTruthy();
     expect(m.hp, "no damage during the wind-up").toBe(1000);
     let hpAtStrike = 1000;
@@ -252,7 +252,7 @@ describe("Task 10 — the swing lands in arc + range, on the strike frame, once"
     const st = T.state, p = T.player;
     p.equipment.hand1 = T.makeItem("magic_wand"); p.equipment.hand2 = null; T.recomputeStats(p);
     st.bolts.length = 0;
-    p.swing.phase = "idle"; p.swing.kind = null; st.pendingAttack = null; p.castCooldown = 0;
+    p.attack.phase = "idle"; p.attack.cls = null; st.pendingAttack = null; p.castCooldown = 0;
     key("Space"); step(1);                      // queue: wand draw-back (wind-up)
     expect(st.bolts.length, "no bolt yet on the wind-up frame").toBe(0);
     let spawned = false;

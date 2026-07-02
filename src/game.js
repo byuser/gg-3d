@@ -994,48 +994,83 @@ import {
   }
 
   // =========================================================================
-  // Swing — a tiny, dt-driven attack/gather animation state machine. It gives
-  // every action a readable ANTICIPATION → IMPACT → RECOVERY arc by owning only
-  // the timing (phase + elapsed time); the Player maps the phase onto limb poses.
-  // The combat hit still lands the instant tryCast() fires, so this only changes
-  // how an action LOOKS, never when it deals damage. Pure, frame-rate independent
-  // (carries leftover time across phase edges) and headless-safe — no DOM/Babylon.
+  // AttackAnim — the from-scratch, per-weapon-class attack state machine (Task 34,
+  // replacing the old single generic Swing). It owns ONLY the timing: which named
+  // phase the attack is in (windup → strike → recover) and how far through it, plus
+  // a combo step that cycles a melee weapon's slash into a 2–3 hit chain. The Player
+  // maps (class, phase, progress, comboStep) onto real body poses in _animateAction,
+  // and the combat loop lands the melee hit / releases the projectile on the STRIKE
+  // frame — so this changes how each weapon LOOKS and WHEN in its arc it connects,
+  // never the damage numbers. Pure, frame-rate independent (leftover time rolls
+  // across phase edges so 30 fps and 120 fps reach the same state), pause-correct (a
+  // zero/negative dt never advances it) and headless-safe (no DOM / Babylon).
+  //
+  // Each class declares a movement `family` — melee (sword/axe/dagger/fists), ranged
+  // (bow/wand) or cast (staff) — that drives its pose and how the loop fires, plus
+  // its own windup/strike/recover seconds so a heavy axe reads slow and a dagger
+  // fast. `combo` (melee) = how many chained slashes cycle within COMBO_WINDOW.
   // =========================================================================
-  const SWING_DUR = {
-    melee:  { windup: 0.11, strike: 0.12, recover: 0.21 }, // a wide weapon arc
-    ranged: { windup: 0.07, strike: 0.07, recover: 0.16 }, // a quick wand thrust
-    gather: { windup: 0.16, strike: 0.14, recover: 0.24 }, // a deliberate chop/reach
+  const ATTACK_SPECS = {
+    // Melee — the strike phase IS the impact frame (meleeSweep lands damage there).
+    sword:  { family: "melee",  windup: 0.13, strike: 0.10, recover: 0.20, combo: 3 }, // swept diagonal slashes
+    axe:    { family: "melee",  windup: 0.22, strike: 0.11, recover: 0.31, combo: 1 }, // weighty overhead chop
+    dagger: { family: "melee",  windup: 0.07, strike: 0.06, recover: 0.13, combo: 2 }, // quick stabs
+    fists:  { family: "melee",  windup: 0.09, strike: 0.07, recover: 0.15, combo: 2 }, // bare-handed jab
+    // Ranged / cast — the strike phase IS the RELEASE frame (the Projectile spawns there).
+    bow:    { family: "ranged", windup: 0.20, strike: 0.05, recover: 0.22, combo: 1 }, // nock → draw → release → recoil
+    wand:   { family: "ranged", windup: 0.08, strike: 0.06, recover: 0.16, combo: 1 }, // raise → point → release
+    staff:  { family: "cast",   windup: 0.18, strike: 0.08, recover: 0.22, combo: 1 }, // raise → channel → release
+    // Harvesting a resource node — a deliberate chop with the free hand (cosmetic).
+    gather: { family: "gather", windup: 0.16, strike: 0.14, recover: 0.24, combo: 1 },
   };
-  const SWING_PHASES = ["windup", "strike", "recover"];
-  class Swing {
-    constructor() { this.kind = null; this.phase = "idle"; this.t = 0; }
-    // Begin an action; an unknown kind defaults to a melee arc.
-    trigger(kind) {
-      this.kind = SWING_DUR[kind] ? kind : "melee";
-      this.phase = "windup"; this.t = 0;
+  const ATTACK_PHASES = ["windup", "strike", "recover"];
+  // Re-triggering the SAME class within this many seconds chains the melee combo.
+  const COMBO_WINDOW = 0.7;
+
+  class AttackAnim {
+    constructor() {
+      this.cls = null; this.phase = "idle"; this.t = 0;
+      this.comboStep = 0;            // which slash in the melee combo (0 .. combo-1)
+      this.sinceTrigger = Infinity;  // seconds since the last trigger (combo timing)
+    }
+    // The active class's timing spec (an unknown class defaults to a sword arc).
+    get spec() { return ATTACK_SPECS[this.cls] || ATTACK_SPECS.sword; }
+    // Movement family: "melee" | "ranged" | "cast" | "gather".
+    get family() { return this.spec.family; }
+    // Begin an attack of `cls`. Re-triggering the same class within COMBO_WINDOW
+    // advances the combo step (cycles the slash); otherwise it resets to the first.
+    trigger(cls) {
+      const key = ATTACK_SPECS[cls] ? cls : "sword";
+      const combo = ATTACK_SPECS[key].combo || 1;
+      const chain = this.cls === key && combo > 1 && this.sinceTrigger <= COMBO_WINDOW;
+      this.comboStep = chain ? (this.comboStep + 1) % combo : 0;
+      this.cls = key; this.phase = "windup"; this.t = 0; this.sinceTrigger = 0;
       return this;
     }
-    // Advance the machine by dt, rolling leftover time into the next phase so the
-    // total timing is exact at any frame rate. Returns the (possibly new) phase.
+    // Advance by dt, rolling leftover time into the next phase so the total timing is
+    // exact at any frame rate. A zero / negative dt never advances (pause-correct).
     update(dt) {
+      const adv = dt > 0 ? dt : 0;
+      this.sinceTrigger += adv;
       if (this.phase === "idle") return "idle";
-      const d = SWING_DUR[this.kind];
-      this.t += (dt > 0 ? dt : 0);
+      const d = this.spec;
+      this.t += adv;
       let guard = 8; // can't cross more than 3 edges; guard against a huge dt
       while (this.phase !== "idle" && this.t >= d[this.phase] && guard-- > 0) {
         this.t -= d[this.phase];
-        const i = SWING_PHASES.indexOf(this.phase);
-        this.phase = SWING_PHASES[i + 1] || "idle";
+        const i = ATTACK_PHASES.indexOf(this.phase);
+        this.phase = ATTACK_PHASES[i + 1] || "idle";
       }
-      if (this.phase === "idle") { this.t = 0; this.kind = null; }
+      if (this.phase === "idle") this.t = 0;
       return this.phase;
     }
     get busy() { return this.phase !== "idle"; }
+    // The impact / release frame — melee lands damage, ranged/cast spawns the bolt.
     get striking() { return this.phase === "strike"; }
     // 0..1 progress through the CURRENT phase (0 when idle).
     progress() {
       if (this.phase === "idle") return 0;
-      const dur = SWING_DUR[this.kind][this.phase] || 1;
+      const dur = this.spec[this.phase] || 1;
       return Math.max(0, Math.min(1, this.t / dur));
     }
   }
@@ -1055,7 +1090,7 @@ import {
       this.onPicked = null;      // callback once the relic reaches the hands
       this.carried = null;       // collectible mesh that flies up + poofs
       this.castCooldown = 0;     // counts down to 0 when ready to cast
-      this.swing = new Swing();  // anticipation→impact→recovery action animation
+      this.attack = new AttackAnim(); // per-weapon-class windup→strike→recover attack
       this.flinch = 0;           // 1→0 recoil timer set when struck
       // Base stats before any gear. recomputeStats() layers equipment on top.
       this.base = { maxHealth: CONFIG.maxHealth, speed: CONFIG.moveSpeed };
@@ -1194,9 +1229,10 @@ import {
     // procedural mesh group, pre-built ONCE under the hand grip and just toggled + tinted
     // on equip by refreshWeaponVisual() — so equipping never allocates or leaks. The main
     // grip is a child of the RIGHT arm pivot, so the weapon tracks the hand through the
-    // whole attack for free (it rides the EXISTING Swing state machine — the from-scratch
-    // attack motion is Task 34, which animates the per-class trail anchor built here). A
-    // dual-wielded off-hand weapon rides a mirror grip on the LEFT arm. The projectile
+    // whole attack for free (it rides the per-weapon-class AttackAnim from Task 34, whose
+    // _animateAction poses the arm — and thus the blade — and flashes the trail smear
+    // built alongside these meshes). A dual-wielded off-hand weapon rides a mirror grip on
+    // the LEFT arm. The projectile
     // muzzle (this.wandTip) + its shared glow/halo are repositioned to the active ranged
     // weapon's business end so bolts/arrows still launch from the tip.
     _buildHeldWeapons(scene, shadow) {
@@ -1230,7 +1266,41 @@ import {
       // Build the six weapon-class meshes under the main grip (+ the four one-handed
       // classes under the off grip), then reveal the equipped one.
       this._buildWeaponMeshes(scene, shadow, spec);
+      // The melee weapon-trail smear that flashes along the blade on the strike frame
+      // (Task 34) — rides the grip so it sweeps WITH the swing; tier-gated off on low.
+      this._buildAttackFx(scene, spec);
       this.refreshWeaponVisual();
+    }
+
+    // A translucent "swoosh" smear that flashes along the blade during a melee strike
+    // (Task 34). Built ONCE, parented to the main grip so it sweeps with the weapon
+    // (the grip is rigid to the arm — the weapon can't detach), disabled at rest and
+    // revealed with a rise-then-fade alpha by _setTrail(). Tier-gated (dropped on the
+    // low tier, like the finer weapon trims) and fully feature-detected / headless-safe.
+    _buildAttackFx(scene, spec) {
+      this._trail = null; this._trailMat = null;
+      try {
+        if (!spec || spec.weaponDetail === false) return; // low tier: no per-frame trail
+        const m = emat(scene, "atkTrail", "#eaf4ff", 0.9);
+        try { m.alpha = 0; m.disableLighting = true; m.backFaceCulling = false; } catch (e) {}
+        const tr = box(scene, "atkTrail", 0.86, 1.5, 0.02, m);
+        tr.parent = this.wandGrip; tr.position.set(0, 0.72, 0);
+        tr.isPickable = false;
+        try { tr.setEnabled(false); } catch (e) {}
+        this._trail = tr; this._trailMat = m;
+      } catch (e) { this._trail = null; this._trailMat = null; }
+    }
+
+    // Reveal / fade the blade-trail smear (0 hides + disables it). Safe when no trail
+    // was built (low tier / headless) or the mesh helpers are stubbed.
+    _setTrail(alpha) {
+      const tr = this._trail;
+      if (!tr) return;
+      try {
+        if (!(alpha > 0.02)) { tr.setEnabled(false); return; }
+        tr.setEnabled(true);
+        if (this._trailMat) this._trailMat.alpha = Math.min(0.72, alpha);
+      } catch (e) { /* headless stub */ }
     }
 
     // Build one procedural mesh group per weapon class (Task 32) — parented to the main-
@@ -2687,10 +2757,10 @@ import {
 
     // Keep the pauldrons seated on the shoulders through the attack. The shoulder
     // pivots are children of the arms (so they swing with the pitch), but the arm's
-    // z-ROLL — big on the melee strike (armR.z → +1.2) — would swing the cap across
-    // the chest. Cancel most of that roll on the pivot each frame (net roll ≈ 20% of
-    // the arm's) so the shoulder cap stays outboard of the torso. Called from
-    // update(), so it freezes correctly with the pause menu.
+    // z-ROLL — big on a sword slash (armR.z → ±1.1) — would swing the cap across the
+    // chest. The pivots hang off the torso instead, following only a FRACTION of the
+    // arm's forward/back PITCH, so the shoulder cap stays outboard of the torso at any
+    // pose. Called from update(), so it freezes correctly with the pause menu.
     _animatePauldrons() {
       if (!this.shoulderPivots) return;
       // The shoulder pivots hang off the torso (lean), so they don't inherit the arm's
@@ -2715,8 +2785,17 @@ import {
     get busy() { return this.state === "pickup"; }
 
     // A quick chop/reach when harvesting a resource node (purely cosmetic — the
-    // material is already credited). Ignored while picking up or mid-swing.
-    gather() { if (!this.busy && !this.swing.busy) this.swing.trigger("gather"); }
+    // material is already credited). Ignored while picking up or mid-attack.
+    gather() { if (!this.busy && !this.attack.busy) this.attack.trigger("gather"); }
+
+    // The weapon CLASS the attack animation should play (Task 34) — the drawn held
+    // weapon's class (sword/axe/dagger/bow/wand/staff) when one is shown, else a bare
+    // -handed motion (a ranged fallback casts like a wand; melee jabs with fists).
+    attackClass() {
+      const shown = this.weaponShown && this.weaponShown.main;
+      if (shown && ATTACK_SPECS[shown]) return shown;
+      return this.weapon && this.weapon.ranged ? "wand" : "fists";
+    }
 
     // Trigger an attack with the active weapon. Returns a descriptor the loop
     // turns into projectiles or a melee sweep, or null if on cooldown / busy.
@@ -2726,7 +2805,7 @@ import {
       if (this.castCooldown > 0 || this.busy) return null;
       const w = this.weapon;
       this.castCooldown = w.cooldown;
-      this.swing.trigger(w.ranged ? "ranged" : "melee");
+      this.attack.trigger(this.attackClass());
       if (!w.ranged) {
         const dir = new BABYLON.Vector3(Math.sin(this.facing), 0, Math.cos(this.facing)).normalize();
         return { type: "melee", origin: this.root.position.clone(), dir, weapon: w };
@@ -2747,13 +2826,13 @@ import {
 
     update(dt, camera) {
       if (this.castCooldown > 0) this.castCooldown -= dt;
-      this.swing.update(dt);
+      this.attack.update(dt);
       if (this.flinch > 0) this.flinch = Math.max(0, this.flinch - dt / 0.32);
 
       if (this.state === "pickup") { this._updatePickup(dt); }
       else { this._updateMove(dt, camera); }
 
-      // Layer the active action pose (wind-up → strike → follow-through) on top of
+      // Layer the active attack pose (wind-up → strike → follow-through) on top of
       // the locomotion pose, then a brief recoil when struck.
       this._animateAction();
       if (this.flinch > 0) {
@@ -2761,52 +2840,109 @@ import {
         this.lean.position.y += this.flinch * 0.05;
       }
 
-      // Pulse the wand crystal; flare it on the ranged strike frame.
+      // The wand/staff crystal pulses at rest, CHANNELS brighter through a staff cast's
+      // wind-up, and FLARES on the ranged/cast release (strike) frame — the muzzle glow
+      // that reads a bolt leaving the tip. (No-op on melee weapons, where it's disabled.)
       const pulse = 0.85 + Math.sin(performance.now() / 120) * 0.15;
-      this.wandHalo.scaling.setAll(pulse);
-      const rangedStrike = this.swing.kind === "ranged" && this.swing.striking;
-      this.wandGlow.intensity = 0.4 + (rangedStrike ? 0.9 : 0) + pulse * 0.1;
+      const a = this.attack, fam = a.family;
+      const charging = a.busy && fam === "cast" && a.phase === "windup" ? a.progress() : 0;
+      const release = a.busy && (fam === "ranged" || fam === "cast") && a.striking ? 1 : 0;
+      this.wandHalo.scaling.setAll(pulse * (1 + charging * 0.55));
+      this.wandGlow.intensity = 0.4 + release * 0.95 + charging * 0.7 + pulse * 0.1;
 
       this._animatePauldrons(); // keep the shoulders seated (after the arms are posed)
       this._animateCloak(dt);
       this.yaw.rotation.y = this.facing;
     }
 
-    // Map the Swing state machine onto limb poses. Each phase eases toward a
-    // target pose, so an action reads as anticipation → impact → recovery.
+    // Map the AttackAnim state machine onto real body poses (Task 34): a per-weapon-
+    // class windup → strike → recovery with torso rotation, weight shift and a foot
+    // plant, so each weapon reads distinct and weighty. Each phase eases the involved
+    // channels toward a target pose; the held weapon rides the right-arm grip, so posing
+    // the arm swings the blade. Deterministic (no wall-clock time), so it freezes on
+    // pause and holds a fixed pose when a phase is pinned (the worn-gear showcases and
+    // the tests rely on that). Layered ON TOP of the locomotion pose (runs after it).
     _animateAction() {
-      const sw = this.swing;
-      if (!sw.busy) { this.lean.rotation.y = lerp(this.lean.rotation.y || 0, 0, 0.2); return; }
-      const ph = sw.phase;
-      if (sw.kind === "melee") {
-        if (ph === "windup") {            // cock the blade up + twist away
-          this.armR.rotation.x = lerp(this.armR.rotation.x, 0.8, 0.4);
-          this.armR.rotation.z = lerp(this.armR.rotation.z || 0, -0.7, 0.4);
-          this.lean.rotation.y = lerp(this.lean.rotation.y || 0, -0.35, 0.35);
-        } else if (ph === "strike") {     // whip it across the body — the hit
-          this.armR.rotation.x = lerp(this.armR.rotation.x, -1.5, 0.55);
-          this.armR.rotation.z = lerp(this.armR.rotation.z || 0, 1.2, 0.55);
-          this.lean.rotation.y = lerp(this.lean.rotation.y || 0, 0.45, 0.5);
-        } else {                          // recover — settle back to rest
-          this.armR.rotation.z = lerp(this.armR.rotation.z || 0, 0, 0.25);
-          this.lean.rotation.y = lerp(this.lean.rotation.y || 0, 0, 0.2);
-        }
-      } else if (sw.kind === "ranged") {
-        if (ph === "windup") this.armR.rotation.x = lerp(this.armR.rotation.x, 0.35, 0.45); // draw back
-        else if (ph === "strike") this.armR.rotation.x = lerp(this.armR.rotation.x, -1.9, 0.7); // thrust
-        else this.lean.rotation.y = lerp(this.lean.rotation.y || 0, 0, 0.2);
-      } else {                            // gather — a downward chop with the free hand
-        if (ph === "windup") {
-          this.armL.rotation.x = lerp(this.armL.rotation.x, -0.7, 0.4);
-          this.lean.rotation.x = lerp(this.lean.rotation.x, 0.15, 0.3);
-        } else if (ph === "strike") {
-          this.armL.rotation.x = lerp(this.armL.rotation.x, 1.3, 0.6);
-          this.lean.rotation.x = lerp(this.lean.rotation.x, 0.5, 0.4);
-        } else {
-          this.armL.rotation.x = lerp(this.armL.rotation.x, 0, 0.25);
-          this.lean.rotation.x = lerp(this.lean.rotation.x, 0, 0.25);
-        }
+      const a = this.attack;
+      if (!a.busy) {
+        // The attack-only channel (torso twist) settles to neutral; locomotion owns the rest.
+        this.lean.rotation.y = lerp(this.lean.rotation.y || 0, 0, 0.2);
+        this._setTrail(0);
+        return;
       }
+      const ph = a.phase, prog = a.progress(), fam = a.family, cls = a.cls;
+      // Ease a rotation channel / the lean's vertical weight toward a target by blend k.
+      const R = (node, ch, target, k) => { node.rotation[ch] = lerp(node.rotation[ch] || 0, target, k); };
+      const P = (target, k) => { this.lean.position.y = lerp(this.lean.position.y || 0, target, k); };
+      const K = ph === "windup" ? 0.4 : ph === "strike" ? 0.6 : 0.24;
+
+      if (fam === "melee" && cls === "axe") {
+        // AXE — a weighty overhead chop: haul high + lean back, drive the whole body
+        // down into it, then settle SLOW (the long recover reads as heft).
+        if (ph === "windup") { R(this.armR, "x", 1.5, K); R(this.armR, "z", -0.15, K); R(this.lean, "x", -0.18, K); R(this.lean, "y", -0.1, K); R(this.legR, "x", 0.15, K); }
+        else if (ph === "strike") { R(this.armR, "x", -1.95, 0.5); R(this.armR, "z", 0.05, 0.5); R(this.lean, "x", 0.28, 0.5); R(this.lean, "y", 0.1, 0.5); P(-0.09, 0.5); }
+        else { R(this.armR, "x", -0.35, 0.2); R(this.armR, "z", 0, 0.2); R(this.lean, "x", 0.05, 0.2); R(this.lean, "y", 0, 0.2); P(0, 0.2); }
+      } else if (fam === "melee" && (cls === "dagger" || cls === "fists")) {
+        // DAGGER / FISTS — quick alternating stabs; the 2-combo flips the lead for a one-two.
+        const dir = a.comboStep % 2 === 1 ? -1 : 1;
+        const reach = cls === "dagger" ? -0.95 : -1.0;
+        if (ph === "windup") { R(this.armR, "x", 0.32, 0.5); R(this.armR, "z", -0.14, 0.5); R(this.lean, "y", -0.22 * dir, 0.5); }
+        else if (ph === "strike") { R(this.armR, "x", reach, 0.65); R(this.armR, "z", -0.05, 0.65); R(this.lean, "y", 0.26 * dir, 0.65); R(this.lean, "x", 0.12, 0.65); R(this.legR, "x", 0.18, 0.65); }
+        else { R(this.armR, "x", -0.1, 0.3); R(this.armR, "z", 0, 0.3); R(this.lean, "y", 0, 0.3); R(this.lean, "x", 0, 0.3); }
+      } else if (fam === "melee") {
+        // SWORD (+ any melee default) — swept diagonal slashes; the 3-combo cycles
+        // left→right, right→left, overhead so a chain reads as a real flurry.
+        const overhead = a.comboStep === 2;
+        const dir = a.comboStep === 1 ? -1 : 1;
+        if (ph === "windup") {
+          if (overhead) { R(this.armR, "x", 1.3, K); R(this.armR, "z", 0, K); R(this.lean, "x", -0.12, K); R(this.lean, "y", -0.15, K); }
+          else { R(this.armR, "x", 0.85, K); R(this.armR, "z", -0.8 * dir, K); R(this.lean, "y", -0.4 * dir, K); }
+          R(this.legR, "x", 0.12, K);
+        } else if (ph === "strike") {
+          if (overhead) { R(this.armR, "x", -1.7, 0.6); R(this.armR, "z", 0, 0.6); R(this.lean, "x", 0.2, 0.6); R(this.lean, "y", 0, 0.6); }
+          else { R(this.armR, "x", -1.35, 0.6); R(this.armR, "z", 1.1 * dir, 0.6); R(this.lean, "y", 0.5 * dir, 0.6); R(this.lean, "x", 0.1, 0.6); }
+          P(-0.04, 0.6);
+        } else {
+          R(this.armR, "x", -0.2, 0.24); R(this.armR, "z", 0, 0.24); R(this.lean, "y", 0, 0.24); R(this.lean, "x", 0, 0.24); P(0, 0.24);
+        }
+      } else if (cls === "bow") {
+        // BOW — the bow arm holds forward while the string hand DRAWS back, then the
+        // string snaps forward on release, with a small recoil settle.
+        if (ph === "windup") { R(this.armR, "x", -0.55, 0.35); R(this.armR, "z", -0.12, 0.35); R(this.armL, "x", 0.55, 0.35); R(this.armL, "z", 0.15, 0.35); R(this.lean, "y", -0.18, 0.35); }
+        else if (ph === "strike") { R(this.armR, "x", -0.5, 0.7); R(this.armL, "x", -0.1, 0.7); R(this.armL, "z", 0, 0.7); R(this.lean, "y", -0.05, 0.7); }
+        else { R(this.armR, "x", -0.2, 0.2); R(this.armL, "x", 0.1, 0.2); R(this.lean, "y", 0, 0.2); R(this.lean, "x", -0.02, 0.2); }
+      } else if (cls === "staff") {
+        // STAFF — raise + CHANNEL the orb (the glow ramps in update), then thrust to
+        // release the bolt; the off hand supports the shaft throughout.
+        if (ph === "windup") { R(this.armR, "x", -0.45, 0.35); R(this.armR, "z", 0.05, 0.35); R(this.armL, "x", -0.25, 0.35); R(this.lean, "x", -0.05, 0.35); R(this.lean, "y", -0.1, 0.35); }
+        else if (ph === "strike") { R(this.armR, "x", -0.95, 0.6); R(this.armL, "x", -0.4, 0.6); R(this.lean, "y", 0.2, 0.6); R(this.lean, "x", 0.1, 0.6); }
+        else { R(this.armR, "x", -0.25, 0.22); R(this.armL, "x", -0.05, 0.22); R(this.lean, "y", 0, 0.22); R(this.lean, "x", 0, 0.22); }
+      } else if (fam === "ranged") {
+        // WAND — raise/draw the wand back, point + RELEASE the bolt on the thrust, settle.
+        if (ph === "windup") { R(this.armR, "x", 0.4, 0.45); R(this.armR, "z", -0.1, 0.45); R(this.lean, "y", -0.12, 0.45); }
+        else if (ph === "strike") { R(this.armR, "x", -1.6, 0.7); R(this.armR, "z", 0.05, 0.7); R(this.lean, "y", 0.2, 0.7); R(this.lean, "x", 0.06, 0.7); }
+        else { R(this.armR, "x", -0.2, 0.25); R(this.armR, "z", 0, 0.25); R(this.lean, "y", 0, 0.25); R(this.lean, "x", 0, 0.25); }
+      } else {
+        // GATHER — a downward chop/reach with the free (left) hand while harvesting.
+        if (ph === "windup") { R(this.armL, "x", -0.7, 0.4); R(this.lean, "x", 0.15, 0.3); }
+        else if (ph === "strike") { R(this.armL, "x", 1.3, 0.6); R(this.lean, "x", 0.5, 0.4); }
+        else { R(this.armL, "x", 0, 0.25); R(this.lean, "x", 0, 0.25); }
+      }
+
+      // The blade smear flashes only on a melee strike (with a real weapon held); every
+      // other family (ranged/cast/gather) shows none.
+      if (fam === "melee") this._trailFor(ph, prog);
+      else this._setTrail(0);
+    }
+
+    // Drive the melee blade-trail smear for the current phase: a rise-then-fall flash
+    // across the strike, fading out through the recovery. Only when a real weapon is held.
+    _trailFor(ph, prog) {
+      if (!this.activeWeaponGroup) { this._setTrail(0); return; }
+      let alpha = 0;
+      if (ph === "strike") alpha = Math.sin(Math.min(1, prog) * Math.PI) * 0.7;
+      else if (ph === "recover") alpha = Math.max(0, 1 - prog) * 0.3;
+      this._setTrail(alpha);
     }
 
     _updateMove(dt, camera) {
@@ -9141,7 +9277,7 @@ import {
     if (state.castle && state.castle.dispose) { try { state.castle.dispose(); } catch (e) {} }
     state.merchant = null; state.blacksmith = null; state.alchemist = null; state.castle = null;
     state.boss = null; state.dragon = null;
-    state.pendingAttack = null;   // drop any mid-swing attack queued in the old zone
+    state.pendingAttack = null;   // drop any mid-attack hit queued in the old zone
     if (interaction && interaction.clear) interaction.clear();
     hideBossBar();
   }
@@ -9222,7 +9358,7 @@ import {
       playSec: 0,       // accumulated active playtime (seconds) — save-slot metadata
       waveStats: { kills: 0, artifacts: 0, coins: 0 },
       merchant: null, blacksmith: null, alchemist: null, boss: null,
-      pendingAttack: null, // attack awaiting its swing's strike (impact) frame
+      pendingAttack: null, // attack awaiting its strike (impact / release) frame
     };
 
     // Hand out the starting gear and compute the initial stat block.
@@ -9338,11 +9474,12 @@ import {
           state.pendingAttack = act;
         }
       }
-      // Land the queued attack the instant the swing reaches its strike phase
-      // (or just after, if a big dt skipped it — never drop a committed hit).
+      // Land the queued attack the instant the attack reaches its strike (impact /
+      // release) frame — or just after, if a big dt skipped it — never dropping a
+      // committed hit. Melee lands damage here; ranged/cast spawns the projectile.
       if (state.pendingAttack) {
-        const sw = player.swing;
-        if (sw.striking || sw.phase === "recover" || !sw.busy) {
+        const a = player.attack;
+        if (a.striking || a.phase === "recover" || !a.busy) {
           fireAttack(state, scene, player, state.pendingAttack);
           state.pendingAttack = null;
         }
@@ -9757,8 +9894,11 @@ import {
           color: el.color, haloColor: el.color, gravity: 1.2,
         }));
       }
-      // The wand flares on a ranged skill, mirroring a normal cast.
-      if (player.swing && player.swing.trigger) player.swing.trigger("ranged");
+      // The weapon flares on a ranged skill, mirroring a normal cast (a held ranged
+      // weapon plays its own release; otherwise a generic wand flourish).
+      if (player.attack && player.attack.trigger) {
+        player.attack.trigger(player.weapon && player.weapon.ranged ? player.attackClass() : "wand");
+      }
     },
 
     _castNova(state, player, def, el, power) {
@@ -13086,8 +13226,10 @@ import {
       relativeHeading, compass8, MAP_TARGETS, targetZoneOf, targetPoint,
       validWaypoint, searchTargets, worldLayout,
       mapVecToScreen, mapHeadingScreen, layoutMapLabels,
+      // ---- Attack animation (Task 34, replaces Task 5's Swing) ----
+      AttackAnim, ATTACK_SPECS, COMBO_WINDOW,
       // ---- Animation (Task 5) ----
-      Swing, SWING_DUR, ambientSpecFor, buildAmbientFX, AMBIENT_SPECS,
+      ambientSpecFor, buildAmbientFX, AMBIENT_SPECS,
       // ---- Lighting / shadows / quality tier (Task 4) ----
       Quality, makeSunShadows, setupPostFX, applyZoneMood,
       // ---- Art direction: cheerful grade + larger tier-gated view (Task 11) ----

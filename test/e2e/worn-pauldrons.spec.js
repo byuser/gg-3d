@@ -75,10 +75,10 @@ test("renders distinct worn pauldrons seated on the shoulder mid-attack", async 
     try { T.equipItem(p, T.makeItem("iron_sword")); T.recomputeStats(p); } catch (e) {}
     p.facing = Math.PI;
     try { p.yaw.rotation.y = Math.PI; } catch (e) {}
-    // Hold the melee STRIKE phase forever so _animateAction keeps the arm in the wide
-    // cross-body swing while we capture (registered AFTER the game's own updater).
+    // Hold the sword STRIKE phase forever so _animateAction keeps the arm in the wide
+    // cross-body slash while we capture (registered AFTER the game's own updater).
     scene.onBeforeRenderObservable.add(() => {
-      try { p.swing.kind = "melee"; p.swing.phase = "strike"; p.swing.t = 0; } catch (e) {}
+      try { p.attack.cls = "sword"; p.attack.phase = "strike"; p.attack.t = 0; } catch (e) {}
     });
     // A 3/4 orbit onto Lily's right shoulder + upper chest, close enough that the
     // distinct pauldron silhouette fills the frame and any chest penetration would show.

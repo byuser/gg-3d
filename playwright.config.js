@@ -319,6 +319,16 @@ export default defineConfig({
       testMatch: /worn-weapons\.spec\.js/,
       use: { ...devices["Desktop Chrome"] },
     },
+    // Attack animations (Task 34): boot the built site, equip each of the six weapon
+    // classes, pin Lily at the class's strike (impact/release) pose and screenshot her
+    // upper body + weapon, asserting each animates as its class, the six strike poses
+    // visibly differ, and a wind-up reads differently from the strike. Needs a real
+    // WebGL canvas, so it runs at desktop.
+    {
+      name: "combat-anim-desktop",
+      testMatch: /combat-anim\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",
