@@ -550,9 +550,9 @@ high-tier extras, **tier-gated**, toggled with **no mesh reallocation** across
 equip/unequip), the **tabbed inventory** (filter / sort / potion consume), the **v7
 save round-trip** of affixes + the new slots **plus migration** from an older (v6) file,
 and the **distinct worn gear** selectors — Task 25's helmets, Task 26's chests, Task 27's
-pauldrons, Task 28's gloves, Task 29's belts, Task 30's boots, Task 31's cloaks and Task 32's held
-weapons (`helmetArchetype` / `chestArchetype` /
-`pauldronArchetype` / `gloveArchetype` / `beltArchetype` / `bootArchetype` / `cloakArchetype` / `weaponArchetype` are each pure + total — every def → a valid
+pauldrons, Task 28's gloves, Task 29's belts, Task 30's boots, Task 31's cloaks, Task 32's held
+weapons and Task 33's jewelry (`helmetArchetype` / `chestArchetype` /
+`pauldronArchetype` / `gloveArchetype` / `beltArchetype` / `bootArchetype` / `cloakArchetype` / `weaponArchetype` / `jewelryArchetype` are each pure + total — every def → a valid
 archetype + material — every archetype group builds once, the equipped item shows its own shape, and
 equip churn never reallocates the meshes; the pauldron suite adds a **shoulder-fit invariant**
 proving the shoulder mesh's inner reach is pose-independent and never enters the torso through
@@ -569,12 +569,17 @@ of six real classes (inferred from its mechanics), shows exactly the equipped cl
 the off-hand class; a two-hander shows one centred weapon), keeps a valid muzzle at the active
 weapon's tip, and adds a **held-in-hand invariant** proving every weapon part is gripped in the fist
 and bounded around the hand, plus a **no-detachment invariant** proving the weapon tip's arm-frame
-position never drifts as the attack plays (so it rides the hand without flying off); Playwright
-`worn-{helmets,chests,pauldrons,gloves,belts,boots,cloaks,weapons}.spec.js` + `combat-anim.spec.js`
+position never drifts as the attack plays (so it rides the hand without flying off); the jewelry suite
+adds a **throat / at-the-hand fit invariant** proving the necklace rides in front of the chest (a
+pendant part sits proud, clear of the breastplate) and the ring seats at the hand, a **glove-cover
+rule** hiding the rings whenever a glove is worn (so a ring never clips the glove), and its **high-tier
+gate** (built only on the desktop tier — every phone skips it); Playwright
+`worn-{helmets,chests,pauldrons,gloves,belts,boots,cloaks,weapons,jewelry}.spec.js` + `combat-anim.spec.js`
 screenshot the distinct pieces worn (and each weapon **attacking**) on a real
 canvas — the pauldrons mid-attack confirming no chest penetration, the gloves wrapped around the wand
 grip, the belts seated below the chest hem, the boots striding on the feet, the cloaks draping behind mid-turn,
-each of the six weapon classes held in hand, and each class at its distinct strike pose (Task 34)),
+each of the six weapon classes held in hand, each class at its distinct strike pose (Task 34), and the
+necklaces/rings on the model (the jewelry spec also proving graceful omission on the Galaxy S24 phone tier)),
 and the **skill & leveling** suite (`test/skills.test.js`) that locks in Task 14: the
 **XP curve + focus math** (pure), **level-up** grants (health + focus + auto-learned skills),
 **focus regen + cooldown** ticking, the **quick-bar** assign (deduplicated) + **activate**
@@ -753,7 +758,9 @@ additive, not a rewrite (pure content tables live in `src/data/`, foundations in
 - **`Input`** — unifies keyboard, the on-screen joystick, and the cast button.
 - **`Player`** — Lily, built from primitives with a procedural walk cycle, a swappable
   held weapon rendered as its real class (wand / bow / staff / sword / axe / dagger),
-  melee + ranged attacks, health, and a derived stat block computed from her gear.
+  worn armour on every slot **plus subtle jewelry** — a chain-and-pendant **necklace** at
+  the throat and slim gem-set **rings** on the hands (Task 33, high-tier only), melee +
+  ranged attacks, health, and a derived stat block computed from her gear.
 - **`ITEM_DB` / `AFFIXES` / `SETS` / equipment / `deriveStats`** — the item catalogue
   (weapons, armour, accessories; **rarity tiers** common → rare → epic → legendary), the
   **12-slot** model (helmet/pauldrons/breastplate/gloves/belt/boots/cloak/necklace/2 rings/
@@ -894,6 +901,19 @@ whole thing is unit-testable without a GPU:
   **two-handed** weapon shows one centred weapon. The bolt/arrow muzzle is repositioned to the active
   weapon's tip so ranged casts still launch from the business end. Tier-gated (finer trims dropped on
   the low tier; the core weapon is always drawn). **No `SAVE_VERSION` change** (visual only).
+- **Visible jewelry (Task 33).** The **necklace** and **rings** — equipped but previously invisible —
+  now render a subtle worn piece: a fine collar **chain + pendant** at the throat (a small teardrop
+  **pendant**, a round-medallion **amulet**, or a heavier twin-chain **torc**) and a slim gem-set band
+  on the hand (a plain **band**, a flat **signet**, or a claw-set **gemband**). The pure, tested
+  selector `jewelryArchetype(def)` maps every ring/necklace (via a `jewel:{ archetype, material, gem }`
+  block, or inferred from rarity) to an archetype + a metal (silver → gold → dragonscale by rarity) + a
+  **gem colour** — the item's own signature (a Ring of Power's ruby) or, with none, its **rarity
+  colour** — so a plain silver band and an epic gold gemband read apart. The necklace rides in **front
+  of the chest** (its pendant sits proud, clear of any breastplate); `ring1`/`ring2` ride the left/right
+  hands and are **hidden whenever a glove covers the hand** so a ring never clips the glove. It is
+  **high-tier only** — the tiniest, most additive piece, so **every phone skips it** (a clean omission)
+  and pays nothing. Built **once** + toggled/tinted on equip like the rest, so it can't leak. **No
+  `SAVE_VERSION` change** (the worn meshes derive from the equipped items).
 - **Persistence.** `SAVE_VERSION` 7 stores `{ id, lvl, aff }` per instance across the bag + all 12
   slots; older saves (no affixes / no new slots) load with clean defaults.
 - **Value / weight.** Items carry a coin **value** (resale, scaled by enhancement); **weight /
@@ -1447,4 +1467,17 @@ Source: GitHub Actions**.
       in the weapon's real arc/reach (no early/late/double hit), `dt`-driven, **frame-rate independent**,
       **pause-correct** and headless-safe; no `SAVE_VERSION` change. Covered by `test/combat-anim.test.js`
       + `test/e2e/combat-anim.spec.js` (a real-browser clip of each class's distinct strike) — Task 34
+- [x] **Visible jewelry** — the **necklace** and **rings**, equipped but previously invisible on the
+      model, now show a subtle worn piece: a fine collar **chain + pendant** at the throat (a teardrop
+      **pendant**, a round-medallion **amulet**, or a heavier twin-chain **torc**) and a slim gem-set band
+      on the hand (a plain **band**, a flat **signet**, or a claw-set **gemband**). A pure, tested
+      `jewelryArchetype(def)` selector maps every ring/necklace (via a `jewel` block, or inferred from
+      rarity) to an archetype + a metal (silver → gold → dragonscale by rarity) + a **gem colour** (the
+      item's signature, else its rarity colour). The necklace rides **in front of the chest** (its pendant
+      proud, clear of any breastplate); the rings ride the hands and are **hidden when a glove covers the
+      hand** so a ring never clips it. **High-tier only** — the tiniest, most additive piece, so **every
+      phone skips it** cleanly. Built once (no reallocation), no `SAVE_VERSION` change (the worn meshes
+      derive from the equipped items). Covered by `test/items.test.js` (incl. a throat / at-the-hand fit +
+      glove-cover invariant) + `test/e2e/worn-jewelry.spec.js` (a real-browser screenshot of distinct
+      necklaces + rings on the model, plus graceful omission on the Galaxy S24 phone tier) — Task 33
 - [ ] Puzzles (levers, plates, gated doors)

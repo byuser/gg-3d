@@ -1,7 +1,12 @@
 # Task 33 — Visible jewelry: necklace + rings on the character (additive)
 
 > Part of the [Good Game 3D backlog](../TODO.md). Shared rules + Definition of Done live there.
-- **Status:** `[ ]`
+- **Status:** `[x]` 2026-07-02 — shipped a subtle worn **necklace** (chain + pendant at
+  the throat: pendant / amulet / torc) and **rings** (slim gem-set band on each hand:
+  band / signet / gemband) via the pure `jewelryArchetype` selector; metal by rarity,
+  gem by item signature or rarity colour; necklace rides in front of the chest, rings
+  hide under gloves; **high-tier only** (phones skip it); built once + toggled on equip
+  (no leak, no `SAVE_VERSION` change). Vitest + a real-browser `worn-jewelry.spec.js`.
 - **Depends on:** Task 12 (the `necklace` + `ring1`/`ring2` slots), Task 3, Task 4.
   Shared bar above. **Net-new scope** (jewelry currently renders no worn mesh).
 - **Goal.** Necklaces and rings are equipped but **invisible on the character** (no

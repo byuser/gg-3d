@@ -50,6 +50,63 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-07-02] — Task 33 — Visible jewelry: necklace + rings on the character
+
+The additive member of the **worn-equipment overhaul** (Tasks 25–35): necklaces and rings
+were equipped but **invisible on the character** — the only two loadout slots with no worn
+mesh. They now render a subtle, tasteful piece so accessories read on the model too, without
+costing phone fps (it's **high-tier only**) and without touching the save schema.
+
+### Added
+
+- **A worn necklace + rings on Lily.** The `necklace` slot shows a fine collar **chain +
+  pendant** at the throat — a small teardrop **pendant** (normal), a round-medallion
+  **amulet** (rare), or a heavier twin-chain **torc** with a big faceted gem (epic+) — and
+  the `ring1`/`ring2` slots show a slim gem-set band on the left/right hand — a plain
+  **band** (normal), a flat **signet** face (rare), or a claw-set **gemband** (epic+).
+  Built from procedural primitives (`Player._buildJewelry`), pre-built **once** under a
+  shared neck anchor + per-hand ring anchors and just toggled + tinted on equip by
+  `refreshWornGear`/`_tintJewelry` (so equipping never allocates or leaks), parented to the
+  body so it rides the walk + the Task 34 attack poses for free.
+- **`jewelryArchetype(def)` — a pure, tested selector** (`src/data/items.js`) mapping every
+  ring/necklace to `{ kind, archetype, material, gem }`: the shape by an explicit
+  `jewel:{ archetype, material, gem }` block or inferred from rarity, the **metal** by rarity
+  (silver → gold → dragonscale), and the **gem colour** by the item's own signature (a Ring
+  of Power's ruby, a Vigor amulet's green, …) or — with none — its **rarity colour**, so a
+  plain silver band and an epic gold gemband read apart. The 8 shipped jewelry items each
+  carry a signature `jewel.gem`.
+- **Correct anchoring, no clipping.** The necklace rides **in front of the chest** (its
+  pendant sits proud, clear of any breastplate's collar/gorget); `ring1`/`ring2` ride the
+  left/right hands and are **hidden whenever a glove covers the hand**, so a ring never clips
+  the glove (it reappears on the bare hand).
+- **High-tier only (phones skip it).** `wornDetailFor` gates jewelry to the **desktop high
+  tier**; both mobile tiers (low **and** medium) omit it entirely — a clean omission that
+  `refreshWornGear` tolerates (guarded like the belt/pauldrons), so equipping jewelry on a
+  phone is a no-op that never throws. The tiniest, most additive worn piece pays **zero**
+  phone budget.
+- **`test/items.test.js`** (+12 tests) — the selector (valid/type-appropriate archetype +
+  material + gem for every def; distinct shapes/materials by rarity; the gem = signature or
+  rarity colour; pure + total, honours an explicit block, clamps junk, deterministic), the
+  **high-tier gate**, the build (every necklace archetype under one anchor + every ring on
+  both slots), **shows-exactly-the-equipped-archetype** (necklace + each ring hand), the
+  **glove-cover hide rule**, a **throat / at-the-hand fit invariant** (a necklace part sits
+  proud in front of the chest; the ring seats at the hand), a **no-leak** equip-churn pass
+  while stepping the loop, and a **serialize/applySave round-trip** (no schema change — the
+  worn meshes rebuild from the equipped items). **Vitest 457 → 469.**
+- **`test/e2e/worn-jewelry.spec.js`** — a real-browser Playwright spec: on the desktop/high
+  tier it equips several necklaces (then rings on the bare hand), frames a close-up and
+  screenshots each, asserting each maps to its archetype and the shapes/gems **visibly
+  differ**; on the **Galaxy S24 Ultra** (portrait + landscape) tier — where jewelry is
+  intentionally omitted — it asserts equipping is a clean no-op and the character still
+  renders. Registered as the `worn-jewelry-desktop` + `worn-jewelry-s24-{portrait,landscape}`
+  projects (with the shared `GG_LOCAL_BABYLON` route hook for offline sandboxes).
+
+### Changed
+
+- **No `SAVE_VERSION` change.** The worn jewelry meshes derive entirely from the already-
+  serialized equipped items, so nothing new persists. No regression to combat, gear, quests,
+  zones/travel, day-night/weather, pause or save/load.
+
 ## [2026-07-02] — Task 34 — Rewrite weapon firing & melee attack animations from scratch
 
 Ninth of the **worn-equipment + combat overhaul** (Tasks 25–35), paired with Task 32's
