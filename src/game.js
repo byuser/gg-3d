@@ -51,7 +51,7 @@ import {
   ZONE_ADJ, zoneEdges, findRoute, nextZoneStep,
   bearingRad, dist2D, relativeHeading, compass8,
   mapVecToScreen, mapHeadingScreen, layoutMapLabels,
-  MAP_TARGETS, targetZoneOf, targetPoint, validWaypoint,
+  MAP_TARGETS, VENDOR_TARGETS, VENDOR_ID_SET, targetZoneOf, targetPoint, validWaypoint,
   searchTargets, worldLayout,
 } from "./data/worldmap.js";
 import {
@@ -4112,11 +4112,15 @@ import {
   // and leaves when the next wave begins. Walk up + press E to open the shop.
   // =========================================================================
   class Merchant {
-    constructor(scene, shadow, interaction, onOpen) {
+    // `pos` (optional {x,z,face}) places the merchant at a travelling-camp anchor
+    // in a wild zone (Task 40); omitted, it keeps its permanent hub-plaza spot.
+    constructor(scene, shadow, interaction, onOpen, pos) {
       const root = new BABYLON.TransformNode("merchant", scene);
-      root.position.set(0, 0, 0);
+      if (pos) { root.position.set(pos.x, 0, pos.z); if (pos.face != null) root.rotation.y = pos.face; }
+      else root.position.set(0, 0, 0);
       this.root = root;
       this.bob = 0;
+      this.interaction = interaction;
       this._build(scene, shadow);
 
       this.it = new Interactable(root, {
@@ -4189,6 +4193,12 @@ import {
       this.sign.position.y = 3.5 + Math.sin(this.bob * 2) * 0.12;
       this.coinIcon.rotation.y += dt * 2;
     }
+    // Free the merchant's interactable + all its meshes. Called on zone teardown
+    // (Task 40): the merchant is now rebuilt per zone, so it must not leak.
+    dispose() {
+      try { if (this.interaction && this.it) this.interaction.remove(this.it); } catch (e) {}
+      try { if (this.root) this.root.dispose(); } catch (e) {}
+    }
   }
 
   // =========================================================================
@@ -4198,11 +4208,15 @@ import {
   // more per level. Shares the Interactable contract like the merchant.
   // =========================================================================
   class Blacksmith {
-    constructor(scene, shadow, interaction, onOpen) {
+    // `pos` (optional): a travelling-camp anchor in a wild zone (Task 40); omitted,
+    // the smith keeps its permanent spot off to the side of the hub plaza.
+    constructor(scene, shadow, interaction, onOpen, pos) {
       const root = new BABYLON.TransformNode("smith", scene);
-      root.position.set(-7, 0, 3); // off to the side of the plaza
+      if (pos) { root.position.set(pos.x, 0, pos.z); if (pos.face != null) root.rotation.y = pos.face; }
+      else root.position.set(-7, 0, 3); // off to the side of the plaza
       this.root = root;
       this.bob = 0;
+      this.interaction = interaction;
       this._build(scene, shadow);
 
       this.it = new Interactable(root, { label: t("label.blacksmith"), range: 3.4, onInteract: () => onOpen() });
@@ -4259,6 +4273,12 @@ import {
       // Flicker the forge glow.
       if (this.glow) this.glow.intensity = 0.6 + Math.abs(Math.sin(this.bob * 5)) * 0.5;
     }
+    // Free the smith's interactable + all its meshes on zone teardown (Task 40):
+    // it is now rebuilt per zone, so it must dispose cleanly (never leak).
+    dispose() {
+      try { if (this.interaction && this.it) this.interaction.remove(this.it); } catch (e) {}
+      try { if (this.root) this.root.dispose(); } catch (e) {}
+    }
   }
 
   // =========================================================================
@@ -4268,9 +4288,12 @@ import {
   // Shares the Merchant/Blacksmith Interactable contract.
   // =========================================================================
   class Alchemist {
-    constructor(scene, shadow, interaction, onOpen) {
+    // `pos` (optional): a travelling-camp anchor in a wild zone (Task 40); omitted,
+    // she keeps the hub's "apothecary" landmark spot, opposite the smith.
+    constructor(scene, shadow, interaction, onOpen, pos) {
       const root = new BABYLON.TransformNode("alchemist", scene);
-      root.position.set(8, 0, 2); // the "apothecary" landmark, opposite the smith
+      if (pos) { root.position.set(pos.x, 0, pos.z); if (pos.face != null) root.rotation.y = pos.face; }
+      else root.position.set(8, 0, 2); // the "apothecary" landmark, opposite the smith
       this.root = root;
       this.bob = 0;
       this._build(scene, shadow);
@@ -6584,6 +6607,115 @@ import {
   }
 
   // =========================================================================
+  // Travelling vendors' camp (Task 40) — the merchant, blacksmith & apothecary
+  // trade in EVERY land, not only the hub. In the hub they keep their permanent
+  // plaza / forge / apothecary spots; in each WILD zone a small caravan camps by
+  // the road into the land (Task 22's road-edge entrance), so a player deep in the
+  // wilds can still buy, sell, repair and restock without trekking home. Placement
+  // is DETERMINISTIC — derived purely from the zone's entrance-road geometry +
+  // radius — and nudged clear of the fence + solid scenery so vendors never land
+  // in an obstacle, in the water or on the player's exact arrival tile.
+  // =========================================================================
+
+  // The zone's PRIMARY entrance: the road that leads back toward the home hub (so
+  // the camp reads as "parked by the road into town"). Falls back to the first
+  // portal for an isolated land. Headless-safe (reads plain portal data only).
+  function primaryEntrancePortal(world) {
+    const ports = (world && world.portals) || [];
+    if (!ports.length) return null;
+    const step = nextZoneStep(world.zone.id, HUB_ZONE); // next hop toward the hub
+    return ports.find((p) => p.to === step) || ports[0];
+  }
+
+  // Push a point out of any solid scenery and inside the zone fence (wild zones
+  // have no river). Deterministic + headless — pure geometry over world.obstacles.
+  function settleClearPoint(world, x, z, clearR) {
+    const R = (world && world.radius) || 60;
+    const obstacles = (world && world.obstacles) || [];
+    for (let it = 0; it < 5; it++) {
+      for (const o of obstacles) {
+        const dx = x - o.x, dz = z - o.z, md = o.r + clearR;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < md * md) {
+          const d = Math.sqrt(d2) || 1e-4, push = md - d;
+          x += (dx / d) * push; z += (dz / d) * push;
+        }
+      }
+      const fr = R - clearR - 2;
+      const hyp = Math.hypot(x, z);
+      if (hyp > fr) { x = (x / hyp) * fr; z = (z / hyp) * fr; }
+    }
+    return { x, z };
+  }
+
+  // The three vendor slots (+ the camp anchor) for a WILD zone: a small cluster
+  // beside the entrance road, each facing inward toward arriving players. Pure +
+  // deterministic so the placement is unit-testable across every zone.
+  function vendorCampSlots(world) {
+    const R = (world && world.radius) || 60;
+    const portal = primaryEntrancePortal(world);
+    let dir = portal && portal.dir ? { x: portal.dir.x, z: portal.dir.z } : { x: 0, z: 1 };
+    const dl = Math.hypot(dir.x, dir.z) || 1; dir = { x: dir.x / dl, z: dir.z / dl };
+    const nd = { x: dir.z, z: -dir.x };  // road normal (beside the lane)
+    const along = Math.max(10, R - 22);  // inside the arrival tile (arrival ≈ R-13)
+    const side = 8;                       // beside the road, off the player's landing tile
+    // Local (forward = dir, sideways = nd) offsets for a believable 3-stall camp.
+    const layout = { merchant: [0, 0], blacksmith: [6, 4], apothecary: [-6, 4] };
+    const place = (off) => {
+      const x = dir.x * (along + off[0]) + nd.x * (side + off[1]);
+      const z = dir.z * (along + off[0]) + nd.z * (side + off[1]);
+      const p = settleClearPoint(world, x, z, 2.2);
+      p.face = Math.atan2(-p.x, -p.z); // face the zone centre (toward the player path)
+      return p;
+    };
+    const anchor = settleClearPoint(world, dir.x * along + nd.x * side, dir.z * along + nd.z * side, 2.2);
+    return {
+      anchor, dir, nd,
+      merchant: place(layout.merchant),
+      blacksmith: place(layout.blacksmith),
+      apothecary: place(layout.apothecary),
+    };
+  }
+
+  // A small decorative camp (a campfire ring, supply crates + a pennant) that ties
+  // the three wild-zone vendors together as one travelling caravan. Purely
+  // cosmetic and feature-detected; adds NO light (the vendors' own glows light the
+  // camp) and disposes as a unit so travel never leaks it.
+  function buildVendorCamp(scene, shadow, slots) {
+    const root = new BABYLON.TransformNode("vendorCamp", scene);
+    root.position.set(slots.anchor.x, 0, slots.anchor.z);
+    const add = (m, cast) => { if (!m) return m; m.parent = root; if (cast && shadow && shadow.addShadowCaster) shadow.addShadowCaster(m); return m; };
+    try {
+      const woodM = mat(scene, "vcWood", "#6a4a2a");
+      const emberM = emat(scene, "vcEmber", "#ff7a3a", 0.9);
+      const stoneM = mat(scene, "vcStone", "#7a7f88");
+      const crateM = mat(scene, "vcCrate", "#8a6a3a");
+      // Campfire: crossed logs + a glowing ember cone (emissive, no point light).
+      for (let i = 0; i < 3; i++) {
+        const log = add(cyl(scene, "vcLog" + i, 0.16, 0.16, 1.1, woodM), true);
+        log.rotation.z = Math.PI / 2; log.rotation.y = (i / 3) * Math.PI; log.position.y = 0.16;
+      }
+      const flame = add(cone(scene, "vcFlame", 0.5, 0.02, 0.7, emberM)); flame.position.y = 0.55;
+      // A ring of hearth stones.
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const s = add(sphere(scene, "vcStone" + i, 0.28, stoneM), true);
+        s.position.set(Math.cos(a) * 0.9, 0.12, Math.sin(a) * 0.9); s.scaling.y = 0.6;
+      }
+      // Supply crates stacked beside the fire.
+      const c1 = add(box(scene, "vcCrate1", 0.9, 0.9, 0.9, crateM), true); c1.position.set(2.2, 0.45, -0.4); c1.rotation.y = 0.3;
+      const c2 = add(box(scene, "vcCrate2", 0.7, 0.7, 0.7, crateM), true); c2.position.set(2.5, 1.25, -0.2); c2.rotation.y = -0.2;
+      // A tall pennant so the camp is visible from afar.
+      const pole = add(cyl(scene, "vcPole", 0.1, 0.1, 4.2, woodM), true); pole.position.set(-2.2, 2.1, 0.6);
+      const flag = add(box(scene, "vcFlag", 1.4, 0.7, 0.06, emat(scene, "vcFlagM", "#ffcf3a", 0.25))); flag.position.set(-1.5, 3.6, 0.6);
+    } catch (e) {}
+    return {
+      root,
+      dispose() { try { if (root) root.dispose(); } catch (e) {} },
+    };
+  }
+
+  // =========================================================================
   // populateAdventure — lay the HUB-only story fixtures on the freshly built
   // home world: the deterministic resource set and the castle build site on
   // Castle Hill. (Story NPCs are placed per-zone by spawnZoneNpcs so they appear
@@ -6602,21 +6734,35 @@ import {
   // =========================================================================
   // setupZoneContent — lay the per-zone CONTENT layer on a freshly built world.
   // EVERY zone gets its resident story NPCs (quest-givers placed at the landmark
-  // that belongs to that zone — Task 38) and its themed, deterministic resource
-  // set. The hub (Meadowgate) additionally gets the merchant, blacksmith,
-  // alchemist, the castle build site and a few artifacts. Monsters are handled
-  // separately by the SpawnDirector.
+  // that belongs to that zone — Task 38), its themed deterministic resource set,
+  // AND the three travelling vendors (Task 40 — merchant, blacksmith, apothecary):
+  // at their permanent plaza/forge/apothecary spots in the hub, or a caravan camp
+  // by the entrance road in a wild zone. The hub additionally gets the castle
+  // build site + a few artifacts (still hub-only). Monsters are handled separately
+  // by the SpawnDirector.
   // =========================================================================
   function setupZoneContent(scene, world, interaction, player, state) {
     const zone = world.zone;
+    // Vendor placement: hub → default class spots (permanent village plaza / forge
+    // / apothecary); wild zone → a deterministic travelling-camp cluster beside the
+    // road into the land, with a small decorative camp tying them together.
+    let slots = null;
+    if (!zone.home) {
+      slots = vendorCampSlots(world);
+      state.vendorCamp = buildVendorCamp(scene, world.shadow, slots);
+    } else {
+      state.vendorCamp = null;
+    }
+    // Spawn all three vendors in EVERY zone (Task 40 — the fix for hub-only trade).
+    const merchant = new Merchant(scene, world.shadow, interaction, () => Shop.openShop("merchant"), slots && slots.merchant);
+    state.merchant = merchant; merchant.show();
+    const blacksmith = new Blacksmith(scene, world.shadow, interaction, () => Anvil.openAnvil(), slots && slots.blacksmith);
+    state.blacksmith = blacksmith; blacksmith.show();
+    // The dedicated alchemist (Task 21): sells potions + basic ingredients.
+    const alchemist = new Alchemist(scene, world.shadow, interaction, () => Shop.openShop("alchemist"), slots && slots.apothecary);
+    state.alchemist = alchemist; alchemist.show();
+
     if (zone.home) {
-      const merchant = new Merchant(scene, world.shadow, interaction, () => Shop.openShop("merchant"));
-      state.merchant = merchant; merchant.show();
-      const blacksmith = new Blacksmith(scene, world.shadow, interaction, () => Anvil.openAnvil());
-      state.blacksmith = blacksmith; blacksmith.show();
-      // The dedicated alchemist (Task 21): sells potions + basic ingredients.
-      const alchemist = new Alchemist(scene, world.shadow, interaction, () => Shop.openShop("alchemist"));
-      state.alchemist = alchemist; alchemist.show();
       populateAdventure(scene, world, interaction, player, state);
       // Re-raise any castle parts already built this run, then re-wake the
       // dragon if the keep was finished but it hasn't been slain.
@@ -6624,7 +6770,7 @@ import {
       if (state.castle) state.castle.resummon();
       for (let i = 0; i < 3; i++) spawnArtifact(scene, world, interaction, player, state);
     } else {
-      state.merchant = null; state.blacksmith = null; state.alchemist = null; state.castle = null;
+      state.castle = null; // castle/dragon stay hub-only (Task 40 un-gates vendors only)
       // Wild zones get their themed resource set from the same DETERMINISTIC,
       // PERSISTENT planner (Task 22) — so gathering still works out in the world,
       // counts stay stable across travel, and per-kind caps hold everywhere.
@@ -8522,16 +8668,41 @@ import {
   const PORTAL_COL = { path: "#9be36b", bridge: "#6cc6ff", cave: "#c69bff" };
   const NPC_STATUS_COL = { turnin: "#5be0a0", new: "#ffd34e", active: "#6cc6ff", done: "#9aa0a6" };
 
+  // The live vendor instance for a "vendor" waypoint id (Task 40). The apothecary
+  // waypoint maps to the Alchemist vendor. Returns null when not spawned yet.
+  function vendorForId(state, id) {
+    if (!state) return null;
+    if (id === "merchant") return state.merchant;
+    if (id === "blacksmith") return state.blacksmith;
+    if (id === "apothecary") return state.alchemist;
+    return null;
+  }
+  // Runtime wrappers over the pure worldmap helpers: a travelling vendor (Task 40)
+  // has no fixed home, so its target zone is ALWAYS the current land and its point
+  // is the live camp position. Everything else defers to the data-driven helpers.
+  function waypointZoneOf(kind, id, state) {
+    if (kind === "vendor") return state ? state.zoneId : null;
+    return targetZoneOf(kind, id);
+  }
+  function waypointPoint(kind, id, state) {
+    if (kind === "vendor") {
+      const v = vendorForId(state, id);
+      const r = v && v.root;
+      return r ? { x: r.position.x, z: r.position.z } : null;
+    }
+    return targetPoint(kind, id);
+  }
+
   // Resolve a {kind,id} waypoint into live guidance for the current zone:
   // { inZone, targetZone, point?, portal?, nextZone?, dx, dz, dist, arrived }.
   function resolveWaypoint(wp, state, player) {
     if (!validWaypoint(wp) || !state || !player) return null;
     const cur = state.zoneId;
-    const tz = targetZoneOf(wp.kind, wp.id);
+    const tz = waypointZoneOf(wp.kind, wp.id, state);
     if (!tz) return null;
     const p = player.position;
     if (cur === tz) {
-      const pt = targetPoint(wp.kind, wp.id);
+      const pt = waypointPoint(wp.kind, wp.id, state);
       if (!pt) return { inZone: true, targetZone: tz, dist: 0, arrived: true };
       const dx = pt.x - p.x, dz = pt.z - p.z, dist = Math.hypot(dx, dz);
       return { inZone: true, targetZone: tz, point: pt, dx, dz, dist, arrived: dist <= CONFIG.questReachRange };
@@ -8626,6 +8797,9 @@ import {
     const glyph = (px, pz, col) => { const s = proj(px, pz); mmDot(ctx, s.x, s.y, labels ? 4 : 3.2, col, "#1a1a1a"); };
     if (state.merchant && state.merchant.visible) glyph(state.merchant.root.position.x, state.merchant.root.position.z, "#ffcf3a");
     if (state.blacksmith && state.blacksmith.visible) glyph(state.blacksmith.root.position.x, state.blacksmith.root.position.z, "#ff8a4e");
+    // The apothecary glyph — drawn everywhere now (Task 40; the minimap previously
+    // omitted the alchemist even in the hub).
+    if (state.alchemist && state.alchemist.visible) glyph(state.alchemist.root.position.x, state.alchemist.root.position.z, "#9ad6a0");
     if (state.castle && state.castle.root) glyph(state.castle.root.position.x, state.castle.root.position.z, "#ff9d5c");
     // Boss / dragon.
     const liveBoss = state.dragon || state.boss;
@@ -8720,7 +8894,7 @@ import {
       }
     }
     if (waypoint) {
-      const tz = targetZoneOf(waypoint.kind, waypoint.id);
+      const tz = waypointZoneOf(waypoint.kind, waypoint.id, state);
       if (tz && lay[tz]) { const p = proj(lay[tz]); mmRing(ctx, p.x, p.y, 17); }
     }
     // Zone names last, clamped + de-overlapped + haloed, so they read fully.
@@ -8851,6 +9025,7 @@ import {
       if (tg.kind === "zone") return tZoneName(ZONE_BY_ID[tg.id]);
       if (tg.kind === "location") return tLocationName(tg.id);
       if (tg.kind === "npc") return tNpcName(tg.id);
+      if (tg.kind === "vendor") return t("vendor." + tg.id); // Task 40 travelling vendors
       return "";
     },
     targetIcon(tg) {
@@ -8909,7 +9084,7 @@ import {
 
     renderResults() {
       if (!dom.mapResults) return;
-      const order = { zone: 0, location: 1, npc: 2 };
+      const order = { zone: 0, location: 1, npc: 2, vendor: 3 };
       const results = searchTargets(this.query, (tg) => this.targetName(tg))
         .slice()
         .sort((a, b) => (order[a.kind] - order[b.kind]) || this.targetName(a).localeCompare(this.targetName(b)));
@@ -8920,7 +9095,7 @@ import {
         dom.mapResults.appendChild(empty); return;
       }
       for (const tg of results.slice(0, 60)) {
-        const tz = targetZoneOf(tg.kind, tg.id);
+        const tz = waypointZoneOf(tg.kind, tg.id, WorldMap.state);
         const row = document.createElement("button");
         const selected = this.sel && this.sel.kind === tg.kind && this.sel.id === tg.id;
         row.className = "map-result" + (selected ? " sel" : "");
@@ -8938,8 +9113,8 @@ import {
       const wp = WorldMap.state && WorldMap.state.waypoint;
       let html = "";
       if (this.sel) {
-        const tz = targetZoneOf(this.sel.kind, this.sel.id);
         const cur = WorldMap.state ? WorldMap.state.zoneId : HUB_ZONE;
+        const tz = waypointZoneOf(this.sel.kind, this.sel.id, WorldMap.state);
         let route;
         if (tz === cur) route = t("map.routeHere");
         else {
@@ -8986,8 +9161,8 @@ import {
         const proj = (wx, wz) => ({ x: W / 2 - wx * base + this.view.ox, y: H / 2 + wz * base + this.view.oy });
         drawZoneScene(ctx, { W, H, world, state, player, waypoint: state.waypoint, proj, scale: base, labels: true });
         // Highlight an in-zone selected target.
-        if (this.sel && targetZoneOf(this.sel.kind, this.sel.id) === state.zoneId) {
-          const pt = targetPoint(this.sel.kind, this.sel.id);
+        if (this.sel && waypointZoneOf(this.sel.kind, this.sel.id, state) === state.zoneId) {
+          const pt = waypointPoint(this.sel.kind, this.sel.id, state);
           if (pt) mmRing(ctx, proj(pt.x, pt.z).x, proj(pt.x, pt.z).y, 9);
         }
       }
@@ -9486,8 +9661,9 @@ import {
     if (state.merchant && state.merchant.dispose) { try { state.merchant.dispose(); } catch (e) {} }
     if (state.blacksmith && state.blacksmith.dispose) { try { state.blacksmith.dispose(); } catch (e) {} }
     if (state.alchemist && state.alchemist.dispose) { try { state.alchemist.dispose(); } catch (e) {} }
+    if (state.vendorCamp && state.vendorCamp.dispose) { try { state.vendorCamp.dispose(); } catch (e) {} }
     if (state.castle && state.castle.dispose) { try { state.castle.dispose(); } catch (e) {} }
-    state.merchant = null; state.blacksmith = null; state.alchemist = null; state.castle = null;
+    state.merchant = null; state.blacksmith = null; state.alchemist = null; state.vendorCamp = null; state.castle = null;
     state.boss = null; state.dragon = null;
     state.pendingAttack = null;   // drop any mid-attack hit queued in the old zone
     if (interaction && interaction.clear) interaction.clear();
@@ -9569,7 +9745,7 @@ import {
       relicsFound: 0,   // lifetime relics collected (recap; survives castle builds)
       playSec: 0,       // accumulated active playtime (seconds) — save-slot metadata
       waveStats: { kills: 0, artifacts: 0, coins: 0 },
-      merchant: null, blacksmith: null, alchemist: null, boss: null,
+      merchant: null, blacksmith: null, alchemist: null, vendorCamp: null, boss: null,
       pendingAttack: null, // attack awaiting its strike (impact / release) frame
     };
 
@@ -13436,6 +13612,9 @@ import {
       // ---- RPG world / zones ----
       ZONES, ZONE_BY_ID, HUB_ZONE, SpawnDirector, ZoneManager, buildWorld,
       setupZoneContent, teardownZone, questGiversForZone, spawnZoneNpcs,
+      // ---- Travelling vendors: per-zone camp placement (Task 40) ----
+      primaryEntrancePortal, settleClearPoint, vendorCampSlots, buildVendorCamp,
+      vendorForId, waypointZoneOf, waypointPoint, VENDOR_TARGETS, VENDOR_ID_SET,
       // ---- Minimap / world map / guided waypoint (Task 13, fixes Task 20) ----
       WorldMap, WorldMapUI, resolveWaypoint,
       ZONE_ADJ, zoneEdges, findRoute, nextZoneStep, bearingRad, dist2D,

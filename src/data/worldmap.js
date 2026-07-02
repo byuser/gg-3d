@@ -154,32 +154,54 @@ import { LOCATIONS, LOCATION_BY_ID, NPC_DATA, NPC_BY_ID, landmarkZone } from "./
     return out;
   }
 
+  // ---- Travelling vendors (Task 40) -----------------------------------------
+  // The merchant, blacksmith and apothecary now trade in EVERY land — a caravan
+  // camped by the road into each wild zone, and the permanent plaza/forge/
+  // apothecary in the hub. Unlike a landmark or NPC they have NO single home zone:
+  // they follow the player, so a "vendor" waypoint resolves to the vendor in the
+  // CURRENT zone at runtime (see the game's waypointZoneOf / waypointPoint). Listed
+  // here as pure data so they appear in the map search + the guided-waypoint UI;
+  // display names + the live in-zone point are supplied by the runtime.
+  const VENDOR_TARGETS = [
+    { kind: "vendor", id: "merchant", icon: "🪙" },
+    { kind: "vendor", id: "blacksmith", icon: "⚒️" },
+    { kind: "vendor", id: "apothecary", icon: "⚗️" },
+  ];
+  const VENDOR_ID_SET = {};
+  for (const v of VENDOR_TARGETS) VENDOR_ID_SET[v.id] = true;
+
   // ---- Map targets (searchable) ---------------------------------------------
-  // Every zone, every landmark and every story NPC, as data only (no display
-  // names — the UI resolves those through i18n so this index stays translation-
-  // agnostic). Each landmark / NPC carries its HOME ZONE (Task 38: grove → forest,
-  // seaside → shore, …; the hub landmarks stay in the meadow) plus its in-zone
-  // point, so the world-map / waypoint route to where the NPC actually stands.
+  // Every zone, every landmark, every story NPC and the three travelling vendors,
+  // as data only (no display names — the UI resolves those through i18n so this
+  // index stays translation-agnostic). Each landmark / NPC carries its HOME ZONE
+  // (Task 38: grove → forest, seaside → shore, …; the hub landmarks stay in the
+  // meadow) plus its in-zone point, so the world-map / waypoint route to where the
+  // NPC actually stands. Vendor NPCs (the apothecary) are NOT listed as fixed NPC
+  // targets — they are travelling vendors (Task 40), resolved to the current land.
   function mapTargets() {
     const out = [];
     for (const z of ZONES) out.push({ kind: "zone", id: z.id, zoneId: z.id, icon: z.icon });
     for (const l of LOCATIONS) out.push({ kind: "location", id: l.id, zoneId: landmarkZone(l.id), x: l.x, z: l.z, icon: l.icon });
     for (const n of NPC_DATA) {
+      if (n.vendor) continue; // travelling vendors are added below, not pinned to a home zone
       const l = LOCATION_BY_ID[n.loc];
       out.push({ kind: "npc", id: n.id, zoneId: landmarkZone(n.loc), x: (l ? l.x : 0) + 3, z: (l ? l.z : 0) + 3, icon: n.icon });
     }
+    for (const v of VENDOR_TARGETS) out.push({ kind: v.kind, id: v.id, icon: v.icon });
     return out;
   }
   const MAP_TARGETS = mapTargets();
 
   // Which zone a target lives in, and its in-zone point (a whole zone has no
   // specific point — arrival just means standing in it). Landmarks + NPCs resolve
-  // to their home zone (Task 38) so cross-zone routing leads the player there.
+  // to their home zone (Task 38) so cross-zone routing leads the player there. A
+  // travelling vendor (Task 40) has no fixed home — it returns null here and is
+  // resolved to the CURRENT zone + the live vendor point by the runtime.
   function targetZoneOf(kind, id) {
     if (kind === "zone") return ZONE_BY_ID[id] ? id : null;
     if (kind === "location") return LOCATION_BY_ID[id] ? landmarkZone(id) : null;
     if (kind === "npc") { const n = NPC_BY_ID[id]; return n ? landmarkZone(n.loc) : null; }
-    return null;
+    return null; // "vendor" (and unknown kinds): resolved dynamically at runtime
   }
   function targetPoint(kind, id) {
     if (kind === "location") { const l = LOCATION_BY_ID[id]; return l ? { x: l.x, z: l.z } : null; }
@@ -188,7 +210,7 @@ import { LOCATIONS, LOCATION_BY_ID, NPC_DATA, NPC_BY_ID, landmarkZone } from "./
       const l = n && LOCATION_BY_ID[n.loc];
       return l ? { x: l.x + 3, z: l.z + 3 } : null;
     }
-    return null;
+    return null; // "vendor": the live camp point comes from the runtime, not data
   }
   // Is `wp` (a {kind,id}) a valid, resolvable target?
   function validWaypoint(wp) {
@@ -196,6 +218,7 @@ import { LOCATIONS, LOCATION_BY_ID, NPC_DATA, NPC_BY_ID, landmarkZone } from "./
     if (wp.kind === "zone") return !!ZONE_BY_ID[wp.id];
     if (wp.kind === "location") return !!LOCATION_BY_ID[wp.id];
     if (wp.kind === "npc") return !!NPC_BY_ID[wp.id];
+    if (wp.kind === "vendor") return !!VENDOR_ID_SET[wp.id];
     return false;
   }
 
@@ -258,6 +281,6 @@ export {
   ZONE_ADJ, zoneEdges, findRoute, nextZoneStep,
   bearingRad, dist2D, wrapAngle, relativeHeading, compass8, COMPASS_KEYS,
   mapVecToScreen, mapHeadingScreen, layoutMapLabels,
-  mapTargets, MAP_TARGETS, targetZoneOf, targetPoint, validWaypoint,
+  mapTargets, MAP_TARGETS, VENDOR_TARGETS, VENDOR_ID_SET, targetZoneOf, targetPoint, validWaypoint,
   normalizeText, matchesQuery, searchTargets, worldLayout,
 };

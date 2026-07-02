@@ -627,7 +627,10 @@ ok(!!T.state.merchant && !!T.state.castle, "hub has the merchant + castle build 
 zm._swap("meadow", "forest", T.ZONE_BY_ID.forest);
 ok(T.world.zone.id === "forest", "streamed into Whisperwood Deep");
 ok(T.state.zoneId === "forest" && T.waves.zone.id === "forest", "zone id + spawn director updated");
-ok(T.state.merchant === null && T.state.castle === null, "wild zone has no vendor / castle");
+// Task 40: the travelling vendors now trade in EVERY land (a caravan by the road),
+// so a wild zone HAS all three; the castle/dragon stay hub-only.
+ok(!!T.state.merchant && !!T.state.blacksmith && !!T.state.alchemist, "wild zone has the travelling vendors (merchant, blacksmith, apothecary)");
+ok(T.state.castle === null, "wild zone still has no castle (hub-only)");
 const forestPop = T.state.monsters.filter((m) => m.alive).length;
 ok(forestPop > 0, `forest seeded ${forestPop} resident monsters at spawn points`);
 ok(Math.hypot(T.player.position.x, T.player.position.z) > 1, "player placed at the arrival portal");

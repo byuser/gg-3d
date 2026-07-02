@@ -23,6 +23,7 @@ import {
   mapHeadingScreen,
   layoutMapLabels,
   MAP_TARGETS,
+  VENDOR_TARGETS,
   targetZoneOf,
   targetPoint,
   validWaypoint,
@@ -215,8 +216,12 @@ describe("Task 20 — map-label layout (no circular clipping, no overlap)", () =
 
 describe("Task 13 — map targets, search & layout (pure)", () => {
   it("derives every zone, landmark and NPC as a target (no duplication)", () => {
-    expect(MAP_TARGETS.length).toBe(ZONES.length + LOCATIONS.length + NPC_DATA.length);
+    // Task 40: vendor NPCs (the apothecary) are travelling vendors, not fixed NPC
+    // targets — they are excluded here and re-added as the three vendor targets.
+    const nonVendorNpcs = NPC_DATA.filter((n) => !n.vendor).length;
+    expect(MAP_TARGETS.length).toBe(ZONES.length + LOCATIONS.length + nonVendorNpcs + VENDOR_TARGETS.length);
     expect(MAP_TARGETS.filter((t) => t.kind === "zone").length).toBe(ZONES.length);
+    expect(MAP_TARGETS.filter((t) => t.kind === "vendor").length).toBe(3);
     // Each landmark / NPC lives in its HOME zone (Task 38): hub landmarks stay in
     // the meadow, wild landmarks resolve to their own land.
     expect(targetZoneOf("zone", "forest")).toBe("forest");
@@ -240,6 +245,19 @@ describe("Task 13 — map targets, search & layout (pure)", () => {
     expect(validWaypoint({ kind: "zone", id: "ghost" })).toBe(false);
     expect(validWaypoint(null)).toBe(false);
     expect(validWaypoint({ kind: "bogus", id: "x" })).toBe(false);
+  });
+
+  it("travelling vendors are targets with no fixed home (Task 40)", () => {
+    for (const v of VENDOR_TARGETS) {
+      expect(validWaypoint({ kind: "vendor", id: v.id })).toBe(true);
+      // No fixed home zone / point — the runtime resolves them to the current land.
+      expect(targetZoneOf("vendor", v.id)).toBe(null);
+      expect(targetPoint("vendor", v.id)).toBe(null);
+    }
+    expect(validWaypoint({ kind: "vendor", id: "ghost" })).toBe(false);
+    // The apothecary VENDOR replaces the old hub-only apothecary NPC map target.
+    expect(MAP_TARGETS.some((t) => t.kind === "npc" && t.id === "alchemist")).toBe(false);
+    expect(MAP_TARGETS.some((t) => t.kind === "vendor" && t.id === "apothecary")).toBe(true);
   });
 
   it("search is case/diacritic-folding and matches by display name", () => {

@@ -30,7 +30,7 @@ const WILD_GIVERS = [
 describe("Task 38 — landmark → zone placement (pure)", () => {
   it("every quest-giver's landmark resolves to a real zone", () => {
     for (const data of NPC_DATA) {
-      if (data.vendor) continue; // vendors are placed separately, hub-only
+      if (data.vendor) continue; // vendors are placed separately, in every land (Task 40)
       const z = landmarkZone(data.loc);
       expect(ZONE_BY_ID[z], `${data.id} @ ${data.loc} → ${z}`).toBeTruthy();
     }
