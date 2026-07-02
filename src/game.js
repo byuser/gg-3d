@@ -367,6 +367,22 @@ import {
     return { pauldrons: true, belt: true, gloves: true, boots: true, cloak: true, cloakSway: true, jewelry: high, helmDetail: true, chestDetail: true, pauldronDetail: true, gloveDetail: true, beltDetail: true, bootDetail: true, weaponDetail: true, jewelryDetail: high };
   }
 
+  // ---- Loadout fit tables (Task 35) -------------------------------------
+  // The final full-loadout integration pass keeps its cross-part placement knobs
+  // in ONE auditable place so the clean fit can't silently rot as future gear /
+  // animations land. Each category task (25–33) owns the SHAPE of its part in its
+  // own builder; these are the shared seams where two parts (or a part + the body)
+  // meet and had to be co-tuned once EVERYTHING is worn at once + attacking.
+  //
+  // GRIP_SEAT — where the held weapon sits in the fist. Seated outboard (x, away
+  // from the body centre) + forward (z) of the bare hand so a drawn weapon's wide
+  // hilt clears the hip/waist at rest (see _buildHeldWeapons). SWORD_WINDUP_ROLL —
+  // how far the sword's non-overhead slash cocks ACROSS the body on the wind-up;
+  // capped so the blade grazes but never plunges through the chest (the strike/hit
+  // frame is untouched, so Task 34's impact timing + reach are unchanged).
+  const GRIP_SEAT = { x: 0.13, z: 0.2 };
+  const SWORD_WINDUP_ROLL = 0.45; // was 0.8 — a tighter cock keeps the wind-up blade off the chest (strike frame unchanged)
+
   // ---- Cloak billow (Task 31) -------------------------------------------
   // Tuning for the procedural cloak sway, kept in one place so the pure updater and
   // the fit invariant read the same clamps. The cloak hangs from a back pivot behind
@@ -1248,12 +1264,19 @@ import {
 
       // Main-hand grip (right hand) + a mirror off-hand grip (left hand, for a dual-
       // wielded second one-hander). Built once; the class groups hang under them.
+      // GRIP_SEAT (Task 35 loadout-fit): the grip is seated a touch OUTBOARD (±x, away
+      // from the body's centre — +x on the right hand, −x on the mirrored left) and
+      // FORWARD (+z) of the bare hand, so a drawn weapon's wide hilt (a sword/dagger
+      // crossguard, an axe head) rests PROUD of the hip/waist at idle instead of the
+      // guard's inner tip dipping into the torso. It's a grip PLACEMENT tweak only —
+      // the weapon stays gripped at the fist (Task 32's grip-local envelope is
+      // unchanged) and the whole weapon still rides the hand through every attack.
       const grip = new BABYLON.TransformNode("wandGrip", scene);
-      grip.parent = this.armR; grip.position.set(0, -0.58, 0.12); // at the hand
+      grip.parent = this.armR; grip.position.set(GRIP_SEAT.x, -0.58, GRIP_SEAT.z); // at the hand, seated out + forward
       grip.rotation.x = -0.5; // angle the weapon slightly forward/up out of the fist
       this.wandGrip = grip;
       const offGrip = new BABYLON.TransformNode("offGrip", scene);
-      offGrip.parent = this.armL; offGrip.position.set(0, -0.58, 0.12);
+      offGrip.parent = this.armL; offGrip.position.set(-GRIP_SEAT.x, -0.58, GRIP_SEAT.z); // mirror: outboard on the left
       offGrip.rotation.x = -0.5;
       this.offGrip = offGrip;
 
@@ -3085,7 +3108,7 @@ import {
         const dir = a.comboStep === 1 ? -1 : 1;
         if (ph === "windup") {
           if (overhead) { R(this.armR, "x", 1.3, K); R(this.armR, "z", 0, K); R(this.lean, "x", -0.12, K); R(this.lean, "y", -0.15, K); }
-          else { R(this.armR, "x", 0.85, K); R(this.armR, "z", -0.8 * dir, K); R(this.lean, "y", -0.4 * dir, K); }
+          else { R(this.armR, "x", 0.85, K); R(this.armR, "z", -SWORD_WINDUP_ROLL * dir, K); R(this.lean, "y", -0.3 * dir, K); }
           R(this.legR, "x", 0.12, K);
         } else if (ph === "strike") {
           if (overhead) { R(this.armR, "x", -1.7, 0.6); R(this.armR, "z", 0, 0.6); R(this.lean, "x", 0.2, 0.6); R(this.lean, "y", 0, 0.6); }
@@ -13360,6 +13383,8 @@ import {
       weaponArchetype, weaponClassOf, WEAPON_ARCHETYPES, WEAPON_MATERIALS, WEAPON_MATERIAL_TINT,
       // ---- Visible jewelry: necklace + rings on the character (Task 33) ----
       jewelryArchetype, NECKLACE_ARCHETYPES, RING_ARCHETYPES, JEWELRY_MATERIALS, JEWELRY_MATERIAL_TINT,
+      // ---- Full-loadout fit & clipping integration (Task 35) ----
+      GRIP_SEAT, SWORD_WINDUP_ROLL,
 
       // ---- Responsive HUD / drag-to-slot / fullscreen (Task 16) ----
       dragSlotReducer, pointerDragSupported, Fullscreen,

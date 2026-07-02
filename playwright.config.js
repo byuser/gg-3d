@@ -349,6 +349,28 @@ export default defineConfig({
       testMatch: /worn-jewelry\.spec\.js/,
       use: s24Landscape,
     },
+    // Full-loadout fit & clipping integration (Task 35): boot the built site, dress Lily
+    // in a full suit + each of the six weapon classes at once, pin her at the class's
+    // strike pose and screenshot her whole body, asserting the loadout + attack render
+    // together, the six fully-geared strikes visibly differ, and no console errors. Needs
+    // a real WebGL canvas. Runs at desktop AND the Galaxy S24 Ultra profile (portrait +
+    // landscape) since it's an on-character visual (the phone tiers' clean omissions are
+    // handled by the spec), per Task 35.
+    {
+      name: "worn-loadout-desktop",
+      testMatch: /worn-loadout\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "worn-loadout-s24-portrait",
+      testMatch: /worn-loadout\.spec\.js/,
+      use: s24Portrait,
+    },
+    {
+      name: "worn-loadout-s24-landscape",
+      testMatch: /worn-loadout\.spec\.js/,
+      use: s24Landscape,
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",
