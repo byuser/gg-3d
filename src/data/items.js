@@ -557,6 +557,79 @@
     return { archetype, material };
   }
 
+  // ---- Held-weapon classes (Task 32) ------------------------------------
+  // Each equipped weapon renders as a real, layered weapon of its actual CLASS in
+  // Lily's hand — a sword (blade + crossguard + grip + pommel), an axe (haft + bladed
+  // head), a dagger (short blade + guard), a bow (upper/lower limbs + string + grip), a
+  // staff (long shaft + head/orb) or a wand (shaft + crystal tip) — instead of the old
+  // three recoloured stand-ins (one flat blade, one torus bow, one crystal). As with the
+  // worn-gear selectors, the 3D CLASS is chosen by a pure, testable selector so the
+  // held-weapon builder (src/game.js `_buildHeldWeapons`) pre-builds every class once
+  // (per grip) and just toggles the matching one on equip. UNLIKE the armour selectors
+  // (whose archetype implies a material), a weapon's CLASS is intrinsic to how it FIGHTS,
+  // so it is inferred from the weapon's own mechanics — ranged + projectile shape + hands
+  // for a bow/staff/wand; melee arc / speed / hands for a sword/axe/dagger — while the
+  // MATERIAL follows rarity (iron → steel → gold → dragonscale). A weapon def may pin
+  // either explicitly via a `held: { archetype, material }` block; otherwise ANY weapon
+  // maps to a valid pair the builder can draw. The per-item accent colour (`weapon.color`)
+  // still tints the metal on equip, so two steel swords of different weapons read apart —
+  // this is the material/rarity variety the mesh keeps through the attacks (the hookable
+  // trail anchor the builder exposes is what Task 34's from-scratch attacks animate).
+  //
+  //   archetype: "sword"  blade + crossguard + grip + pommel   (1H/2H melee, mid arc)
+  //              "axe"    haft + bladed head (+ back spike)     (heavy / wide-arc melee)
+  //              "dagger" short blade + guard + grip            (fast / short 1H melee)
+  //              "bow"    riser + upper/lower limbs + string    (ranged, "arrow")
+  //              "staff"  long shaft + head/orb + prongs        (2H ranged, "bolt")
+  //              "wand"   short shaft + glowing crystal tip     (1H ranged, "bolt")
+  //   material:  "wood" | "iron" | "steel" | "gold" | "crystal" | "dragonscale"
+  const WEAPON_ARCHETYPES = ["sword", "axe", "dagger", "bow", "staff", "wand"];
+  const WEAPON_MATERIALS = ["wood", "iron", "steel", "gold", "crystal", "dragonscale"];
+  // Base tints per material (the per-item accent colour recolours the metal on equip, but
+  // a sensible base keeps the un-painted headless build + any preview readable).
+  const WEAPON_MATERIAL_TINT = {
+    wood: "#6b4a2c", iron: "#b8c0cc", steel: "#d2dae6", gold: "#e8c057",
+    crystal: "#9fd0ff", dragonscale: "#b8603a",
+  };
+  // Infer a weapon's CLASS from how it actually fights (pure + total): ranged weapons
+  // split by projectile shape + hands (arrow → bow; bolt → staff if two-handed, else
+  // wand); melee weapons split by feel (fast + short one-hander → dagger; wide sweep →
+  // axe; else sword). An explicit `held.archetype` always wins.
+  function weaponClassOf(def) {
+    const h = def && def.held;
+    if (h && h.archetype) return h.archetype;
+    const w = def && def.weapon;
+    if (!w) return "sword";
+    if (w.ranged) {
+      if (w.shape === "arrow") return "bow";
+      return def && def.hands === 2 ? "staff" : "wand";
+    }
+    const melee = w.melee || {};
+    const twoH = def && def.hands === 2;
+    const fast = (w.cooldown != null ? w.cooldown : 0.5) <= 0.26;
+    const wide = (melee.arc || 0) >= 2.2;
+    if (!twoH && fast && (melee.range != null ? melee.range : 3) <= 2.7) return "dagger";
+    if (wide) return "axe";
+    return "sword";
+  }
+  // Resolve a weapon item def to a { archetype, material } pair. Pure + total: the class
+  // from weaponClassOf (mechanics, or an explicit `held` block), the material from rarity
+  // (legendary → dragonscale, epic → gold, rare → steel, else iron) unless the `held`
+  // block pins one; finally clamped to the known lists so the result is always a pair the
+  // builder can draw.
+  function weaponArchetype(def) {
+    let archetype = weaponClassOf(def);
+    let material = "iron";
+    const h = def && def.held;
+    if (h && h.material) material = h.material;
+    else if (def && def.rarity === "legendary") material = "dragonscale";
+    else if (def && def.rarity === "epic") material = "gold";
+    else if (def && def.rarity === "rare") material = "steel";
+    if (!WEAPON_ARCHETYPES.includes(archetype)) archetype = "sword";
+    if (!WEAPON_MATERIALS.includes(material)) material = "iron";
+    return { archetype, material };
+  }
+
   // An item's effective stat block once its enhancement level + affixes are folded
   // in. `haste` (a sub-1 cooldown multiplier) improves *toward* zero, so we scale
   // its distance from 1 instead of the raw value; affix haste then compounds.
@@ -782,4 +855,5 @@ export {
   BELT_ARCHETYPES, BELT_MATERIALS, BELT_MATERIAL_TINT, beltArchetype,
   BOOT_ARCHETYPES, BOOT_MATERIALS, BOOT_MATERIAL_TINT, bootArchetype,
   CLOAK_ARCHETYPES, CLOAK_MATERIALS, CLOAK_MATERIAL_TINT, cloakArchetype,
+  WEAPON_ARCHETYPES, WEAPON_MATERIALS, WEAPON_MATERIAL_TINT, weaponClassOf, weaponArchetype,
 };

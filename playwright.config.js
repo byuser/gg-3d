@@ -310,6 +310,15 @@ export default defineConfig({
       testMatch: /worn-cloaks\.spec\.js/,
       use: { ...devices["Desktop Chrome"] },
     },
+    // Held weapons (Task 32): boot the built site, equip each of the six weapon classes,
+    // present the weapon in a steady raised hold and screenshot Lily's hand + weapon,
+    // asserting each maps to its class and the silhouettes visibly differ. Needs a real
+    // WebGL canvas, so it runs at desktop.
+    {
+      name: "worn-weapons-desktop",
+      testMatch: /worn-weapons\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",

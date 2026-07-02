@@ -1618,3 +1618,241 @@ describe("Task 31 — worn cloaks: distinct archetype per item + billow that sta
     T.recomputeStats(p);
   });
 });
+
+describe("Task 32 — held weapons: real wand / bow / staff / sword / axe / dagger in hand", () => {
+  const WEAPON_IDS = Object.keys(T.ITEM_DB).filter((id) => T.ITEM_DB[id].type === "weapon");
+  const VALID_ARCH = ["sword", "axe", "dagger", "bow", "staff", "wand"];
+  const VALID_MAT = ["wood", "iron", "steel", "gold", "crystal", "dragonscale"];
+  const ONE_HANDED = ["sword", "axe", "dagger", "wand"]; // classes that can ride the off hand
+
+  it("maps every weapon def to a valid class + material", () => {
+    expect(WEAPON_IDS.length).toBeGreaterThanOrEqual(6);
+    for (const id of WEAPON_IDS) {
+      const a = T.weaponArchetype(T.getDef(id));
+      expect(VALID_ARCH.includes(a.archetype), `${id} archetype`).toBe(true);
+      expect(VALID_MAT.includes(a.material), `${id} material`).toBe(true);
+    }
+  });
+
+  it("infers each real weapon CLASS from how it fights (the 6 normals span all 6 classes)", () => {
+    const pick = (id) => T.weaponArchetype(T.getDef(id)).archetype;
+    // The six buyable weapons are one of each class — the reference set.
+    expect(pick("magic_wand")).toBe("wand");        // 1H ranged bolt
+    expect(pick("short_bow")).toBe("bow");          // 2H ranged arrow
+    expect(pick("apprentice_staff")).toBe("staff"); // 2H ranged bolt
+    expect(pick("iron_dagger")).toBe("dagger");     // fast short 1H melee
+    expect(pick("iron_sword")).toBe("sword");       // balanced 1H melee
+    expect(pick("war_axe")).toBe("axe");            // heavy wide-arc melee
+    // Every class is distinct — no two of the six collapse to one silhouette.
+    const classes = new Set(["magic_wand", "short_bow", "apprentice_staff", "iron_dagger", "iron_sword", "war_axe"].map(pick));
+    expect(classes.size).toBe(6);
+    // Higher-rarity weapons still land on the right class by mechanics.
+    expect(pick("excalibur")).toBe("sword");     // 2H greatsword
+    expect(pick("twin_fang")).toBe("dagger");    // blistering fast jabs
+    expect(pick("thunder_hammer")).toBe("axe");  // crushing wide arc (haft + head)
+    expect(pick("astral_bow")).toBe("bow");
+    expect(pick("sunfire_staff")).toBe("staff");
+    expect(pick("archmage_wand")).toBe("wand");
+  });
+
+  it("varies the material by rarity (iron → steel → gold → dragonscale)", () => {
+    const mat = (id) => T.weaponArchetype(T.getDef(id)).material;
+    expect(mat("iron_sword")).toBe("iron");        // normal
+    expect(mat("excalibur")).toBe("steel");        // rare
+    expect(mat("void_scythe")).toBe("gold");       // epic
+    expect(mat("world_ender")).toBe("dragonscale");// legendary
+    // Pure rarity fallbacks (no def needed).
+    expect(T.weaponArchetype({ weapon: { melee: {} }, rarity: "legendary" }).material).toBe("dragonscale");
+    expect(T.weaponArchetype({ weapon: { melee: {} }, rarity: "epic" }).material).toBe("gold");
+    expect(T.weaponArchetype({ weapon: { melee: {} }, rarity: "rare" }).material).toBe("steel");
+    expect(T.weaponArchetype({ weapon: { melee: {} }, rarity: "normal" }).material).toBe("iron");
+  });
+
+  it("is pure + total: infers a valid pair for any weapon, honours an explicit block, clamps junk", () => {
+    // Ranged class inference: arrow → bow; bolt → staff (2H) or wand (1H).
+    expect(T.weaponClassOf({ weapon: { ranged: true, shape: "arrow" }, hands: 2 })).toBe("bow");
+    expect(T.weaponClassOf({ weapon: { ranged: true, shape: "bolt" }, hands: 2 })).toBe("staff");
+    expect(T.weaponClassOf({ weapon: { ranged: true, shape: "bolt" }, hands: 1 })).toBe("wand");
+    // Melee class inference: fast+short 1H → dagger; wide arc → axe; else sword.
+    expect(T.weaponClassOf({ weapon: { melee: { range: 2.2, arc: 1.3 }, cooldown: 0.2 }, hands: 1 })).toBe("dagger");
+    expect(T.weaponClassOf({ weapon: { melee: { arc: 2.5 }, cooldown: 0.7 }, hands: 1 })).toBe("axe");
+    expect(T.weaponClassOf({ weapon: { melee: { range: 3.2, arc: 1.7 }, cooldown: 0.45 }, hands: 1 })).toBe("sword");
+    // An explicit `held` block wins over inference (both fields).
+    expect(T.weaponArchetype({ weapon: { melee: {} }, rarity: "normal", held: { archetype: "axe", material: "gold" } }))
+      .toMatchObject({ archetype: "axe", material: "gold" });
+    // Bogus / missing input clamps to a drawable pair (never throws, never invalid).
+    for (const bad of [undefined, null, {}, { weapon: {}, held: { archetype: "zz", material: "plastic" } }]) {
+      const a = T.weaponArchetype(bad);
+      expect(VALID_ARCH.includes(a.archetype)).toBe(true);
+      expect(VALID_MAT.includes(a.material)).toBe(true);
+    }
+    // Deterministic (same def ⇒ same pair).
+    expect(T.weaponArchetype(T.getDef("iron_sword"))).toEqual(T.weaponArchetype(T.getDef("iron_sword")));
+  });
+
+  it("pre-builds every weapon class once under the main grip (+ 1H classes under the off grip), headless-safe", () => {
+    const p = T.player;
+    expect(p.heldWeapons).toBeTruthy();
+    expect(Object.keys(p.heldWeapons).sort()).toEqual(["axe", "bow", "dagger", "staff", "sword", "wand"]);
+    expect(p.wandGrip.parent).toBe(p.armR);
+    expect(p.offGrip.parent).toBe(p.armL);
+    for (const k in p.heldWeapons) {
+      const grp = p.heldWeapons[k];
+      expect(grp.node, k).toBeTruthy();
+      expect(grp.node.parent, k).toBe(p.wandGrip);       // rides the main hand
+      expect(grp.tip.parent, k).toBe(grp.node);          // trail/muzzle anchor under the group
+      expect(grp.mats.length, k).toBeGreaterThan(0);
+      expect(grp.meshes.length, k).toBeGreaterThan(0);   // a real layered mesh, not one box
+      expect(grp.meshes.length, `${k} is layered`).toBeGreaterThanOrEqual(3);
+    }
+    // Exactly the four one-handed classes are mirrored under the off grip (for dual-wield).
+    expect(Object.keys(p.heldOffWeapons).sort()).toEqual(ONE_HANDED.slice().sort());
+    for (const k in p.heldOffWeapons) expect(p.heldOffWeapons[k].node.parent).toBe(p.offGrip);
+  });
+
+  it("keeps the weapon in the core silhouette (always built) with tier-gated trims", () => {
+    // The held weapon is core (always built); only the finer trims gate on the low tier.
+    expect(T.wornDetailFor("low").weaponDetail).toBe(false);
+    expect(T.wornDetailFor("high").weaponDetail).toBe(true);
+  });
+
+  it("shows exactly the equipped weapon's class (and bare hands when none is held)", () => {
+    const p = T.player;
+    const map = {
+      magic_wand: "wand", short_bow: "bow", apprentice_staff: "staff",
+      iron_dagger: "dagger", iron_sword: "sword", war_axe: "axe",
+    };
+    for (const id in map) {
+      clearEquip(p);
+      T.equipItem(p, T.makeItem(id));
+      expect(p.weaponShown.main, id).toBe(map[id]);
+      // Exactly that class is enabled in the main hand; every other class is hidden.
+      for (const k in p.heldWeapons) {
+        expect(p.heldWeapons[k].node.isEnabled(), `${id}/${k}`).toBe(k === map[id]);
+      }
+      // A single (non-dual) weapon shows nothing in the off hand.
+      for (const k in p.heldOffWeapons) expect(p.heldOffWeapons[k].node.isEnabled(), `${id}/off/${k}`).toBe(false);
+    }
+    // Bare-handed (fists): no weapon mesh shows at all.
+    clearEquip(p);
+    T.recomputeStats(p);
+    expect(p.weaponShown.main).toBe(null);
+    for (const k in p.heldWeapons) expect(p.heldWeapons[k].node.isEnabled(), `bare/${k}`).toBe(false);
+  });
+
+  it("shows a second weapon in the off hand only when dual-wielding two one-handers", () => {
+    const p = T.player;
+    // Two one-handed melee weapons → main in the right hand, off-hand in the left.
+    clearEquip(p);
+    T.equipItem(p, T.makeItem("iron_dagger")); // → hand1
+    T.equipItem(p, T.makeItem("iron_sword"));  // → hand2
+    expect(p.weaponShown.main).toBe("dagger");
+    expect(p.weaponShown.off).toBe("sword");
+    expect(p.heldWeapons.dagger.node.isEnabled()).toBe(true);
+    expect(p.heldOffWeapons.sword.node.isEnabled()).toBe(true);
+    // A two-handed weapon fills both hands → one centred weapon, nothing extra off-hand.
+    clearEquip(p);
+    T.equipItem(p, T.makeItem("short_bow")); // 2H
+    expect(p.weaponShown.main).toBe("bow");
+    expect(p.weaponShown.off).toBe(null);
+    for (const k in p.heldOffWeapons) expect(p.heldOffWeapons[k].node.isEnabled(), `2H/off/${k}`).toBe(false);
+    clearEquip(p);
+    T.recomputeStats(p);
+  });
+
+  it("keeps a valid muzzle: ranged weapons launch bolts/arrows from the weapon's tip", () => {
+    const p = T.player;
+    // The bolt/arrow origin (this.wandTip) is a live node repositioned to the active
+    // ranged weapon's tip; tryCast() reads it, so it must always be present + placed.
+    for (const id of ["magic_wand", "apprentice_staff", "short_bow"]) {
+      clearEquip(p);
+      T.equipItem(p, T.makeItem(id));
+      expect(p.wandTip, id).toBeTruthy();
+      const key = T.weaponArchetype(T.getDef(id)).archetype;
+      // The shared muzzle sits at the active class's tip (copied in refreshWeaponVisual).
+      expect(p.wandTip.position.y, `${id} tip`).toBeCloseTo(p.heldWeapons[key].tip.position.y, 6);
+      // The hookable weapon-trail anchor (for Task 34) points at the active weapon's tip.
+      expect(p.weaponTrailTip).toBe(p.heldWeapons[key].tip);
+    }
+    clearEquip(p);
+    T.recomputeStats(p);
+  });
+
+  it("never reallocates the weapon meshes across equip churn (no leak) while attacking", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const swordNode = p.heldWeapons.sword.node;
+    const bowNode = p.heldWeapons.bow.node;
+    const offDagger = p.heldOffWeapons.dagger.node;
+    const meshCount = Object.values(p.heldWeapons).reduce((n, grp) => n + grp.meshes.length, 0)
+      + Object.values(p.heldOffWeapons).reduce((n, grp) => n + grp.meshes.length, 0);
+    for (let i = 0; i < 8; i++) {
+      for (const id of ["iron_sword", "war_axe", "short_bow", "apprentice_staff", "magic_wand", "iron_dagger"]) {
+        T.equipItem(p, T.makeItem(id));
+        p.swing.trigger(p.weapon.ranged ? "ranged" : "melee"); // fire an attack
+        expect(() => step(2)).not.toThrow();                   // the weapon rides the hand each frame
+      }
+    }
+    // Same node objects + total mesh count throughout — nothing was rebuilt.
+    expect(p.heldWeapons.sword.node).toBe(swordNode);
+    expect(p.heldWeapons.bow.node).toBe(bowNode);
+    expect(p.heldOffWeapons.dagger.node).toBe(offDagger);
+    expect(Object.values(p.heldWeapons).reduce((n, grp) => n + grp.meshes.length, 0)
+      + Object.values(p.heldOffWeapons).reduce((n, grp) => n + grp.meshes.length, 0)).toBe(meshCount);
+    clearEquip(p);
+    T.recomputeStats(p);
+  });
+
+  // THE fit invariant: the weapon must be GRIPPED at the hand (a part in the fist, the
+  // whole weapon bounded around the grip — never floating off) AND track the hand through
+  // the attack WITHOUT detaching. Two structural bounds on the emitted geometry:
+  //   (a) HELD ENVELOPE (grip-local, pose-independent since the weapon is rigidly parented
+  //       to the grip): every part CENTRE stays within a compact box around the grip, and
+  //       at least one part sits IN the fist (near the grip origin) — so the weapon is held,
+  //       not detached or floating beside the hand.
+  //   (b) NO DETACHMENT through the attack: the weapon tip's position in the ARM frame is
+  //       invariant as the game drives the melee/ranged swing (the grip is a rigid child of
+  //       the arm), so the weapon can never fly off the hand mid-attack.
+  it("is gripped in the hand and tracks the hand through the attack without detaching", () => {
+    const p = T.player;
+    // (a) HELD ENVELOPE — grip-local bounds + a part in the fist, for every weapon class.
+    const X_MAX = 0.6, Z_MIN = -0.35, Z_MAX = 0.55, Y_FLOOR = -0.8, Y_CEIL = 1.85;
+    for (const id of WEAPON_IDS) {
+      clearEquip(p);
+      T.equipItem(p, T.makeItem(id));
+      const key = p.weaponShown.main;
+      const grp = p.heldWeapons[key];
+      expect(grp && grp.meshes.length, `${id} meshes`).toBeGreaterThan(0);
+      let inFist = false;
+      for (const m of grp.meshes) {
+        const c = toFrame(m, { x: 0, y: 0, z: 0 }, p.wandGrip); // part centre in grip-local space
+        expect(Math.abs(c.x), `${id}/${m.name} x ${c.x.toFixed(3)} off the hand`).toBeLessThanOrEqual(X_MAX);
+        expect(c.z, `${id}/${m.name} z ${c.z.toFixed(3)} behind the hand`).toBeGreaterThanOrEqual(Z_MIN);
+        expect(c.z, `${id}/${m.name} z ${c.z.toFixed(3)} ahead of the hand`).toBeLessThanOrEqual(Z_MAX);
+        expect(c.y, `${id}/${m.name} y ${c.y.toFixed(3)} below the weapon`).toBeGreaterThanOrEqual(Y_FLOOR);
+        expect(c.y, `${id}/${m.name} y ${c.y.toFixed(3)} above the weapon`).toBeLessThanOrEqual(Y_CEIL);
+        if (Math.abs(c.x) <= 0.16 && Math.abs(c.z) <= 0.2 && c.y >= -0.35 && c.y <= 0.55) inFist = true;
+      }
+      expect(inFist, `${id} has a part gripped in the fist`).toBe(true);
+    }
+    // (b) NO DETACHMENT — the tip's ARM-frame position is invariant as the attack plays.
+    for (const id of ["iron_sword", "war_axe", "magic_wand", "short_bow"]) {
+      clearEquip(p);
+      T.equipItem(p, T.makeItem(id));
+      const grp = p.heldWeapons[p.weaponShown.main];
+      const rest = toFrame(grp.tip, { x: 0, y: 0, z: 0 }, p.armR); // tip in the arm's frame at rest
+      p.swing.trigger(p.weapon.ranged ? "ranged" : "melee");
+      for (let f = 0; f < 6; f++) {
+        step(1);
+        const now = toFrame(grp.tip, { x: 0, y: 0, z: 0 }, p.armR);
+        // Rigidly attached to the arm: the offset never changes → it can't detach mid-swing.
+        expect(Math.abs(now.x - rest.x), `${id} tip x drift @${f}`).toBeLessThan(1e-6);
+        expect(Math.abs(now.y - rest.y), `${id} tip y drift @${f}`).toBeLessThan(1e-6);
+        expect(Math.abs(now.z - rest.z), `${id} tip z drift @${f}`).toBeLessThan(1e-6);
+      }
+    }
+    clearEquip(p);
+    T.recomputeStats(p);
+  });
+});

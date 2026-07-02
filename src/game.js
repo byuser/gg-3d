@@ -34,6 +34,7 @@ import {
   PAULDRON_MATERIAL_TINT, pauldronArchetype, GLOVE_MATERIAL_TINT, gloveArchetype,
   BELT_MATERIAL_TINT, beltArchetype, BOOT_MATERIAL_TINT, bootArchetype,
   CLOAK_MATERIAL_TINT, cloakArchetype,
+  WEAPON_ARCHETYPES, WEAPON_MATERIALS, WEAPON_MATERIAL_TINT, weaponClassOf, weaponArchetype,
 } from "./data/items.js";
 import {
   MATERIALS, MATERIAL_IDS, RESOURCE_KINDS, RELICS, CASTLE_PARTS, CASTLE_PART_BY_ID,
@@ -355,8 +356,8 @@ import {
   // are dropped on the low tier so phones keep their budget. Equip still applies
   // a missing piece's STATS — only its mesh is skipped.
   function wornDetailFor(tier) {
-    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, boots: true, cloak: true, cloakSway: false, helmDetail: false, chestDetail: false, pauldronDetail: false, gloveDetail: false, beltDetail: false, bootDetail: false };
-    return { pauldrons: true, belt: true, gloves: true, boots: true, cloak: true, cloakSway: true, helmDetail: true, chestDetail: true, pauldronDetail: true, gloveDetail: true, beltDetail: true, bootDetail: true };
+    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, boots: true, cloak: true, cloakSway: false, helmDetail: false, chestDetail: false, pauldronDetail: false, gloveDetail: false, beltDetail: false, bootDetail: false, weaponDetail: false };
+    return { pauldrons: true, belt: true, gloves: true, boots: true, cloak: true, cloakSway: true, helmDetail: true, chestDetail: true, pauldronDetail: true, gloveDetail: true, beltDetail: true, bootDetail: true, weaponDetail: true };
   }
 
   // ---- Cloak billow (Task 31) -------------------------------------------
@@ -1169,8 +1170,8 @@ import {
         sh.position.set(0, -0.62, 0.06); this.shoes.push(sh);
       }
 
-      // ---- The MAGIC WAND, held in the right hand. ----
-      this._buildWand(scene, shadow);
+      // ---- The HELD WEAPON — a real weapon of the equipped class in hand. ----
+      this._buildHeldWeapons(scene, shadow);
 
       // ---- Visible worn gear (helmet, pauldrons, chest, gloves, belt, boots,
       // cloak), built once + toggled/recoloured on equip so it never leaks. ----
@@ -1188,80 +1189,249 @@ import {
       root.position.set(0, 0, 12);
     }
 
-    _buildWand(scene, shadow) {
-      // Parent the wand to the right arm so it swings with the hand.
+    // The held weapon — a real, layered weapon of the equipped CLASS in Lily's hand
+    // (Task 32): sword / axe / dagger / bow / staff / wand. Each class is a distinct
+    // procedural mesh group, pre-built ONCE under the hand grip and just toggled + tinted
+    // on equip by refreshWeaponVisual() — so equipping never allocates or leaks. The main
+    // grip is a child of the RIGHT arm pivot, so the weapon tracks the hand through the
+    // whole attack for free (it rides the EXISTING Swing state machine — the from-scratch
+    // attack motion is Task 34, which animates the per-class trail anchor built here). A
+    // dual-wielded off-hand weapon rides a mirror grip on the LEFT arm. The projectile
+    // muzzle (this.wandTip) + its shared glow/halo are repositioned to the active ranged
+    // weapon's business end so bolts/arrows still launch from the tip.
+    _buildHeldWeapons(scene, shadow) {
+      const spec = wornDetailFor((typeof Quality !== "undefined" && Quality.tier) || "high");
+      this._weaponSpec = spec;
+
+      // Main-hand grip (right hand) + a mirror off-hand grip (left hand, for a dual-
+      // wielded second one-hander). Built once; the class groups hang under them.
       const grip = new BABYLON.TransformNode("wandGrip", scene);
       grip.parent = this.armR; grip.position.set(0, -0.58, 0.12); // at the hand
-      grip.rotation.x = -0.5; // angle the wand slightly forward/up
+      grip.rotation.x = -0.5; // angle the weapon slightly forward/up out of the fist
       this.wandGrip = grip;
+      const offGrip = new BABYLON.TransformNode("offGrip", scene);
+      offGrip.parent = this.armL; offGrip.position.set(0, -0.58, 0.12);
+      offGrip.rotation.x = -0.5;
+      this.offGrip = offGrip;
 
-      const handleMat = emat(scene, "wandHandle", "#5a3a8a", 0.05);
-      const handle = cyl(scene, "wandHandle", 0.07, 0.05, 0.95, handleMat);
-      handle.parent = grip; handle.position.y = 0.35; shadow.addShadowCaster(handle);
-
-      // Glowing crystal star at the tip.
-      const crystalMat = gloss(emat(scene, "wandCrystal", "#9fd0ff", 1.0), 0.2, 0.1);
-      const crystal = BABYLON.MeshBuilder.CreatePolyhedron("wandCrystal", { type: 2, size: 0.16 }, scene);
-      crystal.material = crystalMat; crystal.parent = grip; crystal.position.y = 0.9;
-      this.wandCrystal = crystal;
-
-      // A soft halo around the crystal.
-      const halo = sphere(scene, "wandHalo", 0.34, emat(scene, "wandHaloM", "#9fd0ff", 1.0));
-      halo.material.alpha = 0.22; halo.parent = grip; halo.position.y = 0.9; halo.isPickable = false;
-      this.wandHalo = halo;
-
-      // The point bolts launch from.
+      // Shared muzzle: the point bolts/arrows launch from + a soft glow halo + a light,
+      // repositioned to the active ranged weapon's tip by refreshWeaponVisual().
       const tip = new BABYLON.TransformNode("wandTip", scene);
-      tip.parent = grip; tip.position.y = 1.02;
+      tip.parent = grip; tip.position.set(0, 1.02, 0);
       this.wandTip = tip;
-
-      // A little light so the wand actually glows on nearby surfaces.
+      const halo = sphere(scene, "wandHalo", 0.34, emat(scene, "wandHaloM", "#9fd0ff", 1.0));
+      halo.material.alpha = 0.22; halo.parent = tip; halo.isPickable = false;
+      this.wandHalo = halo;
       const glow = new BABYLON.PointLight("wandGlow", new BABYLON.Vector3(0, 0, 0), scene);
       glow.parent = tip; glow.diffuse = BABYLON.Color3.FromHexString("#9fd0ff");
       glow.intensity = 0.5; glow.range = 6;
       this.wandGlow = glow;
 
-      // ---- Alternate held weapons, toggled by refreshWeaponVisual(). ----
-      // A melee blade (sword/axe/hammer share this silhouette, recoloured).
-      const bladeMat = gloss(emat(scene, "heldBlade", "#d7dde6", 0.06), 0.34, 0.35);
-      const blade = box(scene, "heldBlade", 0.12, 1.1, 0.03, bladeMat);
-      blade.parent = grip; blade.position.y = 0.7; shadow.addShadowCaster(blade);
-      const guard = box(scene, "heldGuard", 0.42, 0.1, 0.1, emat(scene, "heldGuardM", "#8a6a3a", 0.05));
-      guard.parent = grip; guard.position.y = 0.18;
-      this.heldBladeMat = bladeMat;
-      this.meleeMesh = new BABYLON.TransformNode("meleeMesh", scene);
-      blade.parent = this.meleeMesh; guard.parent = this.meleeMesh;
-      this.meleeMesh.parent = grip;
-
-      // A bow (a thin arc + string) for ranged "arrow" weapons.
-      const bowMat = emat(scene, "heldBow", "#9a6a3a", 0.05);
-      const bow = BABYLON.MeshBuilder.CreateTorus("heldBow", { diameter: 1.1, thickness: 0.07, tessellation: 12 }, scene);
-      bow.material = bowMat; bow.rotation.x = Math.PI / 2; bow.position.y = 0.55;
-      const bowMesh = new BABYLON.TransformNode("bowMesh", scene);
-      bow.parent = bowMesh; bowMesh.parent = grip; shadow.addShadowCaster(bow);
-      this.bowMesh = bowMesh; this.bowMat = bowMat;
-
+      // Build the six weapon-class meshes under the main grip (+ the four one-handed
+      // classes under the off grip), then reveal the equipped one.
+      this._buildWeaponMeshes(scene, shadow, spec);
       this.refreshWeaponVisual();
     }
 
-    // Show the mesh that matches the active weapon and tint it to its colour.
+    // Build one procedural mesh group per weapon class (Task 32) — parented to the main-
+    // hand grip, plus the one-handed classes mirrored under the off-hand grip — all
+    // hidden; refreshWeaponVisual() reveals + tints the class the equipped weapon maps to.
+    // Each group tracks: `node` (the toggle root, identity-parented to its grip so its
+    // `tip` reads directly in grip space), `mats` (all materials), `tintMats` (the metal
+    // that recolours to the weapon's accent colour on equip), `glowMats` (the wand crystal
+    // / staff orb, kept bright), `tip` (the muzzle + hookable weapon-trail anchor at the
+    // business end, for Task 34) and `meshes` (every part, for the leak + fit tests).
+    // Tier-gated: the low tier drops the finer trims (fuller / back spike / prongs / string).
+    _buildWeaponMeshes(scene, shadow, spec) {
+      const detail = spec.weaponDetail !== false;
+      this.heldWeapons = {};
+      this.heldOffWeapons = {};
+      let uid = 0;
+      let curMeshes = null;
+      const track = (x) => { if (curMeshes) curMeshes.push(x); try { shadow.addShadowCaster(x); } catch (e) {} return x; };
+      // A fresh material for a weapon part, base tint by its material key.
+      const wmat = (mats, key, emissive) => {
+        const m = emat(scene, "heldW" + key + uid++, WEAPON_MATERIAL_TINT[key] || "#b8c0cc", emissive == null ? 0.06 : emissive);
+        mats.push(m); return m;
+      };
+      // Layered primitive helpers on a group node (each tracked for the tests).
+      const shell = (node, name, w, h, d, m) => { const x = box(scene, name, w, h, d, m); x.parent = node; return track(x); };
+      const ball = (node, name, dia, m) => { const x = sphere(scene, name, dia, m); x.parent = node; return track(x); };
+      const band = (node, name, top, bot, h, m) => { const x = cyl(scene, name, top, bot, h, m); x.parent = node; return track(x); };
+      const spike = (node, name, bot, h, m) => { const x = cone(scene, name, bot, 0.01, h, m); x.parent = node; return track(x); };
+      const gem = (node, name, size, m) => { const x = BABYLON.MeshBuilder.CreatePolyhedron(name, { type: 2, size }, scene); x.material = m; x.parent = node; return track(x); };
+
+      // ---- The six class builders. Each works in GRIP-LOCAL space: origin at the fist,
+      // +y up the shaft/blade (the grip is tilted forward so +y reads forward-and-up).
+      // `mats`=all materials, `tints`=metal recoloured on equip, `glows`=bright gems,
+      // `tip`=business-end anchor. `detail` gates the finer trims. ----
+      const classes = {
+        // SWORD — pommel + wrapped grip + crossguard + tapered blade. 1H (also the 2H
+        // greatsword silhouette; length reads the class, the accent colour the item).
+        sword: { oneHanded: true, build: (node, mats, tints, glows, tip) => {
+          const wood = wmat(mats, "wood", 0.04);
+          const steel = wmat(mats, "steel", 0.08); tints.push(steel);
+          const pommel = ball(node, "swPommel", 0.14, steel); pommel.position.set(0, -0.1, 0); pommel.scaling.set(1, 0.8, 1);
+          const gripM = band(node, "swGrip", 0.09, 0.09, 0.26, wood); gripM.position.set(0, 0.06, 0);
+          const guard = shell(node, "swGuard", 0.46, 0.09, 0.11, steel); guard.position.set(0, 0.22, 0);
+          const blade = shell(node, "swBlade", 0.14, 0.98, 0.05, steel); blade.position.set(0, 0.76, 0); blade.scaling.x = 0.9;
+          const point = spike(node, "swTip", 0.14, 0.22, steel); point.position.set(0, 1.32, 0);
+          if (detail) { // a raised fuller down the blade + guard nubs
+            const fuller = shell(node, "swFuller", 0.04, 0.9, 0.065, wmat(mats, "iron", 0.05)); fuller.position.set(0, 0.76, 0);
+            for (const sx of [-1, 1]) { const nub = ball(node, "swGuardNub", 0.1, steel); nub.position.set(sx * 0.24, 0.22, 0); }
+          }
+          tip.position.set(0, 1.42, 0);
+        } },
+        // AXE — long wooden haft + a bladed steel head (+ a back spike). Heavy / wide arc.
+        axe: { oneHanded: true, build: (node, mats, tints, glows, tip) => {
+          const wood = wmat(mats, "wood", 0.04);
+          const steel = wmat(mats, "steel", 0.08); tints.push(steel);
+          const haft = band(node, "axHaft", 0.075, 0.085, 1.28, wood); haft.position.set(0, 0.5, 0);
+          const cap = ball(node, "axCap", 0.11, steel); cap.position.set(0, -0.12, 0);
+          const head = shell(node, "axHead", 0.1, 0.34, 0.16, steel); head.position.set(0.13, 1.02, 0);
+          const edge = spike(node, "axEdge", 0.42, 0.3, steel); edge.rotation.z = Math.PI / 2; edge.position.set(0.32, 1.02, 0); edge.scaling.y = 0.5;
+          if (detail) { // a back spike + a socket band where the head meets the haft
+            const back = spike(node, "axBack", 0.1, 0.2, steel); back.rotation.z = -Math.PI / 2; back.position.set(-0.14, 1.02, 0);
+            const socket = band(node, "axSocket", 0.14, 0.14, 0.18, steel); socket.position.set(0, 1.02, 0);
+          }
+          tip.position.set(0.42, 1.02, 0);
+        } },
+        // DAGGER — pommel + short grip + guard + short tapered blade. Fast / short 1H.
+        dagger: { oneHanded: true, build: (node, mats, tints, glows, tip) => {
+          const wood = wmat(mats, "wood", 0.04);
+          const steel = wmat(mats, "steel", 0.08); tints.push(steel);
+          const pommel = ball(node, "dgPommel", 0.1, steel); pommel.position.set(0, -0.06, 0);
+          const gripM = band(node, "dgGrip", 0.075, 0.075, 0.2, wood); gripM.position.set(0, 0.06, 0);
+          const guard = shell(node, "dgGuard", 0.28, 0.06, 0.08, steel); guard.position.set(0, 0.17, 0);
+          const blade = shell(node, "dgBlade", 0.1, 0.46, 0.035, steel); blade.position.set(0, 0.44, 0); blade.scaling.x = 0.85;
+          const point = spike(node, "dgTip", 0.1, 0.2, steel); point.position.set(0, 0.77, 0);
+          if (detail) { const fuller = shell(node, "dgFuller", 0.03, 0.42, 0.05, wmat(mats, "iron", 0.05)); fuller.position.set(0, 0.44, 0); }
+          tip.position.set(0, 0.85, 0);
+        } },
+        // WAND — short wooden shaft + a glowing crystal star at the tip. 1H bolt-caster.
+        wand: { oneHanded: true, build: (node, mats, tints, glows, tip) => {
+          const wood = wmat(mats, "wood", 0.05);
+          const cryst = gloss(wmat(mats, "crystal", 1.0), 0.2, 0.1); glows.push(cryst);
+          const shaft = band(node, "wnShaft", 0.06, 0.05, 0.9, wood); shaft.position.set(0, 0.35, 0);
+          const collar = band(node, "wnCollar", 0.1, 0.08, 0.08, wmat(mats, "gold", 0.1)); collar.position.set(0, 0.78, 0);
+          const crystal = gem(node, "wnCrystal", 0.16, cryst); crystal.position.set(0, 0.94, 0);
+          if (detail) { for (let i = 0; i < 3; i++) { const shard = gem(node, "wnShard", 0.06, cryst); const a = (i / 3) * Math.PI * 2; shard.position.set(Math.cos(a) * 0.11, 0.9, Math.sin(a) * 0.11); } }
+          tip.position.set(0, 1.02, 0);
+        } },
+        // BOW — a central riser + upper & lower limbs curving forward + a taut string. 2H.
+        bow: { oneHanded: false, build: (node, mats, tints, glows, tip) => {
+          const wood = wmat(mats, "wood", 0.05); tints.push(wood);
+          const string = wmat(mats, "iron", 0.02);
+          const riser = shell(node, "bwRiser", 0.07, 0.42, 0.12, wood); riser.position.set(0, 0.05, 0.02);
+          for (const sy of [1, -1]) {
+            const limb = band(node, "bwLimb", 0.03, 0.06, 0.62, wood);
+            limb.position.set(0, 0.05 + sy * 0.42, 0.14); limb.rotation.x = sy * 0.5;
+            const nock = ball(node, "bwNock", 0.05, wood); nock.position.set(0, 0.05 + sy * 0.72, 0.32);
+          }
+          const str = band(node, "bwString", 0.012, 0.012, 1.5, string); str.position.set(0, 0.05, 0.33);
+          if (detail) { const gripWrap = band(node, "bwGrip", 0.09, 0.09, 0.18, wmat(mats, "gold", 0.06)); gripWrap.position.set(0, 0.05, 0.02); }
+          tip.position.set(0, 0.08, 0.36); // the arrow leaves the string, in front of the hand
+        } },
+        // STAFF — a long wooden shaft crowned by a glowing orb held in a clawed cage. 2H.
+        staff: { oneHanded: false, build: (node, mats, tints, glows, tip) => {
+          const wood = wmat(mats, "wood", 0.05);
+          const orbM = gloss(wmat(mats, "crystal", 1.0), 0.2, 0.1); glows.push(orbM);
+          const metalM = wmat(mats, "gold", 0.1); tints.push(metalM);
+          const shaft = band(node, "stShaft", 0.07, 0.08, 1.68, wood); shaft.position.set(0, 0.55, 0);
+          const collar = band(node, "stCollar", 0.13, 0.1, 0.12, metalM); collar.position.set(0, 1.34, 0);
+          const orb = ball(node, "stOrb", 0.26, orbM); orb.position.set(0, 1.5, 0);
+          if (detail) { // a clawed cage of prongs cradling the orb + a butt cap
+            for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; const prong = spike(node, "stProng", 0.05, 0.26, metalM); prong.position.set(Math.cos(a) * 0.14, 1.48, Math.sin(a) * 0.14); prong.rotation.x = Math.sin(a) * 0.5; prong.rotation.z = -Math.cos(a) * 0.5; }
+            const butt = band(node, "stButt", 0.09, 0.06, 0.12, metalM); butt.position.set(0, -0.28, 0);
+          }
+          tip.position.set(0, 1.62, 0);
+        } },
+      };
+
+      // Register each class group under the main grip (and, for one-handers, a mirror
+      // group under the off grip). The build fn is grip-local + identical for both, so
+      // one function serves both hands with no duplicated geometry code.
+      const arch = (bucket, grip, key, build) => {
+        const node = new BABYLON.TransformNode("weap_" + key + (bucket === this.heldOffWeapons ? "_off" : ""), scene);
+        node.parent = grip; try { node.setEnabled(false); } catch (e) {}
+        const mats = [], tintMats = [], glowMats = [], meshes = [];
+        const tipNode = new BABYLON.TransformNode("weapTip_" + key + (bucket === this.heldOffWeapons ? "_off" : ""), scene);
+        tipNode.parent = node;
+        curMeshes = meshes;
+        build(node, mats, tintMats, glowMats, tipNode);
+        curMeshes = null;
+        bucket[key] = { node, mats, tintMats, glowMats, tip: tipNode, meshes };
+      };
+      for (const key in classes) {
+        arch(this.heldWeapons, this.wandGrip, key, classes[key].build);
+        if (classes[key].oneHanded) arch(this.heldOffWeapons, this.offGrip, key, classes[key].build);
+      }
+    }
+
+    // Reveal + tint the weapon-class group the equipped weapon maps to (Task 32). Reads
+    // the live hands so it can distinguish a two-handed weapon (one class, centred) from
+    // a dual-wield (a second one-hander in the off hand). Pure visual: meshes are built
+    // once, so equipping never leaks. Falls back to bare fists when no weapon is held.
     refreshWeaponVisual() {
-      const w = this.weapon || FISTS;
-      const ranged = !!w.ranged;
-      const isArrow = ranged && w.shape === "arrow";
-      const isBolt = ranged && !isArrow;
-      const col = w.color || "#bfe3ff";
-      if (this.wandCrystal) this.wandCrystal.setEnabled(isBolt);
-      if (this.wandHalo) this.wandHalo.setEnabled(isBolt);
-      if (this.meleeMesh) this.meleeMesh.setEnabled(!ranged);
-      if (this.bowMesh) this.bowMesh.setEnabled(isArrow);
-      // The handle stays for wand/melee; hide it for the bow.
+      const eq = this.equipment || {};
+      const i1 = eq.hand1 && eq.hand1 !== TWO_HANDED ? eq.hand1 : null;
+      const i2 = eq.hand2 && eq.hand2 !== TWO_HANDED ? eq.hand2 : null;
+      const d1 = i1 ? getDef(i1.id) : null;
+      const d2 = i2 ? getDef(i2.id) : null;
+      const w1 = d1 && d1.weapon ? d1 : null;
+      const w2 = d2 && d2.weapon ? d2 : null;
+      const mainDef = w1 || w2;                 // main-hand weapon def (hand1 preferred)
+      const dual = !!(w1 && w2);                // two one-handers → dual wield
+      const offDef = dual ? (mainDef === w1 ? w2 : w1) : null;
+      const mainKey = mainDef ? weaponArchetype(mainDef).archetype : null;
+      const offKey = offDef ? weaponArchetype(offDef).archetype : null;
+
+      this._showWeaponGroup(this.heldWeapons, mainKey, mainDef);
+      this._showWeaponGroup(this.heldOffWeapons, offKey, offDef);
+      this.weaponShown = { main: mainKey, off: offKey };
+      this.activeWeaponGroup = mainKey && this.heldWeapons ? this.heldWeapons[mainKey] : null;
+      // The hookable weapon-trail / muzzle anchor at the active weapon's business end,
+      // for Task 34's from-scratch attacks (and the bolt/arrow origin below).
+      this.weaponTrailTip = this.activeWeaponGroup ? this.activeWeaponGroup.tip : this.wandTip;
+
+      // Reposition the shared muzzle (bolt/arrow origin) + glow to the active weapon's
+      // business end; a wand/staff bolt-caster keeps the glowing tip halo, a bow keeps a
+      // dim glow at the nock, melee weapons drop it entirely.
+      const ranged = !!(mainDef && mainDef.weapon && mainDef.weapon.ranged);
+      const bolt = ranged && (mainKey === "wand" || mainKey === "staff");
+      if (this.wandTip) {
+        try { this.wandTip.position.copyFrom(this.activeWeaponGroup ? this.activeWeaponGroup.tip.position : new BABYLON.Vector3(0, 1.02, 0)); } catch (e) {}
+      }
+      try { if (this.wandHalo) this.wandHalo.setEnabled(bolt); } catch (e) {}
+      try { if (this.wandGlow) this.wandGlow.setEnabled(ranged); } catch (e) {}
+      try {
+        const w = (mainDef && mainDef.weapon) || {};
+        const gc = BABYLON.Color3.FromHexString(w.haloColor || w.color || "#9fd0ff");
+        if (this.wandHalo && this.wandHalo.material) this.wandHalo.material.emissiveColor = gc;
+        if (this.wandGlow) this.wandGlow.diffuse = gc;
+      } catch (e) { /* hex parse can fail in the headless stub */ }
+    }
+
+    // Show exactly `key` in `bucket` (hide the rest) and tint the shown group's metal to
+    // the weapon's accent colour, its gems bright, with a rarity-scaled glow.
+    _showWeaponGroup(bucket, key, def) {
+      if (!bucket) return;
+      for (const k in bucket) {
+        const grp = bucket[k];
+        const show = !!def && k === key;
+        try { grp.node.setEnabled(show); } catch (e) {}
+        if (show) this._tintWeapon(grp, def);
+      }
+    }
+    _tintWeapon(grp, def) {
+      const w = (def && def.weapon) || {};
+      const col = w.color || "#cfd6e0";
+      const rar = (def && def.rarity) || "normal";
+      const emi = rar === "legendary" ? 0.5 : rar === "epic" ? 0.34 : rar === "rare" ? 0.22 : 0.14;
       try {
         const c = BABYLON.Color3.FromHexString(col);
-        if (this.wandCrystal && this.wandCrystal.material) { this.wandCrystal.material.diffuseColor = c; this.wandCrystal.material.emissiveColor = c.scale(1.0); }
-        if (this.wandHalo && this.wandHalo.material) this.wandHalo.material.emissiveColor = c;
-        if (this.wandGlow) this.wandGlow.diffuse = c;
-        if (this.heldBladeMat) this.heldBladeMat.diffuseColor = c;
+        for (const m of grp.tintMats) { if (!m) continue; m.diffuseColor = c; m.emissiveColor = c.scale(emi); }
+        for (const m of grp.glowMats) { if (!m) continue; m.diffuseColor = c; m.emissiveColor = c.scale(0.95); }
       } catch (e) { /* hex parse can fail in the headless stub */ }
     }
 
@@ -12857,6 +13027,8 @@ import {
       bootArchetype,
       // ---- Worn cloaks: a real draping cloak per item (Task 31) ----
       cloakArchetype, cloakBillowStep, CLOAK_SWAY,
+      // ---- Held weapons: real wand / bow / staff / sword / axe / dagger (Task 32) ----
+      weaponArchetype, weaponClassOf, WEAPON_ARCHETYPES, WEAPON_MATERIALS, WEAPON_MATERIAL_TINT,
 
       // ---- Responsive HUD / drag-to-slot / fullscreen (Task 16) ----
       dragSlotReducer, pointerDragSupported, Fullscreen,
