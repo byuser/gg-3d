@@ -220,11 +220,18 @@ runs in English without a browser.
   are always foes to hunt, but you're never swarmed by an endless timer. Deeper lands hold
   **tougher, faster** monsters with more dangerous abilities.
 - **The home hub:** the **Meadowgate Vale** is where the **merchant**, the **blacksmith**, the
-  **apothecary** and the **castle build site** live — they're always there to visit between
-  expeditions. The wild lands are **hunting grounds** (plus a few themed resource nodes) **and each
-  is home to its own quest-giver** — the herbalist in the Whisperwood, the fisher on the shore, the
-  smith at Frostpeak, the hermit in the sunken Crystal Caverns — so you can accept and turn in their
-  missions out where they live, then return to the vale to spend and build.
+  **apothecary** and the **castle build site** keep their permanent village plaza, forge and
+  apothecary — always there to visit between expeditions. The wild lands are **hunting grounds**
+  (plus a few themed resource nodes) **and each is home to its own quest-giver** — the herbalist in
+  the Whisperwood, the fisher on the shore, the smith at Frostpeak, the hermit in the sunken Crystal
+  Caverns — so you can accept and turn in their missions out where they live.
+- **Travelling vendors everywhere:** you no longer have to trek back to the vale to trade. In
+  **every** wild land a small **caravan camps by the road into the zone** — the **travelling
+  merchant**, a **field forge** and an **apothecary stall** around a campfire, right where you
+  arrive — so a full bag, damaged gear or an empty potion belt is always a short walk from a
+  buy, sell, repair or restock. All three show up on the **minimap** and are searchable on the
+  **world map** (guide-me-there routes to the camp in your current land). The **castle & dragon**
+  stay hub-only.
 - **Potions & quick-slots:** buy **health potions** (minor / standard / **greater**) and
   **elixirs** (Might, Swiftness) from the **apothecary**, or craft them. Potions live in your
   **bag** (stacked) like everything else; the 3 combat **quick-slots** in the bottom corner
@@ -232,8 +239,8 @@ runs in English without a browser.
   potion onto a slot to make it quick-drinkable (drag between slots to reorder/swap, or off to
   clear — there's a tap-to-pick fallback too). Quaff a slot with `4`/`5`/`6` or a tap: health
   potions heal instantly; elixirs grant a **timed buff** shown as a countdown pill.
-- **The blacksmith:** a burly **🔨 smith** sets up at the plaza between waves beside the
-  merchant. Walk up + press **E** to open the **anvil** and spend coins to **enhance**
+- **The blacksmith:** a burly **🔨 smith** sets up beside the merchant — at the hub plaza and at
+  every wild-land field forge. Walk up + press **E** to open the **anvil** and spend coins to **enhance**
   your weapons and equipment (`+1`, `+2`, …). Rarer gear (**common → rare → epic →
   legendary**) forges to a higher level and gains more per level, so prize loot is worth
   investing in. Enhancement boosts the item's stats / weapon damage and its resale value.
@@ -264,15 +271,16 @@ runs in English without a browser.
   Walk near one and it's scooped up (coins even magnet toward you). Coins are the
   currency you spend at the merchant's shop.
 - **The merchant:** the **travelling merchant** 🧙 keeps a permanent stall in the home
-  **vale**. Walk up and press **E** (or the action button) to open the **shop**. Three tabs:
-  **Buy** normal weapons, armour and accessories; **✨ Rare** — a **rotating selection of
-  rare/epic/legendary wares** (a premium, but no need to wait for a boss); or **Sell** any
-  item from your bag (enhanced gear sells for more; potions + materials sell too). Bosses
-  still **drop** guaranteed rare loot too.
-- **The apothecary:** a dedicated **⚗️ apothecary** tends a bubbling cauldron in the hub.
-  Walk up + **E** to buy **potions** and **basic ingredients** (the wizard no longer stocks
-  consumables — vendors are specialised now), or **sell** your spare potions, materials and
-  gear back for coins.
+  **vale** — and now also **parks his caravan by the road into every wild land** (Task 40). Walk
+  up and press **E** (or the action button) to open the **shop**. Three tabs: **Buy** normal
+  weapons, armour and accessories; **✨ Rare** — a **rotating selection of rare/epic/legendary
+  wares** (a premium, but no need to wait for a boss); or **Sell** any item from your bag
+  (enhanced gear sells for more; potions + materials sell too). Bosses still **drop** guaranteed
+  rare loot too.
+- **The apothecary:** a dedicated **⚗️ apothecary** tends a bubbling cauldron — in the hub and at
+  every wild-land camp. Walk up + **E** to buy **potions** and **basic ingredients** (the wizard no
+  longer stocks consumables — vendors are specialised now), or **sell** your spare potions,
+  materials and gear back for coins.
 - **Solid world:** trees, rocks, bushes, toadstools, crystals, cave pillars, lampposts and
   the vale's river are **solid** — you bump and slide around them instead of walking through.
   A winding **river** with **wooden bridges** crosses the home vale.
@@ -668,6 +676,15 @@ the **regression** that the full **talk → Dialogue → accept → turn-in** fl
 for a wild-zone NPC (the bug was zero NPCs outside the hub), that a **save-load
 into a wild zone** still yields a talkable NPC there, and that **teardown disposes**
 the zone's NPCs (no leaks).
+The **travelling-vendors** suite (`test/travelling-vendors.test.js`) locks in Task 40:
+the **deterministic**, in-bounds, obstacle-free per-zone camp anchor for every wild
+land, the **regression** that entering a wild zone spawns **all three** vendors +
+registers their shop/anvil interactables (the bug was zero vendors outside the hub),
+that walking up + interacting opens the **right UI** (merchant → shop, blacksmith →
+anvil, apothecary → alchemist shop), a **save-load into a wild zone** still yields
+usable vendors, that the **vendor waypoint** resolves to the camp in the current land
+(and round-trips through save/load), and that **teardown disposes** every vendor + the
+camp (no leaks across travel).
 The **HUD-regions** suite (`test/hud-regions.test.js`) locks in Task 39: the pure
 rectangle-geometry helper the non-overlap tests rely on (`rectsOverlap` /
 `pairwiseCollisions` in `test/util/rect.js`) — edge-touching (a reserved-column
@@ -780,9 +797,15 @@ additive, not a rewrite (pure content tables live in `src/data/`, foundations in
   Task 21) with **drag-and-drop potion quick-slots**, and the two specialised vendors'
   **Buy/Sell** shop (`Shop.openShop(vendor)`): the **merchant** sells gear + a rare rotation,
   the **alchemist** sells potions + ingredients; **Sell** buys back any item.
-- **`Alchemist`** — the dedicated apothecary vendor (Task 21): a procedural NPC at the hub's
-  `apothecary` landmark that opens the alchemist shop; stocks potions + basic ingredients
-  (`ALCHEMIST_STOCK`), built/animated/**disposed on teardown** like the merchant + blacksmith.
+- **`Alchemist`** — the dedicated apothecary vendor (Task 21): a procedural NPC that opens the
+  alchemist shop; stocks potions + basic ingredients (`ALCHEMIST_STOCK`), built/animated/**disposed
+  on teardown** like the merchant + blacksmith.
+- **Travelling vendors (Task 40):** the `Merchant`, `Blacksmith` and `Alchemist` spawn in **every**
+  zone, not only the hub — `setupZoneContent` places them at their permanent hub spots or, in a wild
+  land, at a deterministic **travelling-camp** cluster beside the entrance road (`vendorCampSlots` +
+  a decorative `buildVendorCamp`). All three now carry a `dispose()` so per-travel rebuilds never
+  leak, and all three appear on the minimap / world-map as searchable **`vendor`** waypoint targets
+  (`waypointZoneOf` / `waypointPoint` resolve them to the current land).
 
 #### Item & equipment model (Task 12)
 
@@ -1042,9 +1065,10 @@ is fully testable headless:
 - **`SpawnDirector`** — the RPG replacement for timed waves: per-zone resident monsters spawn
   at fixed points, **roam** (`Monster._wander`), and **respawn** after a delay up to the
   zone's cap; boss-lair zones spawn their guardian in the depths.
-- **`setupZoneContent`** — lays the per-zone content on a freshly built world: the hub gets
-  the merchant, blacksmith, NPCs, resource nodes, castle and artifacts; the wild lands get
-  themed resource nodes.
+- **`setupZoneContent`** — lays the per-zone content on a freshly built world: **every** zone
+  gets its resident NPCs, its themed resource nodes and the **three travelling vendors** (merchant,
+  blacksmith, apothecary — at the hub plaza, or a caravan camp by the road in a wild land, Task 40);
+  the hub additionally gets the castle build site and artifacts.
 - **Save/load (`serializeGame` / `applySave`)** — snapshots the run to JSON (schema **v12**;
   Task 18 added **playtime**, Task 19 dropped the legacy `score` and added the lifetime
   `relicsFound` tally, Task 21 unified the bag + added **potion quick-slots**) and rebuilds it:
@@ -1343,6 +1367,16 @@ Source: GitHub Actions**.
       the hub keeps its merchant/blacksmith/alchemist/castle. The world-map / minimap / guided
       waypoint now route to where the NPCs actually stand. No save-schema change (the world rebuilds
       from data) — `test/npc-zones.test.js`.
+- [x] **Travelling vendors in every land** — the **merchant**, **blacksmith** and **apothecary** were
+      locked behind the same `if (zone.home)` gate, so only Meadowgate had shops; deep in a wild land
+      you had to trek all the way home to buy, sell, repair or restock. Now all three spawn in **every**
+      zone — at their permanent hub plaza, or a deterministic **travelling-camp** cluster (caravan +
+      field forge + apothecary stall around a campfire) parked **beside the road into each wild land**
+      (`vendorCampSlots`, clear of the fence/scenery/landing tile). `Merchant`/`Blacksmith` gained a
+      `dispose()` so per-travel rebuilds never leak; the **minimap** now draws all three (incl. the
+      apothecary), and each is a searchable **world-map `vendor` waypoint** that guides to the camp in
+      your current land. Castle/dragon stay hub-only; no `SAVE_VERSION` change (vendors rebuild from
+      data) — `test/travelling-vendors.test.js`.
 - [x] **Collision-free HUD regions** — the HUD is now a disciplined **region/layer system** so no two
       widgets or buttons ever share pixels at any resolution/orientation. The six top-right icon
       buttons became **one flex control ROW** whose width (`--controls-w`) the top-status chip row

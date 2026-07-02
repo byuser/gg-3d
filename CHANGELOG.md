@@ -50,6 +50,57 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-07-02] — Task 40 — Travelling vendors in every land
+
+The **merchant**, **blacksmith** and **apothecary** used to trade **only** in the hub —
+they were created inside the `if (zone.home)` branch of `setupZoneContent`, and only
+Meadowgate is `home`, so a player deep in a wild land with a full bag, damaged gear and
+no potions had to trek all the way home to buy, sell, repair or restock. Now all three
+follow the player: a small **travelling caravan camps by the road into every wild land**,
+so a shop is always within reach wherever you roam. Placement is **data-driven** and
+deterministic; the **castle & dragon stay hub-only**; **no `SAVE_VERSION` change** (the
+world rebuilds vendors from data on every travel/load).
+
+### Changed
+
+- **All three vendors spawn in EVERY zone (the fix).** `setupZoneContent` now creates the
+  `Merchant`, `Blacksmith` and `Alchemist` for **every** land — at their permanent village
+  plaza / forge / apothecary spots in the hub, or a **travelling-camp** cluster in a wild
+  zone — instead of only inside the `if (zone.home)` branch. They register as interactables
+  at the usual talk range and open the same `Shop.openShop("merchant")` / `Anvil.openAnvil()`
+  / `Shop.openShop("alchemist")` UIs, so walk-up + **E** works in every land.
+- **A deterministic per-zone camp beside the entrance road.** A new pure `vendorCampSlots`
+  derives the camp from the zone's **primary entrance** (the road toward the hub, Task 22's
+  road-edge gateway) + radius, then **settles each vendor clear** of the fence and solid
+  scenery (`settleClearPoint`) so nothing lands in an obstacle, in the water or on the
+  player's exact arrival tile. A small decorative `buildVendorCamp` (campfire ring, supply
+  crates, a pennant — no extra light) ties the three stalls together as one caravan.
+- **`Merchant` and `Blacksmith` now `dispose()` (leak fix).** Previously only the `Alchemist`
+  had a `dispose()`; `teardownZone` merely **nulled** the merchant/blacksmith, leaking their
+  meshes on every hub exit. Because all three are now rebuilt on **every** zone travel, both
+  gained a real `dispose()` (remove the interactable + dispose the mesh root), and
+  `teardownZone` disposes them + the camp — so travelling never leaks a vendor or a stale
+  interactable.
+- **The minimap draws all three vendors** (it previously omitted the apothecary glyph, even in
+  the hub), and each is a searchable **world-map `vendor` waypoint target** — "guide me to the
+  merchant / blacksmith / apothecary" routes to the camp in your **current** land. New runtime
+  `waypointZoneOf` / `waypointPoint` resolve a travelling vendor to the live camp (the pure
+  `worldmap.js` helpers stay home-agnostic); the apothecary is no longer a fixed hub NPC map
+  target. New EN + RU strings (`vendor.*`, `map.kind.vendor`).
+
+### Added
+
+- **`test/travelling-vendors.test.js`** (+12 Vitest) — the Task 40 net: the **deterministic**,
+  in-bounds, obstacle-free camp anchor for **every** wild zone (+ the entrance-road anchor and
+  spacing); the **regression** that entering a wild land spawns **all three** vendors and
+  registers their interactables (the bug = zero vendors outside the hub); that walk-up +
+  interact opens the **right UI** per vendor; a **save-load into a non-hub zone** still yields
+  usable vendors (no schema bump); the **vendor waypoint** resolving to the current land's camp
+  and round-tripping through save/load; the minimap/map carrying all three; and a
+  **teardown-disposes-every-vendor-and-the-camp** no-leak check. Updated `test/harness.test.js`
+  and `test/npc-zones.test.js` (which encoded the hub-only-vendor assumption) and
+  `test/worldmap.test.js` (the vendor map targets). **Vitest 490 → 503.**
+
 ## [2026-07-02] — Task 35 — Full-loadout fit & clipping integration
 
 The **final integration pass** of the worn-equipment overhaul (Tasks 25–35). Each category

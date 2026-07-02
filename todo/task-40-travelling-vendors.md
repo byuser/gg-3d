@@ -1,7 +1,15 @@
 # Task 40 — Travelling vendors in every land: merchant, blacksmith & apothecary reachable outside the hub
 
 > Part of the [Good Game 3D backlog](../TODO.md). Shared rules + Definition of Done live there.
-- **Status:** `[ ]`
+- **Status:** `[x]` 2026-07-02 — Un-gated `setupZoneContent` so the merchant,
+  blacksmith & apothecary spawn in **every** land: at their permanent hub spots, or a
+  deterministic **travelling-camp** cluster beside the entrance road in each wild zone
+  (`vendorCampSlots` + `buildVendorCamp`, settled clear of fence/scenery/landing tile).
+  Added `dispose()` to `Merchant`/`Blacksmith` (they now rebuild per travel) + camp
+  disposal in `teardownZone`; the minimap draws all three (incl. the apothecary) and each
+  is a searchable **`vendor`** world-map waypoint that routes to the current land's camp.
+  EN+RU strings; no `SAVE_VERSION` change. Covered by `test/travelling-vendors.test.js`
+  (+12 Vitest, 503 total).
 - **Depends on:** Task 38 (the zone-aware NPC spawn this generalizes —
   `spawnZoneNpcs` / `questGiversForZone` / `landmarkZone`, the `zone` field on
   `LOCATIONS`, `src/game.js` ~4798-4865), Task 12 (the `Shop` / gear economy and
