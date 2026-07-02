@@ -1856,3 +1856,274 @@ describe("Task 32 — held weapons: real wand / bow / staff / sword / axe / dagg
     T.recomputeStats(p);
   });
 });
+
+describe("Task 33 — visible jewelry: necklace + rings on the character", () => {
+  const NECK_IDS = Object.keys(T.ITEM_DB).filter((id) => T.ITEM_DB[id].type === "necklace");
+  const RING_IDS = Object.keys(T.ITEM_DB).filter((id) => T.ITEM_DB[id].type === "ring");
+  const NECK_ARCH = ["pendant", "amulet", "torc"];
+  const RING_ARCH = ["band", "signet", "gemband"];
+  const VALID_MAT = ["silver", "gold", "bronze", "dragonscale"];
+
+  it("maps every jewelry def to a valid, type-appropriate archetype + material + gem", () => {
+    expect(NECK_IDS.length).toBeGreaterThanOrEqual(2);
+    expect(RING_IDS.length).toBeGreaterThanOrEqual(3);
+    for (const id of NECK_IDS) {
+      const a = T.jewelryArchetype(T.getDef(id));
+      expect(a.kind, `${id} kind`).toBe("necklace");
+      expect(NECK_ARCH.includes(a.archetype), `${id} archetype`).toBe(true);
+      expect(VALID_MAT.includes(a.material), `${id} material`).toBe(true);
+      expect(typeof a.gem === "string" && a.gem[0] === "#", `${id} gem`).toBe(true);
+    }
+    for (const id of RING_IDS) {
+      const a = T.jewelryArchetype(T.getDef(id));
+      expect(a.kind, `${id} kind`).toBe("ring");
+      expect(RING_ARCH.includes(a.archetype), `${id} archetype`).toBe(true);
+      expect(VALID_MAT.includes(a.material), `${id} material`).toBe(true);
+      expect(typeof a.gem === "string" && a.gem[0] === "#", `${id} gem`).toBe(true);
+    }
+  });
+
+  it("gives the shipped jewelry distinct, on-theme archetypes + materials by rarity", () => {
+    const pick = (id) => T.jewelryArchetype(T.getDef(id));
+    // Necklaces: a normal pendant, a rare medallion amulet — visibly different shapes.
+    expect(pick("amulet_vigor")).toMatchObject({ archetype: "pendant", material: "silver" });
+    expect(pick("titan_pendant")).toMatchObject({ archetype: "amulet", material: "gold" });
+    // Rings: a normal band, a rare signet, an epic claw-set gemband.
+    expect(pick("ring_power")).toMatchObject({ archetype: "band", material: "silver" });
+    expect(pick("vampiric_ring")).toMatchObject({ archetype: "signet", material: "gold" });
+    expect(pick("seraph_ring")).toMatchObject({ archetype: "gemband", material: "gold" });
+    // A plain band and a claw-set gemband must NOT look identical.
+    expect(pick("ring_power").archetype).not.toBe(pick("seraph_ring").archetype);
+    // At least two visually distinct silhouettes are actually in use per kind.
+    expect(new Set(NECK_IDS.map((id) => pick(id).archetype)).size).toBeGreaterThanOrEqual(2);
+    expect(new Set(RING_IDS.map((id) => pick(id).archetype)).size).toBeGreaterThanOrEqual(2);
+  });
+
+  it("reuses the item's rarity colour for the gem — unless it carries a signature", () => {
+    // Explicit `jewel.gem` signatures win (a Ring of Power's ruby, a Vigor amulet's green).
+    expect(T.jewelryArchetype(T.getDef("ring_power")).gem).toBe("#ff6b6b");
+    expect(T.jewelryArchetype(T.getDef("amulet_vigor")).gem).toBe("#7dff9e");
+    // With no signature, the gem defaults to the RARITY colour (so the finish reads by rarity).
+    expect(T.jewelryArchetype({ type: "ring", rarity: "rare" }).gem).toBe(T.RARITY.rare.color);
+    expect(T.jewelryArchetype({ type: "necklace", rarity: "epic" }).gem).toBe(T.RARITY.epic.color);
+  });
+
+  it("is pure + total: infers a valid piece for any def, honours a `jewel` block, clamps junk", () => {
+    // Rarity fallbacks (epic/legendary → the ornate top tier; rare → mid; else base).
+    expect(T.jewelryArchetype({ type: "necklace", rarity: "legendary" }).archetype).toBe("torc");
+    expect(T.jewelryArchetype({ type: "necklace", rarity: "epic" }).archetype).toBe("torc");
+    expect(T.jewelryArchetype({ type: "necklace", rarity: "rare" }).archetype).toBe("amulet");
+    expect(T.jewelryArchetype({ type: "necklace", rarity: "normal" }).archetype).toBe("pendant");
+    expect(T.jewelryArchetype({ type: "ring", rarity: "epic" }).archetype).toBe("gemband");
+    expect(T.jewelryArchetype({ type: "ring", rarity: "rare" }).archetype).toBe("signet");
+    expect(T.jewelryArchetype({ type: "ring", rarity: "normal" }).archetype).toBe("band");
+    // Material follows rarity when there's no explicit block.
+    expect(T.jewelryArchetype({ type: "ring", rarity: "legendary" }).material).toBe("dragonscale");
+    expect(T.jewelryArchetype({ type: "ring", rarity: "epic" }).material).toBe("gold");
+    expect(T.jewelryArchetype({ type: "ring", rarity: "rare" }).material).toBe("gold");
+    expect(T.jewelryArchetype({ type: "ring", rarity: "normal" }).material).toBe("silver");
+    // An explicit block wins over inference (archetype + material + gem).
+    expect(T.jewelryArchetype({ type: "ring", rarity: "normal", jewel: { archetype: "gemband", material: "dragonscale", gem: "#123456" } }))
+      .toMatchObject({ archetype: "gemband", material: "dragonscale", gem: "#123456" });
+    // Bogus / missing input clamps to a drawable piece (never throws, never invalid).
+    for (const bad of [undefined, null, {}, { type: "ring", jewel: { archetype: "xx", material: "plastic", gem: 42 } }]) {
+      const a = T.jewelryArchetype(bad);
+      const list = a.kind === "ring" ? RING_ARCH : NECK_ARCH;
+      expect(list.includes(a.archetype)).toBe(true);
+      expect(VALID_MAT.includes(a.material)).toBe(true);
+      expect(a.gem[0]).toBe("#");
+    }
+    // Deterministic (same def ⇒ same record).
+    expect(T.jewelryArchetype(T.getDef("seraph_ring"))).toEqual(T.jewelryArchetype(T.getDef("seraph_ring")));
+  });
+
+  it("pre-builds every necklace archetype under one neck anchor + every ring on BOTH slots", () => {
+    const g = T.player.gear;
+    // Necklace: a single stable anchor + one group per archetype.
+    expect(g.necklace).toBeTruthy();
+    expect(Object.keys(g.necklaces).sort()).toEqual(["amulet", "pendant", "torc"]);
+    for (const k in g.necklaces) {
+      const grp = g.necklaces[k];
+      expect(grp.mats.length, k).toBeGreaterThan(0);
+      expect(grp.gemMats.length, k).toBeGreaterThan(0); // every piece has a stone
+      expect(grp.meshes.length, k).toBeGreaterThan(0);
+      expect(grp.node.parent).toBe(g.necklace);
+    }
+    // Rings: one set of archetype groups per slot, each riding its hand pivot.
+    expect(Object.keys(g.rings).sort()).toEqual(["ring1", "ring2"]);
+    expect(g.rings.ring1.band.node.parent).toBe(T.player.armL); // ring1 → left hand
+    expect(g.rings.ring2.band.node.parent).toBe(T.player.armR); // ring2 → right hand
+    for (const slot of ["ring1", "ring2"]) {
+      expect(Object.keys(g.rings[slot]).sort()).toEqual(["band", "gemband", "signet"]);
+      for (const k in g.rings[slot]) {
+        const grp = g.rings[slot][k];
+        expect(grp.gemMats.length, `${slot}/${k}`).toBeGreaterThan(0);
+        expect(grp.meshes.length, `${slot}/${k}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("is HIGH-tier only — every phone (low AND medium) skips it; on for high", () => {
+    // Jewelry is the most additive worn piece, so it is built ONLY on the desktop high
+    // tier; both mobile tiers (low + medium) omit it cleanly so phones pay nothing.
+    expect(T.wornDetailFor("low").jewelry).toBe(false);
+    expect(T.wornDetailFor("low").jewelryDetail).toBe(false);
+    expect(T.wornDetailFor("medium").jewelry).toBe(false);
+    expect(T.wornDetailFor("medium").jewelryDetail).toBe(false);
+    expect(T.wornDetailFor("high").jewelry).toBe(true);
+    expect(T.wornDetailFor("high").jewelryDetail).toBe(true);
+    // The other worn silhouette (pauldrons/belt/cloak) still rides medium — only jewelry
+    // is high-only, so this change adds nothing to the phone budget elsewhere.
+    expect(T.wornDetailFor("medium").pauldrons).toBe(true);
+    expect(T.wornDetailFor("medium").cloak).toBe(true);
+  });
+
+  it("shows exactly the equipped necklace archetype (and nothing when the slot is empty)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const map = { amulet_vigor: "pendant", coin_amulet: "pendant", titan_pendant: "amulet" };
+    for (const id in map) {
+      T.equipItem(p, T.makeItem(id));
+      expect(p.gearShown.necklace, id).toBe(true);
+      expect(p.gearShown.necklaceArchetype, id).toBe(map[id]);
+      expect(p.gear.necklace.isEnabled()).toBe(true);
+      for (const k in p.gear.necklaces) {
+        expect(p.gear.necklaces[k].node.isEnabled(), `${id}/${k}`).toBe(k === map[id]);
+      }
+      T.unequipSlot(p, "necklace");
+      T.recomputeStats(p);
+    }
+    expect(p.gearShown.necklace).toBe(false);
+    expect(p.gearShown.necklaceArchetype).toBe(null);
+    expect(p.gear.necklace.isEnabled()).toBe(false);
+  });
+
+  it("shows the equipped ring on each slot's hand — and only that archetype", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    // Two different rings fill ring1 then ring2 (equipItem round-robins the two slots).
+    T.equipItem(p, T.makeItem("ring_power"));  // → ring1 (band)
+    T.equipItem(p, T.makeItem("seraph_ring")); // → ring2 (gemband)
+    expect(p.equipment.ring1.id).toBe("ring_power");
+    expect(p.equipment.ring2.id).toBe("seraph_ring");
+    expect(p.gearShown.ring1).toBe(true);
+    expect(p.gearShown.ring2).toBe(true);
+    expect(p.gearShown.ring1Archetype).toBe("band");
+    expect(p.gearShown.ring2Archetype).toBe("gemband");
+    for (const slot of ["ring1", "ring2"]) {
+      const sel = p.gearShown[slot + "Archetype"];
+      for (const k in p.gear.rings[slot]) {
+        expect(p.gear.rings[slot][k].node.isEnabled(), `${slot}/${k}`).toBe(k === sel);
+      }
+    }
+    clearEquip(p);
+    T.recomputeStats(p);
+    expect(p.gearShown.ring1).toBe(false);
+    expect(p.gearShown.ring1Archetype).toBe(null);
+  });
+
+  it("hides the rings when a glove covers the hand (so a ring never clips the glove)", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.equipItem(p, T.makeItem("ring_power"));
+    T.equipItem(p, T.makeItem("ring_guard"));
+    expect(p.gearShown.ring1).toBe(true);
+    expect(p.gearShown.ring2).toBe(true);
+    // Put a glove on: both rings tuck away (the hand is covered), so nothing z-fights it.
+    T.equipItem(p, T.makeItem("iron_gauntlets"));
+    expect(p.gearShown.ring1).toBe(false);
+    expect(p.gearShown.ring2).toBe(false);
+    for (const slot of ["ring1", "ring2"]) {
+      for (const k in p.gear.rings[slot]) expect(p.gear.rings[slot][k].node.isEnabled(), `${slot}/${k}`).toBe(false);
+    }
+    // Remove the glove: the rings come back on the now-bare hands.
+    T.unequipSlot(p, "gloves");
+    T.recomputeStats(p);
+    expect(p.gearShown.ring1).toBe(true);
+    expect(p.gearShown.ring2).toBe(true);
+    clearEquip(p);
+    T.recomputeStats(p);
+  });
+
+  it("seats the necklace in FRONT of the chest at the throat, and the ring at the hand", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.equipItem(p, T.makeItem("titan_pendant")); // amulet: chain + medallion + gem
+    const grp = p.gear.necklaces[p.gearShown.necklaceArchetype];
+    let proud = false;
+    for (const m of grp.meshes) {
+      const c = toFrame(m, { x: 0, y: 0, z: 0 }, p.lean); // origin in lean (torso) space
+      expect(Math.abs(c.x), `${m.name} x ${c.x.toFixed(3)} off to the side`).toBeLessThanOrEqual(0.32);
+      // Throat / upper-chest band: above the chest anchor centre (1.16) and below the head.
+      expect(c.y, `${m.name} y ${c.y.toFixed(3)} too low`).toBeGreaterThanOrEqual(1.1);
+      expect(c.y, `${m.name} y ${c.y.toFixed(3)} too high`).toBeLessThanOrEqual(1.62);
+      // Never behind the front of the body by more than the collar radius (the chain's
+      // back can ring the nape); the pendant reads in front.
+      expect(c.z, `${m.name} z ${c.z.toFixed(3)} too far back`).toBeGreaterThanOrEqual(-0.32);
+      if (c.z >= 0.28) proud = true; // a pendant/gem clears the chest front (~0.27)
+    }
+    expect(proud, "a necklace part sits proud in front of the chest").toBe(true);
+    // Ring seats at the hand (arm-local y ≈ −0.72, just below the hand sphere).
+    T.equipItem(p, T.makeItem("seraph_ring")); // → ring1 (left hand)
+    const rgrp = p.gear.rings.ring1[p.gearShown.ring1Archetype];
+    for (const m of rgrp.meshes) {
+      const c = toFrame(m, { x: 0, y: 0, z: 0 }, p.armL); // origin in the arm's frame
+      expect(Math.abs(c.x), `ring ${m.name} x ${c.x.toFixed(3)}`).toBeLessThanOrEqual(0.14);
+      expect(c.y, `ring ${m.name} y ${c.y.toFixed(3)} not at the hand`).toBeGreaterThanOrEqual(-0.9);
+      expect(c.y, `ring ${m.name} y ${c.y.toFixed(3)} not at the hand`).toBeLessThanOrEqual(-0.6);
+      expect(c.z, `ring ${m.name} z ${c.z.toFixed(3)}`).toBeGreaterThanOrEqual(-0.05);
+      expect(c.z, `ring ${m.name} z ${c.z.toFixed(3)}`).toBeLessThanOrEqual(0.22);
+    }
+    clearEquip(p);
+    T.recomputeStats(p);
+  });
+
+  it("never reallocates the jewelry meshes across equip churn (no leak) while stepping", () => {
+    const p = T.player;
+    clearEquip(p);
+    T.recomputeStats(p);
+    const neckNode = p.gear.necklaces.amulet.node;
+    const ring1Node = p.gear.rings.ring1.gemband.node;
+    const meshCount = Object.values(p.gear.necklaces).reduce((n, grp) => n + grp.meshes.length, 0)
+      + ["ring1", "ring2"].reduce((n, slot) => n + Object.values(p.gear.rings[slot]).reduce((m, grp) => m + grp.meshes.length, 0), 0);
+    for (let i = 0; i < 10; i++) {
+      for (const id of ["amulet_vigor", "titan_pendant", "ring_power", "vampiric_ring", "seraph_ring"]) {
+        T.equipItem(p, T.makeItem(id));
+        expect(() => step(1)).not.toThrow(); // jewelry rides the body/hands each frame
+      }
+      T.unequipSlot(p, "necklace");
+      T.unequipSlot(p, "ring1");
+      T.unequipSlot(p, "ring2");
+      T.recomputeStats(p);
+    }
+    // Same node objects + total mesh count throughout — nothing was rebuilt.
+    expect(p.gear.necklaces.amulet.node).toBe(neckNode);
+    expect(p.gear.rings.ring1.gemband.node).toBe(ring1Node);
+    expect(Object.values(p.gear.necklaces).reduce((n, grp) => n + grp.meshes.length, 0)
+      + ["ring1", "ring2"].reduce((n, slot) => n + Object.values(p.gear.rings[slot]).reduce((m, grp) => m + grp.meshes.length, 0), 0)).toBe(meshCount);
+    clearEquip(p);
+    T.recomputeStats(p);
+  });
+
+  it("round-trips equipped jewelry through serialize/applySave (no schema change)", () => {
+    const p = T.player;
+    clearEquip(p);
+    p.equipment.necklace = T.makeItem("titan_pendant");
+    p.equipment.ring1 = T.makeItem("ring_power");
+    p.equipment.ring2 = T.makeItem("seraph_ring");
+    T.recomputeStats(p);
+    const save = T.serializeGame();
+    clearEquip(p);
+    T.applySave(save);
+    expect(T.player.equipment.necklace.id).toBe("titan_pendant");
+    expect(T.player.equipment.ring1.id).toBe("ring_power");
+    expect(T.player.equipment.ring2.id).toBe("seraph_ring");
+    // The worn meshes rebuild from the equipped items on load — no persisted mesh state.
+    expect(T.player.gearShown.necklace).toBe(true);
+    expect(T.player.gearShown.necklaceArchetype).toBe("amulet");
+    clearEquip(T.player);
+    T.recomputeStats(T.player);
+  });
+});

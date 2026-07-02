@@ -630,6 +630,66 @@
     return { archetype, material };
   }
 
+  // ---- Worn jewelry: necklace + rings (Task 33) -------------------------
+  // Necklaces and rings were equipped but INVISIBLE on the character — unlike the
+  // other seven worn slots, they rendered no mesh. This adds a subtle, tasteful worn
+  // piece for each: a chain + pendant at the neck (necklace) and a thin gem-set band
+  // on the hand (rings). As with every other worn-gear category, the 3D SHAPE is
+  // chosen by a pure, testable selector so the worn-gear builder (src/game.js
+  // `_buildJewelry`) pre-builds every archetype ONCE (under a shared neck anchor +
+  // per-hand ring anchors) and just toggles + tints the matching one on equip — so
+  // equipping never allocates or leaks. It is TINY and tier-gated to the HIGH tier
+  // only (dropped entirely on the low/phone tier — see wornDetailFor), and each piece
+  // varies by rarity/material with the gemstone taking a rarity/signature colour.
+  //
+  // A jewelry def may opt in via a `jewel: { archetype, material, gem }` block; without
+  // one a sensible piece is inferred from the item's rarity, so ANY ring/necklace def
+  // maps to a valid shape the builder can draw.
+  //
+  //   necklace archetype: "pendant" a fine collar chain + a small teardrop gem  (normal)
+  //                       "amulet"  a chain + a round medallion set with a gem   (rare)
+  //                       "torc"    a heavier twin chain + a big faceted gem     (epic+)
+  //   ring archetype:     "band"    a plain slim band + a tiny gem dot           (normal)
+  //                       "signet"  a band + a flat signet face + a gem          (rare)
+  //                       "gemband" a band + a raised claw-set gemstone          (epic+)
+  //   material (metal):   "silver" | "gold" | "bronze" | "dragonscale" (follows rarity)
+  //   gem:  a hex colour for the stone — an explicit `jewel.gem` gives the item its own
+  //         signature (e.g. a Ring of Power's ruby); otherwise it defaults to the item's
+  //         RARITY colour, so the finish always reads by rarity (the task hint).
+  const NECKLACE_ARCHETYPES = ["pendant", "amulet", "torc"];
+  const RING_ARCHETYPES = ["band", "signet", "gemband"];
+  const JEWELRY_MATERIALS = ["silver", "gold", "bronze", "dragonscale"];
+  // Base metal tints per material (the equip-time paint recolours the built mesh, but a
+  // sensible base keeps the un-painted headless build + any preview readable).
+  const JEWELRY_MATERIAL_TINT = {
+    silver: "#d5dae8", gold: "#e8c057", bronze: "#c88a3a", dragonscale: "#b8603a",
+  };
+  // Resolve a jewelry item def (ring OR necklace) to a { kind, archetype, material, gem }
+  // record. Pure + total: honours an explicit `jewel` block, else infers the archetype
+  // from rarity (epic/legendary → the ornate top tier, rare → the mid tier, else the
+  // simple base) and the metal from rarity (legendary → dragonscale, epic/rare → gold,
+  // else silver); the gem colour is the explicit signature or the item's rarity colour.
+  // Finally clamps every field to a value the builder can draw, so it never throws or
+  // returns an invalid shape.
+  function jewelryArchetype(def) {
+    const isRing = !!(def && def.type === "ring");
+    const list = isRing ? RING_ARCHETYPES : NECKLACE_ARCHETYPES;
+    const j = def && def.jewel;
+    let archetype = list[0];
+    if (j && j.archetype) archetype = j.archetype;
+    else if (def && (def.rarity === "legendary" || def.rarity === "epic")) archetype = list[2];
+    else if (def && def.rarity === "rare") archetype = list[1];
+    let material = "silver";
+    if (j && j.material) material = j.material;
+    else if (def && def.rarity === "legendary") material = "dragonscale";
+    else if (def && (def.rarity === "epic" || def.rarity === "rare")) material = "gold";
+    let gem = (j && j.gem) || (RARITY[def && def.rarity] || RARITY.normal).color;
+    if (!list.includes(archetype)) archetype = list[0];
+    if (!JEWELRY_MATERIALS.includes(material)) material = "silver";
+    if (typeof gem !== "string" || gem[0] !== "#") gem = RARITY.normal.color;
+    return { kind: isRing ? "ring" : "necklace", archetype, material, gem };
+  }
+
   // An item's effective stat block once its enhancement level + affixes are folded
   // in. `haste` (a sub-1 cooldown multiplier) improves *toward* zero, so we scale
   // its distance from 1 instead of the raw value; affix haste then compounds.
@@ -742,11 +802,11 @@
     guard_cloak:    { name: "Warding Cloak",  icon: "🧥", type: "cloak",       rarity: "normal", cost: 30, desc: "+18 health, +4% resist.", stats: { maxHealth: 18, damageReduction: 0.04 }, cloak: { archetype: "mantle", material: "cloth" } },
 
     // ----- Accessories (normal / buyable) -----
-    amulet_vigor:   { name: "Amulet of Vigor", icon: "📿", type: "necklace", rarity: "normal", cost: 26, desc: "+25 max health.", stats: { maxHealth: 25 } },
-    coin_amulet:    { name: "Lodestone Pendant", icon: "🧲", type: "necklace", rarity: "normal", cost: 18, desc: "Draw coins from afar.", stats: { coinRange: 3 } },
-    ring_power:     { name: "Ring of Power",  icon: "💍", type: "ring", rarity: "normal", cost: 22, desc: "+1 weapon damage.", stats: { damage: 1 } },
-    ring_swift:     { name: "Ring of Haste",  icon: "💍", type: "ring", rarity: "normal", cost: 24, desc: "Attack 12% faster.", stats: { haste: 0.88 } },
-    ring_guard:     { name: "Ring of Guard",  icon: "💍", type: "ring", rarity: "normal", cost: 20, desc: "+6% damage resist.", stats: { damageReduction: 0.06 } },
+    amulet_vigor:   { name: "Amulet of Vigor", icon: "📿", type: "necklace", rarity: "normal", cost: 26, desc: "+25 max health.", stats: { maxHealth: 25 }, jewel: { gem: "#7dff9e" } },
+    coin_amulet:    { name: "Lodestone Pendant", icon: "🧲", type: "necklace", rarity: "normal", cost: 18, desc: "Draw coins from afar.", stats: { coinRange: 3 }, jewel: { gem: "#ffd76a" } },
+    ring_power:     { name: "Ring of Power",  icon: "💍", type: "ring", rarity: "normal", cost: 22, desc: "+1 weapon damage.", stats: { damage: 1 }, jewel: { gem: "#ff6b6b" } },
+    ring_swift:     { name: "Ring of Haste",  icon: "💍", type: "ring", rarity: "normal", cost: 24, desc: "Attack 12% faster.", stats: { haste: 0.88 }, jewel: { gem: "#6fe0d0" } },
+    ring_guard:     { name: "Ring of Guard",  icon: "💍", type: "ring", rarity: "normal", cost: 20, desc: "+6% damage resist.", stats: { damageReduction: 0.06 }, jewel: { gem: "#9fd0ff" } },
 
     // ----- RARE gear (boss drops only) -----
     excalibur:      { name: "Excalibur", icon: "🗡️", type: "weapon", rarity: "rare", hands: 2, value: 120, desc: "Two-handed greatsword. Devastating wide arc.",
@@ -762,8 +822,8 @@
     dragon_helm:    { name: "Dragon Helm",   icon: "🐲", type: "helmet",      rarity: "rare", value: 80, desc: "+40 health, +10% resist.", stats: { maxHealth: 40, damageReduction: 0.1 }, set: "dragonscale", helm: { archetype: "dragon", material: "dragonscale" } },
     aegis_plate:    { name: "Aegis Plate",   icon: "🛡️", type: "breastplate", rarity: "rare", value: 100, desc: "+55 health, +16% resist.", stats: { maxHealth: 55, damageReduction: 0.16 }, chest: { archetype: "plate", material: "steel" } },
     winged_boots:   { name: "Winged Boots",  icon: "🪽", type: "boots",       rarity: "rare", value: 80, desc: "+1.4 speed, +5% resist.", stats: { moveSpeed: 1.4, damageReduction: 0.05 }, boot: { archetype: "boot", material: "leather" } },
-    vampiric_ring:  { name: "Vampiric Ring", icon: "🩸", type: "ring",        rarity: "rare", value: 70, desc: "Heal +3 per kill.", stats: { lifesteal: 3 } },
-    titan_pendant:  { name: "Titan Pendant", icon: "💠", type: "necklace",    rarity: "rare", value: 110, desc: "+45 health, +8% resist, +2 damage.", stats: { maxHealth: 45, damageReduction: 0.08, damage: 2 } },
+    vampiric_ring:  { name: "Vampiric Ring", icon: "🩸", type: "ring",        rarity: "rare", value: 70, desc: "Heal +3 per kill.", stats: { lifesteal: 3 }, jewel: { gem: "#ff3b5c" } },
+    titan_pendant:  { name: "Titan Pendant", icon: "💠", type: "necklace",    rarity: "rare", value: 110, desc: "+45 health, +8% resist, +2 damage.", stats: { maxHealth: 45, damageReduction: 0.08, damage: 2 }, jewel: { gem: "#7fd0ff" } },
     dragonscale_plate: { name: "Dragonscale Plate", icon: "🐲", type: "breastplate", rarity: "rare", value: 105, desc: "+50 health, +14% resist.", stats: { maxHealth: 50, damageReduction: 0.14 }, set: "dragonscale", chest: { archetype: "dragonscale", material: "dragonscale" } },
     dragon_pauldrons: { name: "Dragonscale Spaulders", icon: "🐲", type: "pauldrons", rarity: "rare", value: 80, desc: "+30 health, +8% resist.", stats: { maxHealth: 30, damageReduction: 0.08 }, set: "dragonscale", paul: { archetype: "spiked", material: "dragonscale" } },
     dragon_gauntlets: { name: "Dragonscale Gauntlets", icon: "🐲", type: "gloves", rarity: "rare", value: 78, desc: "+18 health, +2 damage.", stats: { maxHealth: 18, damage: 2 }, set: "dragonscale", glov: { archetype: "scaled", material: "dragonscale" } },
@@ -778,7 +838,7 @@
     sunfire_staff:  { name: "Sunfire Staff", icon: "☀️", type: "weapon", rarity: "epic", hands: 2, value: 190, desc: "Two-handed. A 5-bolt searing fan.",
                       weapon: { ranged: true, shape: "bolt", damage: 3, cooldown: 0.3, multishot: 5, spread: 0.14, pierce: 1, boltSpeed: 28, boltRadius: 0.95, gravity: 1.1, color: "#ffb24e", haloColor: "#ffe27a" } },
     phoenix_plate:  { name: "Phoenix Plate", icon: "🔥", type: "breastplate", rarity: "epic", value: 180, desc: "+75 health, +20% resist.", stats: { maxHealth: 75, damageReduction: 0.2 }, chest: { archetype: "plate", material: "gold" } },
-    seraph_ring:    { name: "Seraph Ring", icon: "💫", type: "ring", rarity: "epic", value: 150, desc: "+3 damage, +5 lifesteal.", stats: { damage: 3, lifesteal: 5 } },
+    seraph_ring:    { name: "Seraph Ring", icon: "💫", type: "ring", rarity: "epic", value: 150, desc: "+3 damage, +5 lifesteal.", stats: { damage: 3, lifesteal: 5 }, jewel: { gem: "#e6c8ff" } },
     storm_pauldrons:{ name: "Stormforged Spaulders", icon: "⚡", type: "pauldrons", rarity: "epic", value: 160, desc: "+45 health, +12% resist.", stats: { maxHealth: 45, damageReduction: 0.12 }, paul: { archetype: "winged", material: "steel" } },
     titan_gauntlets:{ name: "Titan Gauntlets", icon: "🥊", type: "gloves", rarity: "epic", value: 150, desc: "+25 health, +3 damage.", stats: { maxHealth: 25, damage: 3 }, glov: { archetype: "warplate", material: "steel" } },
 
@@ -856,4 +916,5 @@ export {
   BOOT_ARCHETYPES, BOOT_MATERIALS, BOOT_MATERIAL_TINT, bootArchetype,
   CLOAK_ARCHETYPES, CLOAK_MATERIALS, CLOAK_MATERIAL_TINT, cloakArchetype,
   WEAPON_ARCHETYPES, WEAPON_MATERIALS, WEAPON_MATERIAL_TINT, weaponClassOf, weaponArchetype,
+  NECKLACE_ARCHETYPES, RING_ARCHETYPES, JEWELRY_MATERIALS, JEWELRY_MATERIAL_TINT, jewelryArchetype,
 };

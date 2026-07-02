@@ -329,6 +329,26 @@ export default defineConfig({
       testMatch: /combat-anim\.spec\.js/,
       use: { ...devices["Desktop Chrome"] },
     },
+    // Visible jewelry (Task 33): boot the built site, equip several necklaces (then
+    // several rings on the bare hand), frame a close-up of the throat / hand and
+    // screenshot each, asserting each maps to its archetype and the shapes/gems visibly
+    // differ. Needs a real WebGL canvas. Runs at desktop AND on the Galaxy S24 Ultra
+    // profile (portrait + landscape) since it's an on-character visual (per Task 33).
+    {
+      name: "worn-jewelry-desktop",
+      testMatch: /worn-jewelry\.spec\.js/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "worn-jewelry-s24-portrait",
+      testMatch: /worn-jewelry\.spec\.js/,
+      use: s24Portrait,
+    },
+    {
+      name: "worn-jewelry-s24-landscape",
+      testMatch: /worn-jewelry\.spec\.js/,
+      use: s24Landscape,
+    },
   ],
   webServer: {
     command: "npm run build && npm run preview",

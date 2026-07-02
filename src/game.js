@@ -35,6 +35,7 @@ import {
   BELT_MATERIAL_TINT, beltArchetype, BOOT_MATERIAL_TINT, bootArchetype,
   CLOAK_MATERIAL_TINT, cloakArchetype,
   WEAPON_ARCHETYPES, WEAPON_MATERIALS, WEAPON_MATERIAL_TINT, weaponClassOf, weaponArchetype,
+  NECKLACE_ARCHETYPES, RING_ARCHETYPES, JEWELRY_MATERIALS, JEWELRY_MATERIAL_TINT, jewelryArchetype,
 } from "./data/items.js";
 import {
   MATERIALS, MATERIAL_IDS, RESOURCE_KINDS, RELICS, CASTLE_PARTS, CASTLE_PART_BY_ID,
@@ -355,9 +356,15 @@ import {
   // built; the lighter extras (pauldrons, belt) and the per-frame cloak billow
   // are dropped on the low tier so phones keep their budget. Equip still applies
   // a missing piece's STATS — only its mesh is skipped.
+  // Jewelry (necklace + rings, Task 33) is the tiniest, most additive worn piece, so it
+  // is HIGH-TIER ONLY (`jewelry: true` only when tier === "high") — every PHONE (both the
+  // low AND medium mobile tiers) skips it entirely, a clean omission that costs them zero
+  // fps, exactly as the task's "high-tier-only so phones skip it" hint asks. Its finer
+  // trims (torc side beads, ring claws) then gate on `jewelryDetail`.
   function wornDetailFor(tier) {
-    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, boots: true, cloak: true, cloakSway: false, helmDetail: false, chestDetail: false, pauldronDetail: false, gloveDetail: false, beltDetail: false, bootDetail: false, weaponDetail: false };
-    return { pauldrons: true, belt: true, gloves: true, boots: true, cloak: true, cloakSway: true, helmDetail: true, chestDetail: true, pauldronDetail: true, gloveDetail: true, beltDetail: true, bootDetail: true, weaponDetail: true };
+    if (tier === "low") return { pauldrons: false, belt: false, gloves: true, boots: true, cloak: true, cloakSway: false, jewelry: false, helmDetail: false, chestDetail: false, pauldronDetail: false, gloveDetail: false, beltDetail: false, bootDetail: false, weaponDetail: false, jewelryDetail: false };
+    const high = tier === "high";
+    return { pauldrons: true, belt: true, gloves: true, boots: true, cloak: true, cloakSway: true, jewelry: high, helmDetail: true, chestDetail: true, pauldronDetail: true, gloveDetail: true, beltDetail: true, bootDetail: true, weaponDetail: true, jewelryDetail: high };
   }
 
   // ---- Cloak billow (Task 31) -------------------------------------------
@@ -1592,6 +1599,14 @@ import {
       // the equipped one. Always built (core silhouette); finer trims are tier-gated.
       if (spec.cloak) this._buildCloak(scene, spec, cast, off);
 
+      // Jewelry — a subtle worn necklace (chain + pendant at the throat) and rings
+      // (a slim gem-set band on each hand) per item (Task 33). Necklaces/rings were
+      // equipped but rendered no mesh; this gives them a tiny, tasteful piece. Every
+      // archetype is pre-built once under a shared neck anchor (+ per-hand ring
+      // anchors) and refreshWornGear() reveals + tints the equipped one. Tier-gated:
+      // dropped entirely on the low tier (a clean omission), so phones skip it.
+      if (spec.jewelry) this._buildJewelry(scene, spec, cast, off);
+
       this.refreshWornGear();
     }
 
@@ -2610,6 +2625,139 @@ import {
       });
     }
 
+    // Build the subtle worn jewelry (Task 33): a necklace (chain + pendant) under a
+    // single neck anchor at the throat, and a slim gem-set ring under a per-hand anchor
+    // on each hand. Every archetype is pre-built ONCE + hidden; refreshWornGear() reveals
+    // + tints the equipped one, so equipping never allocates or leaks. Headless-safe (all
+    // meshes/materials go through the proven helpers). Tier-gated OFF entirely on the low
+    // tier — this method is only called above it — and its finer trims gate on
+    // `jewelryDetail`. Kept TINY so it never costs phone fps and never engulfs the body:
+    // the necklace rides in FRONT of the chest (clear of any chest piece); the rings sit
+    // at the finger and are hidden by refreshWornGear when a glove covers the hand.
+    _buildJewelry(scene, spec, cast, off) {
+      const detail = spec.jewelryDetail !== false; // torc beads / ring claws above low
+      const g = this.gear;
+      let uid = 0;
+      // A fresh metal material for a jewelry part (tracked in `mats` so the equip paint
+      // recolours the band by material) and a fresh gem material (tracked in `gemMats`
+      // so the equip paint gives the stone its rarity/signature colour + glow).
+      const metalM = (mats, tintHex) => { const m = emat(scene, "gearJewelM" + uid++, tintHex, 0.14); mats.push(m); return m; };
+      const gemM = (gemMats) => { const m = emat(scene, "gearJewelG" + uid++, "#bcd2ff", 0.5); gemMats.push(m); return m; };
+      // Primitive helpers attached to a group node (each tracked for the leak/fit tests).
+      const ring = (grp, node, name, dia, thick, m) => { const x = BABYLON.MeshBuilder.CreateTorus(name, { diameter: dia, thickness: thick, tessellation: 16 }, scene); x.material = m; x.parent = node; grp.meshes.push(x); cast(x); return x; };
+      const bar = (grp, node, name, top, bot, h, m) => { const x = cyl(scene, name, top, bot, h, m); x.parent = node; grp.meshes.push(x); cast(x); return x; };
+      const bead = (grp, node, name, dia, m) => { const x = sphere(scene, name, dia, m); x.parent = node; grp.meshes.push(x); cast(x); return x; };
+      const box3 = (grp, node, name, w, h, d, m) => { const x = box(scene, name, w, h, d, m); x.parent = node; grp.meshes.push(x); cast(x); return x; };
+      const gemPoly = (grp, node, name, size, m) => { const x = BABYLON.MeshBuilder.CreatePolyhedron(name, { type: 1, size }, scene); x.material = m; x.parent = node; grp.meshes.push(x); cast(x); return x; };
+
+      // ---- NECKLACE: a fine collar chain + a pendant, worn at the throat/upper chest.
+      // The anchor sits at lean-y 1.5 (the collar); the torso surface there is z ≈ 0.23,
+      // so the chain ring (front z ≈ 0.27) sits just PROUD of the body, and the pendant
+      // hangs in front on the sternum (z ≥ 0.3) — clear of every chest piece (whose front
+      // tops out at z ≈ 0.27) so it never clips the breastplate.
+      const neck = new BABYLON.TransformNode("gearNecklace", scene);
+      neck.parent = this.lean; neck.position.set(0, 1.5, 0.02);
+      g.necklace = neck; off(neck);
+      const necklaces = (g.necklaces = {});
+      const necklace = (key, build) => {
+        const node = new BABYLON.TransformNode("necklace_" + key, scene);
+        node.parent = neck; off(node);
+        const grp = { node, mats: [], gemMats: [], meshes: [] };
+        build(grp, node);
+        necklaces[key] = grp;
+      };
+      // Shared collar chain + a short drop strand down to the pendant seat (0,-0.18,0.3).
+      const collar = (grp, node, thick) => {
+        const m = metalM(grp.mats, "#d5dae8");
+        const chain = ring(grp, node, "neckChain", 0.5, thick, m); chain.rotation.x = Math.PI / 2; chain.position.set(0, 0, 0);
+        const drop = bar(grp, node, "neckDrop", 0.02, 0.02, 0.16, m); drop.position.set(0, -0.1, 0.28);
+        return m;
+      };
+
+      // pendant (normal): a fine chain + a small teardrop gem.
+      necklace("pendant", (grp, node) => {
+        collar(grp, node, 0.02);
+        const gm = gemM(grp.gemMats);
+        const drop = bead(grp, node, "pendantGem", 0.11, gm); drop.position.set(0, -0.2, 0.31); drop.scaling.set(0.8, 1.35, 0.8);
+      });
+      // amulet (rare): a chain + a round medallion set with a gem.
+      necklace("amulet", (grp, node) => {
+        const m = collar(grp, node, 0.024);
+        const disc = bar(grp, node, "amuletDisc", 0.2, 0.2, 0.04, m); disc.rotation.x = Math.PI / 2; disc.position.set(0, -0.22, 0.31);
+        if (detail) { const rim = ring(grp, node, "amuletRim", 0.22, 0.02, m); rim.rotation.x = Math.PI / 2; rim.position.set(0, -0.22, 0.31); }
+        const gm = gemM(grp.gemMats);
+        const stone = gemPoly(grp, node, "amuletGem", 0.06, gm); stone.position.set(0, -0.22, 0.34);
+      });
+      // torc (epic+): a heavier twin chain + a big faceted gem (+ side beads on detail).
+      necklace("torc", (grp, node) => {
+        const m = collar(grp, node, 0.03);
+        const chain2 = ring(grp, node, "torcChain2", 0.54, 0.028, m); chain2.rotation.x = Math.PI / 2; chain2.position.set(0, -0.03, 0);
+        const gm = gemM(grp.gemMats);
+        const stone = gemPoly(grp, node, "torcGem", 0.1, gm); stone.position.set(0, -0.22, 0.33);
+        if (detail) for (const sx of [-1, 1]) { const b = bead(grp, node, "torcBead", 0.07, gm); b.position.set(sx * 0.16, -0.14, 0.26); }
+      });
+
+      // ---- RINGS: a slim gem-set band on the hand. ring1 rides the LEFT hand, ring2 the
+      // RIGHT — each under its own anchor at the finger (arm-local y −0.72, just below the
+      // hand sphere), so it follows the hand through the attack. Every archetype is
+      // pre-built on BOTH slots; refreshWornGear() reveals the equipped slot's archetype
+      // and HIDES it when a glove covers that hand (so a ring never clips the glove).
+      const rings = (g.rings = { ring1: {}, ring2: {} });
+      const ringHand = { ring1: this.armL, ring2: this.armR };
+      const ringBuild = {
+        // band (normal): a plain slim band + a tiny gem dot.
+        band: (grp, node) => {
+          const m = metalM(grp.mats, "#d5dae8");
+          const b = ring(grp, node, "ringBand", 0.12, 0.022, m); b.rotation.x = Math.PI / 2;
+          const gm = gemM(grp.gemMats);
+          const dot = bead(grp, node, "ringDot", 0.04, gm); dot.position.set(0, 0, 0.065);
+        },
+        // signet (rare): a band + a flat signet face set with a gem.
+        signet: (grp, node) => {
+          const m = metalM(grp.mats, "#e8c057");
+          const b = ring(grp, node, "signetBand", 0.13, 0.026, m); b.rotation.x = Math.PI / 2;
+          const face = box3(grp, node, "signetFace", 0.1, 0.06, 0.03, m); face.position.set(0, 0.02, 0.06); face.rotation.x = -0.4;
+          const gm = gemM(grp.gemMats);
+          const stone = bead(grp, node, "signetGem", 0.045, gm); stone.position.set(0, 0.03, 0.075);
+        },
+        // gemband (epic+): a band + a raised claw-set gemstone (+ claws on detail).
+        gemband: (grp, node) => {
+          const m = metalM(grp.mats, "#e8c057");
+          const b = ring(grp, node, "gembandBand", 0.13, 0.028, m); b.rotation.x = Math.PI / 2;
+          const gm = gemM(grp.gemMats);
+          const stone = gemPoly(grp, node, "gembandGem", 0.05, gm); stone.position.set(0, 0.03, 0.07);
+          if (detail) for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; const claw = bar(grp, node, "gembandClaw", 0.015, 0.015, 0.06, m); claw.position.set(Math.cos(a) * 0.045, 0.03, 0.07 + Math.sin(a) * 0.02); }
+        },
+      };
+      for (const slot of ["ring1", "ring2"]) {
+        const hand = ringHand[slot];
+        for (const key of RING_ARCHETYPES) {
+          const node = new BABYLON.TransformNode("ring_" + slot + "_" + key, scene);
+          node.parent = hand; node.position.set(0, -0.72, 0.05); off(node);
+          const grp = { node, mats: [], gemMats: [], meshes: [] };
+          ringBuild[key](grp, node);
+          rings[slot][key] = grp;
+        }
+      }
+    }
+
+    // Tint a built jewelry group on equip (Task 33): the metal band takes its material
+    // colour (a rarity-driven silver/gold/dragonscale), the gemstone takes its signature
+    // (or rarity) colour with a rarity-scaled glow — so a plain silver ring and an epic
+    // gold gemband read apart. Headless-safe (hex parse guarded). Pure visual.
+    _tintJewelry(grp, def) {
+      try {
+        const j = jewelryArchetype(def);
+        const metalHex = JEWELRY_MATERIAL_TINT[j.material] || "#d5dae8";
+        const rar = (def && def.rarity) || "normal";
+        const gemEmi = rar === "legendary" ? 0.95 : rar === "epic" ? 0.78 : rar === "rare" ? 0.6 : 0.44;
+        const mc = BABYLON.Color3.FromHexString(metalHex);
+        for (const m of grp.mats) { if (!m) continue; m.diffuseColor = mc; m.emissiveColor = mc.scale(0.16); }
+        const gc = BABYLON.Color3.FromHexString(j.gem);
+        for (const m of grp.gemMats) { if (!m) continue; m.diffuseColor = gc; m.emissiveColor = gc.scale(gemEmi); }
+      } catch (e) { /* hex parse can fail in the headless stub */ }
+    }
+
     // Show/hide + recolour each worn-gear piece from the live equipment. Pure
     // visual: no allocation (meshes built once), so equipping never leaks. The
     // rarity colour signals power at a glance; legendary/epic get a faint glow.
@@ -2726,10 +2874,51 @@ import {
           }
         }
       };
+      // Jewelry (Task 33): reveal the equipped necklace archetype under the single neck
+      // anchor, and the equipped ring archetype on each hand — HIDING a ring when a glove
+      // covers that hand so it never clips the glove. `g.necklace`/`g.rings` are absent on
+      // the low tier (jewelry omitted), which this tolerates (a clean omission). The metal
+      // band takes its material colour and the gemstone its rarity/signature glow.
+      const applyJewelry = () => {
+        // Necklace — one archetype under the shared neck anchor.
+        const ninst = this.equipment.necklace;
+        const non = !!(ninst && ninst !== TWO_HANDED);
+        shown.necklace = non;
+        try { if (g.necklace) g.necklace.setEnabled(non); } catch (e) {}
+        const nsel = non && g.necklaces ? jewelryArchetype(getDef(ninst.id)).archetype : null;
+        shown.necklaceArchetype = nsel;
+        if (g.necklaces) {
+          for (const key in g.necklaces) {
+            const grp = g.necklaces[key];
+            const show = non && key === nsel;
+            try { grp.node.setEnabled(show); } catch (e) {}
+            if (show) this._tintJewelry(grp, getDef(ninst.id));
+          }
+        }
+        // Rings — one per hand; hidden on any hand a glove covers (both hands share the
+        // single `gloves` slot), so a ring is only ever shown on a bare hand.
+        const gloved = !!(this.equipment.gloves && this.equipment.gloves !== TWO_HANDED);
+        for (const slot of ["ring1", "ring2"]) {
+          const rinst = this.equipment[slot];
+          const ron = !!(rinst && rinst !== TWO_HANDED) && !gloved;
+          shown[slot] = ron;
+          const rsel = ron && g.rings && g.rings[slot] ? jewelryArchetype(getDef(rinst.id)).archetype : null;
+          shown[slot + "Archetype"] = rsel;
+          if (g.rings && g.rings[slot]) {
+            for (const key in g.rings[slot]) {
+              const grp = g.rings[slot][key];
+              const show = ron && key === rsel;
+              try { grp.node.setEnabled(show); } catch (e) {}
+              if (show) this._tintJewelry(grp, getDef(rinst.id));
+            }
+          }
+        }
+      };
       applyPauldrons();
       applyGloves();
       applyBoots();
       applyCloak();
+      applyJewelry();
     }
 
     // Billow the cloak with movement (Task 31). Frame-rate-independent + pure: the
@@ -13169,6 +13358,8 @@ import {
       cloakArchetype, cloakBillowStep, CLOAK_SWAY,
       // ---- Held weapons: real wand / bow / staff / sword / axe / dagger (Task 32) ----
       weaponArchetype, weaponClassOf, WEAPON_ARCHETYPES, WEAPON_MATERIALS, WEAPON_MATERIAL_TINT,
+      // ---- Visible jewelry: necklace + rings on the character (Task 33) ----
+      jewelryArchetype, NECKLACE_ARCHETYPES, RING_ARCHETYPES, JEWELRY_MATERIALS, JEWELRY_MATERIAL_TINT,
 
       // ---- Responsive HUD / drag-to-slot / fullscreen (Task 16) ----
       dragSlotReducer, pointerDragSupported, Fullscreen,
