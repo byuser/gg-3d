@@ -50,6 +50,68 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-07-02] — Task 34 — Rewrite weapon firing & melee attack animations from scratch
+
+Ninth of the **worn-equipment + combat overhaul** (Tasks 25–35), paired with Task 32's
+held weapons: the **attack animations**. The single generic `Swing` (Task 5) — one arc
+reused for every weapon — is **replaced from scratch** by a **per-weapon-class** attack
+system with real weight and follow-through: each class now reads as its own distinct,
+readable move, without regressing hit timing, pause behaviour or headless-safety.
+
+### Added
+
+- **`AttackAnim` — a from-scratch, per-weapon-class attack state machine** (`src/game.js`,
+  replacing `Swing`/`SWING_DUR`). Each class declares its own `windup → strike → recover`
+  seconds and a movement `family` (`melee` / `ranged` / `cast`), so a heavy **axe** reads
+  slow and a **dagger** fast: **sword** = swept diagonal slashes with a **3-hit combo**
+  that cycles left→right, right→left, overhead; **axe** = a weighty overhead chop (long,
+  heavy recover); **dagger** / **fists** = quick alternating stabs (2-hit one-two);
+  **bow** = nock → draw (the string hand pulls back) → release (snap) → recoil; **wand** =
+  raise → point → release; **staff** = raise → channel (the orb glow ramps through the
+  wind-up) → release. Pure, `dt`-driven and **frame-rate independent** (leftover time rolls
+  across phase edges so 30 fps and 120 fps reach the same state), **pause-correct** (a
+  zero/negative dt never advances it) and **headless-safe** (no DOM/Babylon).
+- **Real body involvement.** `Player._animateAction` maps `(class, phase, progress,
+  comboStep)` onto the actual rig — torso rotation (`lean.rotation.y` coil→drive), a weight
+  shift (`lean.position.y`), a forward lean and a foot plant (`legR`) on top of the arm
+  swing — so attacks land with weight, not just an arm waggle. The held weapon rides the
+  right-arm grip (rigid to the arm — it can't detach mid-swing), so posing the arm swings
+  the blade.
+- **Blade-trail smear** (`_buildAttackFx` / `_setTrail`) — a translucent swoosh that flashes
+  along the blade on the melee **strike** frame (rise-then-fade), riding the grip so it
+  sweeps with the swing. **Tier-gated** (dropped on the low tier, like the finer weapon
+  trims), feature-detected and headless-safe. The **muzzle glow** now *channels* brighter
+  through a staff cast's wind-up and *flares* on the ranged/cast **release** frame.
+- **`test/combat-anim.test.js`** (new Vitest suite, 16 tests) — the pure `AttackAnim`
+  (per-class timers, the strike/release frame, combo chaining + reset + single-hit classes,
+  default + pause-correctness), **frame-rate independence** (the loop's fire predicate
+  lands the hit exactly once at 30 fps *and* 120 fps, and never drops a committed hit even
+  when one giant dt skips the whole strike phase), the **live combat path** (melee lands on
+  the strike frame, in arc + range, exactly once — no early/late/double hit, correct
+  facing; ranged/cast spawns the full multishot on the release frame, not the wind-up), and
+  a headless **no-throw** pass that animates every weapon class. **Vitest 441 → 457.**
+- **`test/e2e/combat-anim.spec.js`** — a real-browser Playwright clip per weapon class:
+  boots the built site, equips each of the six classes, pins Lily at the class's strike
+  (impact/release) pose and screenshots her upper body + weapon, asserting each animates as
+  its class, the six strike poses **visibly differ**, and a **wind-up reads differently
+  from the strike** (the anticipation → impact arc actually plays). Registered as the
+  `combat-anim-desktop` project (with the shared `GG_LOCAL_BABYLON` route hook for offline
+  sandboxes).
+
+### Changed
+
+- **The combat loop fires on the attack's strike frame.** The queued `pendingAttack` still
+  lands the instant the machine reaches its **strike** (impact for melee / release for
+  ranged/cast) phase — or just after, if a big dt skipped it — so damage/projectiles line
+  up with the animation exactly as before (Task 10 preserved). `player.swing` is now
+  `player.attack`; a ranged **skill** flourish plays the held weapon's own release (or a
+  generic wand cast when unarmed/melee). The gather/mine chop moved onto the new system
+  unchanged. **No `SAVE_VERSION` change** — attack animation is transient.
+- **The old `Swing` / `SWING_DUR` / `SWING_PHASES` are gone** (no dead code). The animation
+  suites (`test/harness.test.js`, `test/bugfixes.test.js`, `test/items.test.js`) and the
+  worn-gear showcases (`worn-pauldrons` / `worn-gloves` / `worn-weapons` E2E) move to the
+  new `player.attack` (`cls` / `phase` / `AttackAnim` / `ATTACK_SPECS`).
+
 ## [2026-07-01] — Task 32 — Held weapons: real wand / bow / staff / sword / axe / dagger in hand
 
 Eighth of the **worn-equipment appearance overhaul** (Tasks 25–35): the **held weapon**.

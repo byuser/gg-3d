@@ -1,7 +1,13 @@
 # Task 34 — Rewrite weapon firing & melee attack animations from scratch (MMORPG-grade)
 
 > Part of the [Good Game 3D backlog](../TODO.md). Shared rules + Definition of Done live there.
-- **Status:** `[ ]`
+- **Status:** `[x]` 2026-07-02 — shipped: the old generic `Swing` is replaced by a
+  from-scratch per-weapon-class `AttackAnim` (sword/axe/dagger/fists melee slashes with a
+  3-hit sword combo + a tier-gated blade-trail smear, bow draw→release, wand point→release,
+  staff channel→release), each with real windup→strike→recovery body involvement (torso
+  twist, weight shift, foot plant). Hit timing is preserved (melee lands / projectiles
+  release on the strike frame, in arc/reach, once), `dt`-driven, pause-correct and
+  headless-safe. Tests: new `test/combat-anim.test.js` + a per-class Playwright clip.
 - **Depends on:** Task 5 (the `Swing` state machine) and Task 10 (the impact-frame
   fix) — this **replaces** them; Task 32 (the weapon meshes it animates); the
   `Projectile` / `Hazard` combat system. Pairs with Task 32 (build them together).

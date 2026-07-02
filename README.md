@@ -176,11 +176,16 @@ runs in English without a browser.
   tapered trunks; craggier rocks; clustered crystal spires; Lily now has hands). It's all on the
   same auto-detected **graphics tier** as the lighting (desktop → PBR + the IBL probe + the densest
   meshes; phones stay on lighter geometry, low-end keeps Standard) so it stays smooth everywhere.
-- **Lively animation:** every attack now reads with clear **anticipation → impact → recovery** —
-  Lily winds the blade back and whips it across her body for melee, draws the wand back before a
-  ranged thrust, and gives a deliberate **chop/reach** when harvesting; she also **flinches** when
-  struck. The motion runs through a small, frame-rate-independent **state machine** that freezes
-  cleanly with the pause menu. Each land also **breathes**: drifting ambient particles tuned per
+- **Distinct per-weapon attacks:** every weapon class has its own from-scratch move with clear
+  **wind-up → strike → recovery**, real weight and body involvement (torso rotation, weight shift,
+  foot plant) — a **sword** cuts swept diagonal slashes that chain into a **3-hit combo** with a
+  blade **trail**, an **axe** heaves a weighty overhead chop, a **dagger** jabs quick stabs, a
+  **bow** nocks → draws → releases → recoils, a **wand** points and releases, and a **staff**
+  raises → channels (its orb glowing) → releases; she gives a deliberate **chop/reach** when
+  harvesting and **flinches** when struck. Damage lands (and projectiles launch) on the **strike
+  frame** in the weapon's real arc/reach, so hits line up with the animation. The motion runs
+  through a small, frame-rate-independent per-class **state machine** that freezes cleanly with
+  the pause menu. Each land also **breathes**: drifting ambient particles tuned per
   zone (meadow **pollen**, forest **spores**, **sea mist**, falling **snow** on the peaks, glowing
   **motes** in the caverns, **embers** in the thicket) plus wandering **butterflies** by day and
   glowing **fireflies** in the dark, over **gustier, per-zone wind** (windy peaks, sheltered lairs).
@@ -503,10 +508,15 @@ tearing down its shadow generator** without leaking, the **feature-detected post
 models** suite: the **model-fidelity tiers** (PBR / env / mesh-density gating), the **PBR ⇄
 StandardMaterial fallback**, the legacy **diffuse/specular aliases**, the procedural **IBL env
 probe**, and **every zone building + tearing down on the PBR + env tier** without throwing, and the
-new **animation** suite: the attack **state machine** (anticipation → impact → recovery phase
-transitions + timers, proven **frame-rate independent** and **pause-correct**), the player **flinch**
+new **animation** suite: the **per-weapon attack state machine** (`AttackAnim`, Task 34 — per-class
+windup → strike → recover timers, the **strike/release frame**, **combo chaining** + reset + single
+-hit classes, proven **frame-rate independent** and **pause-correct**), the player **flinch**
 + **gather** triggers, the pure **per-zone ambient spec**, **tier-gated** ambient density, and
 **every zone building + animating + disposing its ambient FX** (feature-detected, **leak-free**),
+plus the dedicated **combat-animation** suite (`test/combat-anim.test.js`): the live combat path
+lands melee damage / releases projectiles on the **strike frame**, in **arc + range**, **exactly
+once** (no early/late/double hit, correct facing) at 30 fps **and** 120 fps, and animates every
+weapon class headlessly without throwing,
 and the new **audio** suite: per-surface **footstep** mapping, the pure **per-zone ambience bed**
 recipes, the **mixer** volume **clamping** + channel validation + **master mute**, the
 **settings persistence round-trip** (survives reload), the **headless no-op** path (no
@@ -560,10 +570,11 @@ the off-hand class; a two-hander shows one centred weapon), keeps a valid muzzle
 weapon's tip, and adds a **held-in-hand invariant** proving every weapon part is gripped in the fist
 and bounded around the hand, plus a **no-detachment invariant** proving the weapon tip's arm-frame
 position never drifts as the attack plays (so it rides the hand without flying off); Playwright
-`worn-{helmets,chests,pauldrons,gloves,belts,boots,cloaks,weapons}.spec.js` screenshot the distinct pieces worn on a real
+`worn-{helmets,chests,pauldrons,gloves,belts,boots,cloaks,weapons}.spec.js` + `combat-anim.spec.js`
+screenshot the distinct pieces worn (and each weapon **attacking**) on a real
 canvas — the pauldrons mid-attack confirming no chest penetration, the gloves wrapped around the wand
 grip, the belts seated below the chest hem, the boots striding on the feet, the cloaks draping behind mid-turn,
-and each of the six weapon classes held in hand),
+each of the six weapon classes held in hand, and each class at its distinct strike pose (Task 34)),
 and the **skill & leveling** suite (`test/skills.test.js`) that locks in Task 14: the
 **XP curve + focus math** (pure), **level-up** grants (health + focus + auto-learned skills),
 **focus regen + cooldown** ticking, the **quick-bar** assign (deduplicated) + **activate**
@@ -876,9 +887,9 @@ whole thing is unit-testable without a GPU:
   projectile shape + hands → bow/staff/wand; melee arc / speed / hands → sword/axe/dagger; an explicit
   `held:{ archetype, material }` block always wins), while the **material** follows rarity (iron → steel
   → gold → dragonscale). The six buyable weapons span all six classes. Each class is pre-built **once**
-  under the hand grip (a child of the right arm, so the weapon **tracks the hand through the existing
-  attack** for free — the from-scratch attack motion + weapon trail are Task 34, which hooks the
-  per-class trail anchor built here); the per-item accent colour tints the metal on equip so two steel
+  under the hand grip (a child of the right arm, so the weapon **tracks the hand through the attack**
+  for free — the from-scratch **per-weapon attack motion + blade trail** are Task 34, whose
+  `AttackAnim` poses the arm and flashes the trail smear built here); the per-item accent colour tints the metal on equip so two steel
   swords still read apart. A **dual-wielded** off-hand weapon rides a mirror grip on the left arm; a
   **two-handed** weapon shows one centred weapon. The bolt/arrow muzzle is repositioned to the active
   weapon's tip so ranged casts still launch from the business end. Tier-gated (finer trims dropped on
@@ -1146,11 +1157,16 @@ Source: GitHub Actions**.
 - [x] **Bigger world**: an island with a sky dome, surrounding sea, distant mountains and named landmarks
 - [x] **Impact feedback**: knockback + shard bursts on hits, ground/scenery splats, bomber shockwaves
 - [x] Prettier character animation (swinging ponytails + feet, a forward lean and hip sway)
-- [x] **More + higher-quality animation** — attacks read as **anticipation → impact → recovery** via
-      a frame-rate-independent, pause-correct **`Swing`** state machine (melee / ranged / gather), a
-      **flinch** on damage, plus per-zone **ambient FX** (drifting pollen/spores/mist/snow/motes/embers
-      + wandering butterflies & fireflies) over **gustier, per-zone wind** — all tier-gated, feature-
-      detected and disposed on travel; covered by a new headless animation suite
+- [x] **More + higher-quality animation** — a **flinch** on damage, plus per-zone **ambient FX**
+      (drifting pollen/spores/mist/snow/motes/embers + wandering butterflies & fireflies) over
+      **gustier, per-zone wind** — all tier-gated, feature-detected and disposed on travel; covered
+      by a headless animation suite
+- [x] **From-scratch per-weapon attack animations (Task 34)** — the generic `Swing` is replaced by a
+      per-weapon-class **`AttackAnim`** (windup → strike → recover with torso rotation, weight shift +
+      foot plant): sword slashes that chain into a **3-hit combo** with a tier-gated **blade trail**,
+      an axe overhead chop, dagger stabs, a bow draw→release→recoil, a wand point→release and a staff
+      channel→release; damage lands / projectiles launch on the **strike frame** in the weapon's real
+      arc/reach, **frame-rate-independent**, **pause-correct** and headless-safe
 - [x] Save/load extended to the full adventure state (materials, relics, quests, castle, time, weather)
 - [x] **Russian language support** — full **English + Russian** localization (UI + all data) via a
       `LOCALES`/`t()` i18n layer, switchable on the start screen & in pause settings, applied live
@@ -1416,11 +1432,19 @@ Source: GitHub Actions**.
       mechanics (ranged + shape + hands → bow/staff/wand; melee arc/speed/hands → sword/axe/dagger; an
       explicit `held` block wins) while the material follows rarity — the six buyable weapons span all six
       classes. Each class builds **once** under the hand grip (a child of the right arm, so it **tracks the
-      hand through the existing attack**; the from-scratch attack motion + weapon trail are Task 34, which
-      hooks the per-class trail anchor built here); a **dual-wield** shows an off-hand weapon on a mirror
+      hand through the attack**; the from-scratch attack motion + blade trail are Task 34, whose
+      `AttackAnim` poses the arm and flashes the trail smear built here); a **dual-wield** shows an off-hand weapon on a mirror
       left grip, a **two-hander** one centred weapon, and the bolt/arrow muzzle rides the active weapon's
       tip. Built once (no reallocation), tier-gated (finer trims on high; core weapon always drawn), no
       `SAVE_VERSION` change. Covered by `test/items.test.js` (incl. a held-in-hand + no-detachment
       invariant) + `test/e2e/worn-weapons.spec.js` (a real-browser screenshot of each of the six weapon
       classes held in hand) — Task 32
+- [x] **From-scratch per-weapon attack animations** — the single generic `Swing` is replaced by a
+      per-weapon-class **`AttackAnim`** (windup → strike → recover, each with real weight + body
+      involvement): sword swept diagonal slashes chaining a **3-hit combo** with a tier-gated **blade
+      trail**, an axe weighty overhead chop, dagger quick stabs, a bow nock→draw→release→recoil, a wand
+      point→release and a staff channel→release. Damage lands / projectiles launch on the **strike frame**
+      in the weapon's real arc/reach (no early/late/double hit), `dt`-driven, **frame-rate independent**,
+      **pause-correct** and headless-safe; no `SAVE_VERSION` change. Covered by `test/combat-anim.test.js`
+      + `test/e2e/combat-anim.spec.js` (a real-browser clip of each class's distinct strike) — Task 34
 - [ ] Puzzles (levers, plates, gated doors)
