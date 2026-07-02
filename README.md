@@ -573,13 +573,21 @@ position never drifts as the attack plays (so it rides the hand without flying o
 adds a **throat / at-the-hand fit invariant** proving the necklace rides in front of the chest (a
 pendant part sits proud, clear of the breastplate) and the ring seats at the hand, a **glove-cover
 rule** hiding the rings whenever a glove is worn (so a ring never clips the glove), and its **high-tier
-gate** (built only on the desktop tier — every phone skips it); Playwright
-`worn-{helmets,chests,pauldrons,gloves,belts,boots,cloaks,weapons,jewelry}.spec.js` + `combat-anim.spec.js`
+gate** (built only on the desktop tier — every phone skips it); the **full-loadout integration** suite
+(`test/worngear.test.js`, Task 35) then dresses Lily in **every slot at once** and drives the **real**
+animation, proving the held weapon never penetrates the torso/head core through any weapon's wind-up →
+strike → recover (the strike frame held clean), the neighbouring parts stay clear with a full suit
+(pauldrons outboard, belt tucked under the chest, necklace proud of the breastplate, cloak behind the
+legs), `refreshWornGear` shows exactly the equipped parts with no stray on swap/unequip, and every worn +
+weapon mesh descends from `player.root` (disposed with the player, never reallocated on churn) on every
+tier; Playwright
+`worn-{helmets,chests,pauldrons,gloves,belts,boots,cloaks,weapons,jewelry,loadout}.spec.js` + `combat-anim.spec.js`
 screenshot the distinct pieces worn (and each weapon **attacking**) on a real
 canvas — the pauldrons mid-attack confirming no chest penetration, the gloves wrapped around the wand
 grip, the belts seated below the chest hem, the boots striding on the feet, the cloaks draping behind mid-turn,
-each of the six weapon classes held in hand, each class at its distinct strike pose (Task 34), and the
-necklaces/rings on the model (the jewelry spec also proving graceful omission on the Galaxy S24 phone tier)),
+each of the six weapon classes held in hand, each class at its distinct strike pose (Task 34), the
+necklaces/rings on the model (the jewelry spec also proving graceful omission on the Galaxy S24 phone tier),
+and a **fully-geared Lily mid-attack for each weapon class** (the loadout matrix, desktop + S24 portrait/landscape)),
 and the **skill & leveling** suite (`test/skills.test.js`) that locks in Task 14: the
 **XP curve + focus math** (pure), **level-up** grants (health + focus + auto-learned skills),
 **focus regen + cooldown** ticking, the **quick-bar** assign (deduplicated) + **activate**
@@ -914,6 +922,15 @@ whole thing is unit-testable without a GPU:
   **high-tier only** — the tiniest, most additive piece, so **every phone skips it** (a clean omission)
   and pays nothing. Built **once** + toggled/tinted on equip like the rest, so it can't leak. **No
   `SAVE_VERSION` change** (the worn meshes derive from the equipped items).
+- **Full-loadout fit & clipping integration (Task 35).** The **final integration pass** over the whole
+  worn-gear family: with **every** slot equipped at once and each weapon class's Task 34 attack playing,
+  no worn part or the held weapon clips Lily's body or another part across idle / walk / each weapon's
+  wind-up → strike → recover / flinch on every tier. Two named, exported **fit tables** consolidate the
+  cross-part placement so it stays auditable — `GRIP_SEAT` seats the drawn weapon **outboard + forward**
+  of the fist so a wide hilt clears the hip at rest (the weapon still grips at the fist and rides the
+  hand through every attack), and `SWORD_WINDUP_ROLL` tightens the slash's anticipation cock (`0.8 →
+  0.45 rad`) so the blade grazes but never plunges through the chest — **the strike/hit frame is
+  untouched**, so Task 34's timing + reach are unchanged. **No `SAVE_VERSION` change** (visual only).
 - **Persistence.** `SAVE_VERSION` 7 stores `{ id, lvl, aff }` per instance across the bag + all 12
   slots; older saves (no affixes / no new slots) load with clean defaults.
 - **Value / weight.** Items carry a coin **value** (resale, scaled by enhancement); **weight /
@@ -1480,4 +1497,16 @@ Source: GitHub Actions**.
       derive from the equipped items). Covered by `test/items.test.js` (incl. a throat / at-the-hand fit +
       glove-cover invariant) + `test/e2e/worn-jewelry.spec.js` (a real-browser screenshot of distinct
       necklaces + rings on the model, plus graceful omission on the Galaxy S24 phone tier) — Task 33
+- [x] **Full-loadout fit & clipping integration** — the **final integration pass** over the worn-gear
+      family: with **every** slot equipped at once and each weapon class's attack playing, no worn part or
+      the held weapon clips Lily's body or another part across idle / walk / each weapon's wind-up →
+      strike → recover / flinch on every tier. Consolidated the cross-part placement into two named,
+      exported **fit tables** — `GRIP_SEAT` (seats the drawn weapon outboard + forward so a wide hilt
+      clears the hip at rest) and `SWORD_WINDUP_ROLL` (tightens the slash's cross-body cock so the blade
+      grazes but never plunges through the chest; the **strike/hit frame is unchanged**). No
+      `SAVE_VERSION` change (visual only). Covered by `test/worngear.test.js` (a full-loadout
+      weapon-vs-body no-penetration + neighbour-clearance + show-exactly-equipped + all-descend-from-root
+      dispose + per-tier invariant, +21 Vitest) + `test/e2e/worn-loadout.spec.js` (a real-browser
+      screenshot matrix of a fully-geared Lily mid-attack for each weapon class, desktop + S24
+      portrait/landscape) — Task 35
 - [ ] Puzzles (levers, plates, gated doors)

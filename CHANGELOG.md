@@ -50,6 +50,58 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-07-02] — Task 35 — Full-loadout fit & clipping integration
+
+The **final integration pass** of the worn-equipment overhaul (Tasks 25–35). Each category
+task made its own part look right in isolation; this one verifies the **whole loadout
+together** — every slot equipped at once, with each weapon class's Task 34 attack playing —
+so no worn part or the held weapon clips through Lily's body or another part across idle /
+walk / each weapon's wind-up → strike → recover / flinch on every tier. Visual only; **no
+`SAVE_VERSION` change**.
+
+### Changed
+
+- **The held weapon is seated PROUD of the body at rest.** A full audit found the one
+  persistent cross-part clip: with the always-drawn weapon, a wide hilt (a sword/dagger
+  crossguard, an axe head) rested against the hip because the fist sits at the torso's edge,
+  so the guard's inner tip dipped into the waist. The grip is now seated a touch **outboard
+  (±x, away from the body centre) + forward (+z)** of the bare hand (`GRIP_SEAT`, a new named
+  fit table read by `_buildHeldWeapons`), so a drawn hilt clears the hip — the weapon still
+  grips at the fist (Task 32's grip-local envelope is unchanged) and rides the hand through
+  every attack.
+- **The sword wind-up cocks less across the chest.** The non-overhead slash's anticipation
+  roll (`SWORD_WINDUP_ROLL`, another named fit table) was tightened `0.8 → 0.45 rad` so the
+  blade grazes but never plunges through the chest on the wind-up. The **strike (impact/
+  release) frame is untouched**, so Task 34's hit timing + reach are exactly as shipped.
+- **The cross-part placement is consolidated into named, auditable fit tables** (`GRIP_SEAT`,
+  `SWORD_WINDUP_ROLL`, alongside the per-category tables the earlier tasks introduced) and
+  exported on the test seam, so the clean fit can't silently rot as future gear / animations
+  land.
+
+### Added
+
+- **`test/worngear.test.js`** (+21 Vitest) — the full-loadout regression net. With every slot
+  equipped at once it drives the **real** animation (locomotion base + the Task 34 attack
+  layer + the per-frame shoulder/cloak follow) and asserts: (a) the **held weapon never
+  penetrates the torso/head core** beyond a small graze at idle / walk / every combo step of
+  wind-up → strike → recover (the strike frame held clean); (b) the neighbouring pairs stay
+  clear with a full suit — **pauldrons outboard** of the torso, the **belt tucked under** the
+  chest hem, the **necklace pendant proud** of the breastplate front, the **cloak trailing
+  behind** the legs; (c) `refreshWornGear` **shows exactly the equipped parts** (rings hidden
+  under gloves) with **no stray mesh** on swap/unequip and nothing on an empty slot; (d)
+  every worn + weapon mesh **descends from `player.root`** (so it disposes with the player —
+  no orphan leak) and is **never reallocated** across a full-loadout equip + attack churn;
+  and (e) a full loadout **builds + refreshes on every graphics tier** (with the documented
+  low-tier omissions). **Vitest 469 → 490.**
+- **`test/e2e/worn-loadout.spec.js`** — a real-browser Playwright **screenshot matrix**: it
+  dresses Lily in a full Ironguard suit + cloak + amulet **and** each of the six weapon
+  classes, pins her at the class's strike pose, frames her whole body from the gameplay 3/4
+  angle and screenshots each — asserting the loadout + attack render together, the six fully-
+  geared strikes **visibly differ**, and no console errors. Registered as the
+  `worn-loadout-desktop` + `worn-loadout-s24-{portrait,landscape}` projects (adapting to the
+  phone tiers' clean omissions), with the shared `GG_LOCAL_BABYLON` route hook for offline
+  sandboxes.
+
 ## [2026-07-02] — Task 33 — Visible jewelry: necklace + rings on the character
 
 The additive member of the **worn-equipment overhaul** (Tasks 25–35): necklaces and rings

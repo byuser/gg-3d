@@ -1,7 +1,15 @@
 # Task 35 — Full-loadout fit & clipping integration (no stray textures across all gear + the new attacks)
 
 > Part of the [Good Game 3D backlog](../TODO.md). Shared rules + Definition of Done live there.
-- **Status:** `[ ]`
+- **Status:** `[x]` 2026-07-02 — Shipped: full-loadout integration pass. Consolidated the
+  cross-part placement into two named fit tables (`GRIP_SEAT`, `SWORD_WINDUP_ROLL`) — the
+  held weapon now seats outboard/forward so a drawn hilt clears the hip at rest and the
+  sword wind-up cocks less across the chest (strike/hit frame unchanged). New
+  `test/worngear.test.js` (+21 Vitest) proves the full loadout coexists (weapon-vs-body
+  no-penetration across idle/walk/each weapon's wind-up→strike→recover, pauldron/belt/
+  necklace/cloak neighbour clearance, refresh shows-exactly-equipped + no stray on swap,
+  all-descend-from-root dispose, no-realloc churn, per-tier build) and a Playwright
+  full-loadout screenshot matrix (`worn-loadout.spec.js`, desktop + S24 portrait/landscape).
 - **Depends on:** the worn-category tasks (25–33) **and** the combat-animation rewrite
   (Task 34) — this is the **final integration pass** that runs after them. Builds on
   the named **fit table** each category task introduces.
