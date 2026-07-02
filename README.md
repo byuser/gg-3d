@@ -540,8 +540,9 @@ high-tier extras, **tier-gated**, toggled with **no mesh reallocation** across
 equip/unequip), the **tabbed inventory** (filter / sort / potion consume), the **v7
 save round-trip** of affixes + the new slots **plus migration** from an older (v6) file,
 and the **distinct worn gear** selectors — Task 25's helmets, Task 26's chests, Task 27's
-pauldrons, Task 28's gloves, Task 29's belts, Task 30's boots and Task 31's cloaks (`helmetArchetype` / `chestArchetype` /
-`pauldronArchetype` / `gloveArchetype` / `beltArchetype` / `bootArchetype` / `cloakArchetype` are each pure + total — every def → a valid
+pauldrons, Task 28's gloves, Task 29's belts, Task 30's boots, Task 31's cloaks and Task 32's held
+weapons (`helmetArchetype` / `chestArchetype` /
+`pauldronArchetype` / `gloveArchetype` / `beltArchetype` / `bootArchetype` / `cloakArchetype` / `weaponArchetype` are each pure + total — every def → a valid
 archetype + material — every archetype group builds once, the equipped item shows its own shape, and
 equip churn never reallocates the meshes; the pauldron suite adds a **shoulder-fit invariant**
 proving the shoulder mesh's inner reach is pose-independent and never enters the torso through
@@ -553,10 +554,16 @@ no-ground-clip invariant** proving every boot part hugs the foot/shin and, sampl
 stride swing, never dips below the feet it rides on, and the cloak suite adds a **pure, clamped,
 frame-rate-independent billow updater** (`cloakBillowStep`) plus a **behind-the-legs invariant**
 proving every drape part, swept across the whole sway range, stays behind the leg envelope and above
-the feet so it never scythes through the legs; Playwright
-`worn-{helmets,chests,pauldrons,gloves,belts,boots,cloaks}.spec.js` screenshot the distinct pieces worn on a real
+the feet so it never scythes through the legs, and the held-weapon suite maps every weapon def to one
+of six real classes (inferred from its mechanics), shows exactly the equipped class (a dual-wield adds
+the off-hand class; a two-hander shows one centred weapon), keeps a valid muzzle at the active
+weapon's tip, and adds a **held-in-hand invariant** proving every weapon part is gripped in the fist
+and bounded around the hand, plus a **no-detachment invariant** proving the weapon tip's arm-frame
+position never drifts as the attack plays (so it rides the hand without flying off); Playwright
+`worn-{helmets,chests,pauldrons,gloves,belts,boots,cloaks,weapons}.spec.js` screenshot the distinct pieces worn on a real
 canvas — the pauldrons mid-attack confirming no chest penetration, the gloves wrapped around the wand
-grip, the belts seated below the chest hem, the boots striding on the feet, the cloaks draping behind mid-turn),
+grip, the belts seated below the chest hem, the boots striding on the feet, the cloaks draping behind mid-turn,
+and each of the six weapon classes held in hand),
 and the **skill & leveling** suite (`test/skills.test.js`) that locks in Task 14: the
 **XP curve + focus math** (pure), **level-up** grants (health + focus + auto-learned skills),
 **focus regen + cooldown** ticking, the **quick-bar** assign (deduplicated) + **activate**
@@ -734,8 +741,8 @@ additive, not a rewrite (pure content tables live in `src/data/`, foundations in
   artifacts and the **merchant NPC** use it (puzzle levers will too).
 - **`Input`** — unifies keyboard, the on-screen joystick, and the cast button.
 - **`Player`** — Lily, built from primitives with a procedural walk cycle, a swappable
-  held weapon (wand / bow / blade), melee + ranged attacks, health, and a derived stat
-  block computed from her gear.
+  held weapon rendered as its real class (wand / bow / staff / sword / axe / dagger),
+  melee + ranged attacks, health, and a derived stat block computed from her gear.
 - **`ITEM_DB` / `AFFIXES` / `SETS` / equipment / `deriveStats`** — the item catalogue
   (weapons, armour, accessories; **rarity tiers** common → rare → epic → legendary), the
   **12-slot** model (helmet/pauldrons/breastplate/gloves/belt/boots/cloak/necklace/2 rings/
@@ -859,6 +866,23 @@ whole thing is unit-testable without a GPU:
   movement/turns **without scything through the legs or feet** at any frame. Built once (no
   reallocation) and tier-gated (the per-frame sway + finer folds are dropped on the low tier; the core
   drape is always drawn).
+- **Real held weapons (Task 32).** The equipped weapon renders as a real, layered weapon of its actual
+  **class** in Lily's hand — a **sword** (blade + crossguard + grip + pommel), an **axe** (haft + bladed
+  head + back spike), a **dagger** (short blade + guard + grip), a **bow** (riser + upper/lower limbs +
+  taut string), a **staff** (long shaft + a glowing orb in a clawed cage) or a **wand** (shaft + a
+  glowing crystal tip) — instead of the old three recoloured stand-ins (one flat blade, one torus bow,
+  one crystal). Unlike the armour selectors, a weapon's **class is intrinsic to how it fights**, so the
+  pure, tested selector `weaponArchetype(def)` **infers** it from the weapon's own mechanics (ranged +
+  projectile shape + hands → bow/staff/wand; melee arc / speed / hands → sword/axe/dagger; an explicit
+  `held:{ archetype, material }` block always wins), while the **material** follows rarity (iron → steel
+  → gold → dragonscale). The six buyable weapons span all six classes. Each class is pre-built **once**
+  under the hand grip (a child of the right arm, so the weapon **tracks the hand through the existing
+  attack** for free — the from-scratch attack motion + weapon trail are Task 34, which hooks the
+  per-class trail anchor built here); the per-item accent colour tints the metal on equip so two steel
+  swords still read apart. A **dual-wielded** off-hand weapon rides a mirror grip on the left arm; a
+  **two-handed** weapon shows one centred weapon. The bolt/arrow muzzle is repositioned to the active
+  weapon's tip so ranged casts still launch from the business end. Tier-gated (finer trims dropped on
+  the low tier; the core weapon is always drawn). **No `SAVE_VERSION` change** (visual only).
 - **Persistence.** `SAVE_VERSION` 7 stores `{ id, lvl, aff }` per instance across the bag + all 12
   slots; older saves (no affixes / no new slots) load with clean defaults.
 - **Value / weight.** Items carry a coin **value** (resale, scaled by enhancement); **weight /
@@ -1383,4 +1407,20 @@ Source: GitHub Actions**.
       reallocation), tier-gated (per-frame sway + finer folds on high; core drape always drawn). Covered
       by `test/items.test.js` (incl. the pure billow updater + a behind-the-legs sway invariant) +
       `test/e2e/worn-cloaks.spec.js` (a real-browser screenshot of distinct cloaks draping mid-turn) — Task 31
+- [x] **Real held weapons** — the equipped weapon shows as a real, layered weapon of its actual **class**
+      in hand instead of three recoloured stand-ins: a **sword** (blade + crossguard + grip + pommel), an
+      **axe** (haft + bladed head), a **dagger** (short blade + guard), a **bow** (riser + upper/lower
+      limbs + string), a **staff** (long shaft + a glowing orb in a clawed cage) or a **wand** (shaft + a
+      glowing crystal tip). Unlike the armour selectors, the class is **intrinsic to how the weapon
+      fights**, so the pure, tested `weaponArchetype(def)` selector **infers** it from the weapon's own
+      mechanics (ranged + shape + hands → bow/staff/wand; melee arc/speed/hands → sword/axe/dagger; an
+      explicit `held` block wins) while the material follows rarity — the six buyable weapons span all six
+      classes. Each class builds **once** under the hand grip (a child of the right arm, so it **tracks the
+      hand through the existing attack**; the from-scratch attack motion + weapon trail are Task 34, which
+      hooks the per-class trail anchor built here); a **dual-wield** shows an off-hand weapon on a mirror
+      left grip, a **two-hander** one centred weapon, and the bolt/arrow muzzle rides the active weapon's
+      tip. Built once (no reallocation), tier-gated (finer trims on high; core weapon always drawn), no
+      `SAVE_VERSION` change. Covered by `test/items.test.js` (incl. a held-in-hand + no-detachment
+      invariant) + `test/e2e/worn-weapons.spec.js` (a real-browser screenshot of each of the six weapon
+      classes held in hand) — Task 32
 - [ ] Puzzles (levers, plates, gated doors)

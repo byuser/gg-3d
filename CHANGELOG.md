@@ -50,6 +50,81 @@ delta it shipped with, since later tasks reference those.
   cap timed them out). No game or test behaviour changes; all device-profile
   coverage (desktop + S24 Ultra portrait/landscape) is preserved.
 
+## [2026-07-01] — Task 32 — Held weapons: real wand / bow / staff / sword / axe / dagger in hand
+
+Eighth of the **worn-equipment appearance overhaul** (Tasks 25–35): the **held weapon**.
+The equipped weapon now renders as a real, layered weapon of its actual **class** in
+Lily's hand — a sword, an axe, a dagger, a bow, a staff or a wand — instead of the old
+three recoloured stand-ins (one flat blade shared by every melee weapon, one torus bow,
+one crystal). Built to ride the **existing** Swing state machine (Task 5); the from-scratch
+attack motion + weapon trail are **Task 34**, which hooks the per-class trail anchor
+exposed here.
+
+### Added
+
+- **Per-class procedural weapon meshes.** The old three stand-ins (`_buildWand`: a `0.12 ×
+  1.1 × 0.03` flat blade + guard for *every* melee weapon, a torus bow, a crystal) are
+  replaced by **six** distinct classes, each built from layered primitives: **sword**
+  (pommel + wrapped grip + crossguard + tapered blade + point), **axe** (long haft +
+  bladed head + cutting edge + back spike), **dagger** (short blade + guard + grip),
+  **bow** (central riser + upper/lower limbs curving forward + a taut string), **staff**
+  (long shaft + a glowing orb cradled in a clawed cage of prongs) and **wand** (short shaft
+  + a glowing crystal star tip). Built from the proven mesh/material helpers, so they're
+  **headless-safe**; each carries a hookable **trail/muzzle anchor** at its business end
+  for Task 34.
+- **`weaponArchetype(def)` selector** (`src/data/items.js`) — a **pure, total,
+  deterministic** function mapping every weapon to a `{ archetype, material }` pair.
+  UNLIKE the armour selectors (whose archetype implies a material), a weapon's **class is
+  intrinsic to how it fights**, so `weaponClassOf` **infers** it from the weapon's own
+  mechanics: ranged + projectile shape + hands → **bow** (arrow) / **staff** (2H bolt) /
+  **wand** (1H bolt); melee arc / speed / hands → **dagger** (fast, short, 1H) / **axe**
+  (wide arc) / **sword** (else). The **material** follows rarity (iron → steel → gold →
+  dragonscale). An explicit `held: { archetype, material }` block always wins; junk clamps
+  to a drawable pair. The six buyable weapons span all six classes. Exported on the test
+  seam.
+- **Correct grip + handedness that tracks the existing attack.** Each class is pre-built
+  **once** under the right-hand grip (`this.wandGrip`, a child of the right arm pivot), so
+  the weapon **tracks the hand through the current Swing for free** — no re-parenting,
+  structurally rigid. A **dual-wielded** second one-hander shows on a mirror grip on the
+  **left** arm (`this.offGrip`); a **two-handed** weapon shows one centred weapon and
+  nothing off-hand. The per-item accent colour (`weapon.color`) tints the weapon's metal on
+  equip (with a rarity-scaled glow, wand/staff gems kept bright), so two steel swords of
+  different weapons still read apart — real material/rarity variety, not a monochrome tint.
+- **Muzzle keeps working.** The shared bolt/arrow origin (`this.wandTip`) + its glow/halo
+  are **repositioned to the active ranged weapon's tip** each equip (a wand/staff keeps the
+  glowing tip, a bow a dim nock glow, melee drops it), so `tryCast` and skill volleys still
+  launch from the business end.
+- **Tier-gated** (`wornDetailFor().weaponDetail`). The weapon is part of the core
+  silhouette (**always built**); only the finer trims (blade fuller, axe back spike, staff
+  prongs, wand shards, bow grip wrap) are dropped on the low tier so phones keep their
+  budget.
+- **Task 32 tests** — `test/items.test.js` gains the weapon selector suite (validity /
+  class-per-mechanic / material-by-rarity / pure-total inference + explicit-block-wins +
+  clamp / determinism), a pre-build-once-per-grip (+ the four 1H classes mirrored off-hand)
+  + no-leak-across-equip-churn-while-attacking check, the core-silhouette + tier-gate, a
+  shows-exactly-the-equipped-class (+ dual-wield off-hand + two-hander) check, a valid-muzzle
+  check, and a **held-in-hand + no-detachment fit invariant** (every weapon part is gripped
+  in the fist and bounded around the hand; the weapon tip's **arm-frame** position never
+  drifts as the game drives the melee/ranged swing, so it can't fly off mid-attack). Suite
+  83 → 94; **Vitest 430 → 441**.
+- **`test/e2e/worn-weapons.spec.js`** — a real-browser Playwright spec that boots the built
+  site, equips each of the six weapon classes, presents the weapon in a steady raised hold,
+  frames a 3/4 close-up of Lily's hand + weapon and **screenshots each of the six classes
+  held in hand**, asserting each maps to its class, the silhouettes visibly differ, and
+  there are no console errors (with the shared `GG_LOCAL_BABYLON` route hook for offline
+  sandboxes). Registered as the `worn-weapons-desktop` project in `playwright.config.js`.
+
+### Changed
+
+- **`refreshWeaponVisual` reads the live hands** (not just the merged weapon profile) so it
+  can tell a two-handed weapon from a dual-wield, then reveals the matching class group in
+  each hand and tints it — pre-built groups are toggled, never reallocated, so equip churn
+  can't leak. `p.weaponShown` (`{ main, off }`) + `p.weaponTrailTip` (the active weapon's
+  trail/muzzle anchor, for Task 34) are exposed for tests/debugging. `_buildWand` is
+  replaced by `_buildHeldWeapons` + `_buildWeaponMeshes` (`this.heldWeapons` /
+  `this.heldOffWeapons`, archetype-keyed records of `{ node, mats, tintMats, glowMats, tip,
+  meshes }`). No `SAVE_VERSION` change (held weapons are transient visuals).
+
 ## [2026-07-01] — Task 31 — Worn cloaks: a real draping cloak per item
 
 Seventh of the **worn-equipment appearance overhaul** (Tasks 25–35): the cloak. Each
